@@ -1,0 +1,23 @@
+[gd_resource type="Resource" script_class="StatusDef" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://core/data/status_def.gd" id="1_statusdef"]
+
+[resource]
+script = ExtResource("1_statusdef")
+id = &"burn"
+display_name = "Горение"
+description = "Периодический урон огнём."
+duration = 3.0
+tick_interval = 1.0
+attack_modifier = 0.0
+defense_modifier = 0.0
+move_speed_modifier = 0.0
+attack_speed_modifier = 0.0
+is_percent_modifier = true
+blocks_actions = false
+is_harmful = true
+stackable = false
+max_stacks = 1
+dot_damage = 5
+dot_heal = 0
+dot_damage_kind = 1

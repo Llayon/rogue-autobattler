@@ -1,0 +1,23 @@
+[gd_resource type="Resource" script_class="UnitDef" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://core/data/unit_def.gd" id="1_unitdef"]
+[ext_resource type="Resource" path="res://content/abilities/fireball.tres" id="2_fireball"]
+
+[resource]
+script = ExtResource("1_unitdef")
+id = &"goblin"
+display_name = "Гоблин-шаман"
+team = 1
+max_hp = 60
+attack = 6
+defense = 2
+magic_power = 20
+magic_resist = 4
+attack_speed = 0.7
+move_speed = 1.4
+attack_range = 3
+sight_range = 7
+tier = 1
+cost = 0
+abilities = Array[Resource]([ExtResource("2_fireball")])
+description = "Слабый враг-шаман."

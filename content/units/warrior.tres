@@ -1,0 +1,22 @@
+[gd_resource type="Resource" script_class="UnitDef" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://core/data/unit_def.gd" id="1_unitdef"]
+
+[resource]
+script = ExtResource("1_unitdef")
+id = &"warrior"
+display_name = "Воин"
+team = 0
+max_hp = 200
+attack = 18
+defense = 8
+magic_power = 0
+magic_resist = 3
+attack_speed = 0.9
+move_speed = 1.5
+attack_range = 1
+sight_range = 6
+tier = 1
+cost = 1
+abilities = Array[Resource]([])
+description = "Стойкий боец ближнего боя."
