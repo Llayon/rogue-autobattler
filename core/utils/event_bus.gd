@@ -23,6 +23,9 @@ signal battle_started
 signal battle_ended(winner_team: int)
 signal gold_changed(new_value: int)
 signal xp_changed(new_xp: int, new_level: int)
+# S3.1.5: reward screen signals
+signal reward_offered(unit_ids: Array[StringName])
+signal reward_chosen(unit_id: StringName, slot: int)
 
 
 ## Возвращает инстанс шины событий (autoload или созданный вручную в тестах).
@@ -102,3 +105,15 @@ static func emit_effect_applied(effect, target, source) -> void:
 	var inst: Node = _instance()
 	if inst != null:
 		inst.effect_applied.emit(effect, target, source)
+
+
+static func emit_reward_offered(unit_ids: Array[StringName]) -> void:
+	var inst: Node = _instance()
+	if inst != null:
+		inst.reward_offered.emit(unit_ids)
+
+
+static func emit_reward_chosen(unit_id: StringName, slot: int) -> void:
+	var inst: Node = _instance()
+	if inst != null:
+		inst.reward_chosen.emit(unit_id, slot)

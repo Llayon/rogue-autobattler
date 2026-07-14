@@ -151,6 +151,10 @@ func _initialize() -> void:
 	_test_reward_screen_pool()
 	_test_reward_screen_determinism()
 	_test_reward_screen_target_tier()
+	_test_run_controller_reward_phase()
+	_test_run_controller_skip_reward()
+	_test_run_controller_no_reward_on_first_run_start()
+	_test_run_controller_max_round_no_reward()
 
 	print("\n=== Result: %d passed, %d failed ===\n" % [_passed, _failed])
 
@@ -1372,7 +1376,7 @@ func _test_run_controller_continue_below_max_round() -> void:
 	await process_frame
 	# Детерминированный seed.
 	ctrl.start_run(42)
-	# Сымитируем 5 побед подряд: round_index=5, wins=4; после _on_battle_ended → round_index=6, PREP.
+	# Сымитируем 5 побед подряд: round_index=5, wins=4; после _on_battle_ended → round_index=6, REWARD (S3.1.5).
 	ctrl.state.round_index = 5
 	ctrl.state.wins = 4
 	# Запускаем бой, чтобы создать runner.
@@ -1383,10 +1387,14 @@ func _test_run_controller_continue_below_max_round() -> void:
 	ctrl.runner.state.phase = BattleStateScriptForCtrl.Phase.ENDED
 	ctrl.runner.state.winner_team = 0
 	ctrl.tick_battle(0.1)
-	# Проверяем: round_index 6, phase PREP, wins=5, НЕ GAMEOVER.
+	# Проверяем: round_index 6, phase REWARD (S3.1.5), wins=5, НЕ GAMEOVER.
 	_assert(ctrl.state.round_index == 6, "round_index 5→6 (got %d)" % ctrl.state.round_index)
 	_assert(ctrl.state.wins == 5, "wins 4→5 (got %d)" % ctrl.state.wins)
-	_assert(ctrl.phase == RunControllerScript.Phase.PREP, "phase = PREP после победы (got %d)" % ctrl.phase)
+	_assert(ctrl.phase == RunControllerScript.Phase.REWARD, "phase = REWARD (got %d)" % ctrl.phase)
+	# Skip reward → PREP.
+	var skipped: bool = ctrl.skip_reward()
+	_assert(skipped == true, "skip_reward = true")
+	_assert(ctrl.phase == RunControllerScript.Phase.PREP, "phase = PREP после skip")
 	_cleanup_ctrl(ctrl)
 
 
@@ -1481,6 +1489,91 @@ func _test_reward_screen_target_tier() -> void:
 	_assert(RewardScreenScript.target_tier_for_round(6) == 2, "round 6 → tier 2 (6/3=2)")
 	_assert(RewardScreenScript.target_tier_for_round(9) == 3, "round 9 → tier 3 (9/3=3)")
 	_assert(RewardScreenScript.target_tier_for_round(20) == 3, "round 20 → tier 3 (clamped)")
+
+
+func _test_run_controller_reward_phase() -> void:
+	print("[test] S3.1.5: RunController переходит в REWARD после 2-й победы")
+	var ctrl: Node = RunControllerScript.new()
+	get_root().add_child.call_deferred(ctrl)
+	await process_frame
+	ctrl.start_run(42)
+	# Сымитируем 1-ю победу: round_index=1, wins=0; после _on_battle_ended → round_index=2, REWARD.
+	ctrl.state.round_index = 1
+	ctrl.state.wins = 0
+	# Ловим сигнал reward_offered.
+	var offered: Array = [null]
+	# EventBus autoload может не быть зарегистрирован в тестах — проверим.
+	var bus: Node = get_root().get_node_or_null("EventBus")
+	if bus != null:
+		bus.reward_offered.connect(func(ids: Array[StringName]) -> void: offered[0] = ids)
+	ctrl.start_battle()
+	ctrl.runner.state.phase = BattleStateScriptForCtrl.Phase.ENDED
+	ctrl.runner.state.winner_team = 0
+	ctrl.tick_battle(0.1)
+	_assert(ctrl.state.round_index == 2, "round_index 1→2 (got %d)" % ctrl.state.round_index)
+	_assert(ctrl.phase == RunControllerScript.Phase.REWARD, "phase = REWARD (got %d)" % ctrl.phase)
+	_assert(ctrl.reward.offered_ids().size() == BalanceScript.REWARD_SLOTS, "reward offer = %d слота" % BalanceScript.REWARD_SLOTS)
+	if bus != null:
+		_assert(offered[0] != null, "reward_offered emitted (got %s)" % str(offered[0]))
+	# Игрок берёт слот 0.
+	var taken: Resource = ctrl.choose_reward(0)
+	_assert(taken != null, "choose_reward(0) вернул UnitDef (got %s)" % str(taken))
+	_assert(ctrl.phase == RunControllerScript.Phase.PREP, "phase = PREP после выбора (got %d)" % ctrl.phase)
+	_assert(ctrl.state.bench_unit_ids.has(taken.id), "юнит %s добавлен в bench" % taken.id)
+	_cleanup_ctrl(ctrl)
+
+
+func _test_run_controller_skip_reward() -> void:
+	print("[test] S3.1.5: skip_reward() переходит в PREP без юнита")
+	var ctrl: Node = RunControllerScript.new()
+	get_root().add_child.call_deferred(ctrl)
+	await process_frame
+	ctrl.start_run(42)
+	# Round 2 → wins 1 → после win: round_index=3, REWARD.
+	ctrl.state.round_index = 2
+	ctrl.state.wins = 1
+	ctrl.start_battle()
+	ctrl.runner.state.phase = BattleStateScriptForCtrl.Phase.ENDED
+	ctrl.runner.state.winner_team = 0
+	ctrl.tick_battle(0.1)
+	_assert(ctrl.phase == RunControllerScript.Phase.REWARD, "phase = REWARD (got %d)" % ctrl.phase)
+	var bench_before: int = ctrl.state.bench_unit_ids.size()
+	var ok: bool = ctrl.skip_reward()
+	_assert(ok == true, "skip_reward = true (got %s)" % str(ok))
+	_assert(ctrl.phase == RunControllerScript.Phase.PREP, "phase = PREP после skip (got %d)" % ctrl.phase)
+	_assert(ctrl.state.bench_unit_ids.size() == bench_before, "bench не изменился (was %d, now %d)" % [bench_before, ctrl.state.bench_unit_ids.size()])
+	_cleanup_ctrl(ctrl)
+
+
+func _test_run_controller_no_reward_on_first_run_start() -> void:
+	# S3.1.5: на самом первом старте рана (round_index=1, до первого боя) — нет reward.
+	# Это проверяется неявно через start_run() — phase = PREP сразу.
+	print("[test] S3.1.5: start_run() сразу PREP, без reward")
+	var ctrl: Node = RunControllerScript.new()
+	get_root().add_child.call_deferred(ctrl)
+	await process_frame
+	ctrl.start_run(42)
+	_assert(ctrl.state.round_index == 1, "round_index = 1 (got %d)" % ctrl.state.round_index)
+	_assert(ctrl.phase == RunControllerScript.Phase.PREP, "phase = PREP сразу после start_run (got %d)" % ctrl.phase)
+	_cleanup_ctrl(ctrl)
+
+
+func _test_run_controller_max_round_no_reward() -> void:
+	print("[test] S3.1.5: на MAX_ROUND победа → GAMEOVER (без reward)")
+	var ctrl: Node = RunControllerScript.new()
+	get_root().add_child.call_deferred(ctrl)
+	await process_frame
+	ctrl.start_run(42)
+	# Round 10 → wins 9 → после win: round_index=11, GAMEOVER (skip reward).
+	ctrl.state.round_index = BalanceScript.MAX_ROUND
+	ctrl.state.wins = BalanceScript.MAX_ROUND - 1
+	ctrl.start_battle()
+	ctrl.runner.state.phase = BattleStateScriptForCtrl.Phase.ENDED
+	ctrl.runner.state.winner_team = 0
+	ctrl.tick_battle(0.1)
+	_assert(ctrl.phase == RunControllerScript.Phase.GAMEOVER, "phase = GAMEOVER (got %d)" % ctrl.phase)
+	_assert(ctrl.state.round_index == BalanceScript.MAX_ROUND + 1, "round_index = MAX+1 (got %d)" % ctrl.state.round_index)
+	_cleanup_ctrl(ctrl)
 
 
 

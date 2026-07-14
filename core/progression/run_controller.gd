@@ -17,6 +17,7 @@ const BalanceScript = preload("res://core/balance.gd")
 
 var state: RunState = RunState.new()
 var shop: Shop = Shop.new()
+var reward: RewardScreen = RewardScreen.new()
 var ctx: BattleContext = null
 var runner: BattleRunner = null
 var phase: int = Phase.PREP
@@ -135,9 +136,14 @@ func _on_battle_ended() -> void:
 		if state.round_index > BalanceScript.MAX_ROUND:
 			_end_run(true)
 			return
-		_set_phase(Phase.PREP)
-		_refresh_shop()
-		GameBus.emit_round_started(state.round_index)
+		# S3.1.5: после первой победы (round_index >= 2) — reward screen.
+		# На round 1 → сразу PREP (стартовый набор).
+		if state.round_index >= 2:
+			_enter_reward()
+		else:
+			_set_phase(Phase.PREP)
+			_refresh_shop()
+			GameBus.emit_round_started(state.round_index)
 	elif winner == 1:
 		state.losses += 1
 		state.lives -= 1
@@ -162,6 +168,42 @@ func _end_run(won: bool) -> void:
 	SaveService.save_run(state)
 	run_ended.emit(won)
 	GameLog.info("run", "Run ended", {"round": state.round_index, "won": won})
+
+
+## S3.1.5: переход в фазу REWARD после победы (кроме round 1).
+func _enter_reward() -> void:
+	reward.generate_offer(state.round_index)
+	_set_phase(Phase.REWARD)
+	GameBus.emit_reward_offered(reward.offered_ids())
+	GameLog.info("run", "Reward offered", {"round": state.round_index, "ids": reward.offered_ids()})
+
+
+## Игрок выбирает юнита из reward. Возвращает UnitDef или null.
+## Переводит в PREP после выбора.
+func choose_reward(slot: int) -> Resource:
+	if phase != Phase.REWARD:
+		return null
+	var def: Resource = reward.offer_at(slot)
+	if def == null:
+		return null
+	state.bench_unit_ids.append(def.id)
+	GameBus.emit_reward_chosen(def.id, slot)
+	GameLog.info("run", "Reward chosen", {"id": def.id, "round": state.round_index})
+	_set_phase(Phase.PREP)
+	_refresh_shop()
+	GameBus.emit_round_started(state.round_index)
+	return def
+
+
+## Игрок пропускает reward. Возвращает true если успешно.
+func skip_reward() -> bool:
+	if phase != Phase.REWARD:
+		return false
+	GameLog.info("run", "Reward skipped", {"round": state.round_index})
+	_set_phase(Phase.PREP)
+	_refresh_shop()
+	GameBus.emit_round_started(state.round_index)
+	return true
 
 
 func _set_phase(p: int) -> void:
