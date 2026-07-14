@@ -128,6 +128,8 @@ func _initialize() -> void:
 
 	_test_ability_mana_cost()
 	_test_magic_resist_method()
+	_test_magic_resist_modifier_status()
+	_test_apply_modifier_safe_for_missing_fields()
 
 	_test_magic_resist_method()
 
@@ -980,6 +982,33 @@ func _test_magic_resist_method() -> void:
 		100, 0.0, 1.5, 0.0, c2.magic_resist(), 0, 0.0, true, 0.0
 	)
 	_assert(r.dealt == 67, "magic 100 vs 50 magic_resist → 67 (got %d)" % r.dealt)
+
+
+
+func _test_magic_resist_modifier_status() -> void:
+	print("[test] StatusDef.magic_resist_modifier + Combatant.magic_resist()")
+	var def: Resource = _make_unit_def(&"m", 100, 0, TeamScript.ENEMY)
+	def.magic_resist = 50
+	var c = CombatantScript.new(def)
+	_assert(c.magic_resist() == 50, "magic_resist() = 50 без статуса")
+	var burn: Resource = _make_status_def(&"magic_shred", 0, 5.0)
+	burn.is_percent_modifier = true  # multiplicative
+	burn.magic_resist_modifier = -0.5  # -50% magic_resist
+	c.apply_status(burn, 5.0, 1, null)
+	_assert(c.magic_resist() == 25, "magic_resist с modifier: 50 → 25 (got %d)" % c.magic_resist())
+	_assert(c.defense() == 0, "defense() не тронут (got %d)" % c.defense())
+
+
+func _test_apply_modifier_safe_for_missing_fields() -> void:
+	print("[test] _apply_modifier безопасен для missing fields")
+	var def: Resource = _make_unit_def(&"x", 100, 0, TeamScript.ENEMY)
+	def.defense = 50
+	def.magic_resist = 50
+	var c = CombatantScript.new(def)
+	var burn: Resource = _make_status_def(&"burn", 5, 2.0)
+	c.apply_status(burn, 2.0, 1, null)
+	_assert(c.defense() == 50, "defense() = 50 (без модификаторов)")
+	_assert(c.magic_resist() == 50, "magic_resist() = 50 (без модификаторов)")
 func _test_balance_compute_attack_armor() -> void:
 
 	print("[test] Balance.compute_attack с armor")

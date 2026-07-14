@@ -162,7 +162,11 @@ func _apply_modifier(base_value: float, field: String) -> float:
 		var def: Resource = s.def
 		if def == null:
 			continue
-		var mod: float = float(def.get(field))
+		# Безопасный доступ: если поле не объявлено в StatusDef, get() вернёт null.
+		var raw_value = def.get(field)
+		if raw_value == null:
+			continue
+		var mod: float = float(raw_value)
 		if mod == 0.0:
 			continue
 		if def.is_percent_modifier:

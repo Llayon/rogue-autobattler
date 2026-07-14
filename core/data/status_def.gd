@@ -17,6 +17,8 @@ class_name StatusDef extends Resource
 # Модификаторы (применяются к Combatant на время действия статуса).
 @export var attack_modifier: float = 0.0     # абсолютный/процентный — в зависимости от is_percent_modifier
 @export var defense_modifier: float = 0.0
+@export var magic_power_modifier: float = 0.0
+@export var magic_resist_modifier: float = 0.0
 @export var move_speed_modifier: float = 0.0
 @export var attack_speed_modifier: float = 0.0
 
