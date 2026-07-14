@@ -61,6 +61,7 @@ const MetaProfileScript = preload("res://core/progression/meta_profile.gd")
 const BattleRunnerScriptForCtrl = preload("res://core/battle/battle_runner.gd")
 const BattleStateScriptForCtrl = preload("res://core/battle/battle_state.gd")
 const UnitsMetaScript = preload("res://core/data/units_meta.gd")
+const RewardScreenScript = preload("res://core/progression/reward_screen.gd")
 
 
 
@@ -147,6 +148,9 @@ func _initialize() -> void:
 	_test_run_controller_continue_below_max_round()
 	_test_run_controller_win_at_max_round()
 	_test_units_meta_all_units()
+	_test_reward_screen_pool()
+	_test_reward_screen_determinism()
+	_test_reward_screen_target_tier()
 
 	print("\n=== Result: %d passed, %d failed ===\n" % [_passed, _failed])
 
@@ -1438,6 +1442,45 @@ func _test_units_meta_all_units() -> void:
 	# Tier 0 — пусто.
 	var tier0: Array[StringName] = UnitsMetaScript.ids_by_tier(0)
 	_assert(tier0.is_empty(), "tier 0 пусто (got %d)" % tier0.size())
+
+
+func _test_reward_screen_pool() -> void:
+	print("[test] S3.1.5: RewardScreen pool generation + tier weights")
+	# Round 3 → target tier 1 (clamp(3/3, 1, 3) = 1).
+	Rng.seed_run(12345)
+	var rs1: Object = RewardScreenScript.new()
+	var pool1: Array[StringName] = rs1.generate_offer(3)
+	_assert(pool1.size() == BalanceScript.REWARD_SLOTS, "offer = %d слота (got %d)" % [BalanceScript.REWARD_SLOTS, pool1.size()])
+	for id in pool1:
+		var def: Resource = ContentDB_static.get_by_id(id)
+		_assert(def != null, "offered id валиден: %s" % id)
+	# Round 7 → target tier 2 (clamp(7/3, 1, 3) = 2).
+	var pool7: Array[StringName] = rs1.generate_offer(7)
+	_assert(pool7.size() == BalanceScript.REWARD_SLOTS, "round 7 offer = %d слота" % BalanceScript.REWARD_SLOTS)
+	# Round 12 (после MAX_ROUND) → target tier 3, не падает.
+	var pool12: Array[StringName] = rs1.generate_offer(12)
+	_assert(pool12.size() == BalanceScript.REWARD_SLOTS, "round 12 offer = %d слота" % BalanceScript.REWARD_SLOTS)
+
+
+func _test_reward_screen_determinism() -> void:
+	print("[test] S3.1.5: тот же seed = тот же reward offer (детерминизм)")
+	Rng.seed_run(777)
+	var rs1: Object = RewardScreenScript.new()
+	var pool1: Array[StringName] = rs1.generate_offer(5)
+	Rng.seed_run(777)
+	var rs2: Object = RewardScreenScript.new()
+	var pool2: Array[StringName] = rs2.generate_offer(5)
+	_assert(pool1 == pool2, "детерминизм: pool1 == pool2 (got %s vs %s)" % [str(pool1), str(pool2)])
+
+
+func _test_reward_screen_target_tier() -> void:
+	print("[test] S3.1.5: target_tier_for_round корректно clamp'ит")
+	_assert(RewardScreenScript.target_tier_for_round(1) == 1, "round 1 → tier 1")
+	_assert(RewardScreenScript.target_tier_for_round(3) == 1, "round 3 → tier 1 (3/3=1)")
+	_assert(RewardScreenScript.target_tier_for_round(4) == 1, "round 4 → tier 1 (4/3=1)")
+	_assert(RewardScreenScript.target_tier_for_round(6) == 2, "round 6 → tier 2 (6/3=2)")
+	_assert(RewardScreenScript.target_tier_for_round(9) == 3, "round 9 → tier 3 (9/3=3)")
+	_assert(RewardScreenScript.target_tier_for_round(20) == 3, "round 20 → tier 3 (clamped)")
 
 
 
