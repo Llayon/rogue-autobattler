@@ -52,7 +52,8 @@ func _draw() -> void:
 		var color: Color = player_color if c.team == Team.PLAYER else enemy_color
 		draw_rect(Rect2(pos, sz), color)
 		# HP-бар.
-		var hp_ratio: float = float(c.current_hp) / float(maxi(1, c.max_hp()))
+		# Combatant: current_hp это поле HealthComponent (не метод!), max_hp() это метод.
+		var hp_ratio: float = float(c.health.current_hp) / float(maxi(1, c.max_hp()))
 		var bar_w: float = sz.x * hp_ratio
 		var bar_rect: Rect2 = Rect2(pos.x, pos.y + sz.y + 2, bar_w, BAR_HEIGHT)
 		draw_rect(bar_rect, Color(0.2, 0.9, 0.3))
