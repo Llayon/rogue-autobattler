@@ -33,7 +33,7 @@ func _ready() -> void:
 ## Если seed == 0 — берётся случайный.
 func start_run(seed_value: int = 0) -> void:
 	if seed_value == 0:
-		seed_value = randi()
+		seed_value = Rng.randi_range(1, 999999)
 	Rng.seed_run(seed_value)
 	state = RunState.new()
 	state.seed = seed_value

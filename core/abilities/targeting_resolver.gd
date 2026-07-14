@@ -62,7 +62,7 @@ static func _resolve_single_ally(source, ctx, origin: Vector2i, ability: Resourc
 		var d: int = _manhattan(c.cell, origin)
 		if d > ability.range:
 			continue
-		var missing: int = c.max_hp - c.current_hp
+		var missing: int = c.max_hp() - c.health.current_hp
 		if missing > best_missing_hp:
 			best_missing_hp = missing
 			best = c

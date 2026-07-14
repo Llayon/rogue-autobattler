@@ -92,7 +92,7 @@ func _unhandled_input(event: InputEvent) -> void:
 					run_controller.buy_unit(0)
 			KEY_R:
 				if run_controller.phase == RunController.Phase.GAMEOVER:
-					run_controller.start_run(randi())
+					run_controller.start_run(Rng.randi_range(1, 999999))
 
 
 func _on_battle_ended(_winner: int) -> void:
