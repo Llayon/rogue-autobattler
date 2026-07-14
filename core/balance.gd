@@ -16,6 +16,15 @@ const STARTING_UNIT_IDS: Array[StringName] = [&"warrior", &"archer"]
 const MAX_ROUND: int = 10
 # Бонусное золото за прохождение раунда (поверх WIN_BONUS_GOLD + round_index).
 
+# === Reward screen (S3.1.5) ===
+# S3.1.5: после каждой победы (кроме раунда 1 и MAX_ROUND) показываем
+# выбор из REWARD_SLOTS бесплатных юнитов. Tier-weighted по round_index.
+const REWARD_SLOTS: int = 3
+const REWARD_OFFER_PRICE: int = 0  # бесплатно
+const REWARD_TIER_BASE_WEIGHT: float = 0.6  # 60% — основной tier для раунда
+const REWARD_TIER_MINUS_WEIGHT: float = 0.3  # 30% — tier-1 (если >0)
+const REWARD_TIER_PLUS_WEIGHT: float = 0.1   # 10% — tier+1 (если <4)
+
 # === Экономика ===
 const WIN_BONUS_GOLD: int = 5                # базовый бонус за победу
 const WIN_BONUS_PER_ROUND: int = 1           # +1 за каждый раунд (итого: 5+round)
