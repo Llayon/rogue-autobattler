@@ -139,6 +139,11 @@ func defense() -> int:
 	return _apply_modifier(defense_base, "defense_modifier")
 
 
+## То же для магической защиты. Используется для magic-атак.
+func magic_resist() -> int:
+	return _apply_modifier(magic_resist_base, "magic_resist_modifier")
+
+
 func attack() -> int:
 	return _apply_modifier(attack_base, "attack_modifier")
 

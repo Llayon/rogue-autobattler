@@ -20,16 +20,22 @@ func apply(ctx, source, targets: Array) -> Array:
 	var results: Array = []
 	if not has_valid_targets(targets):
 		return results
+	# Атакующая сила: для magic используем magic_power (поле), для физики — attack() (метод с модификаторами).
+	# Это consistent с тем что magic_power не имеет статус-модификаторов в нашей модели,
+	# а attack() модифицируется баффами/дебаффами (через _apply_modifier).
 	var attacker_power: int = source.magic_power if (is_magic and scales_with_magic_power) else source.attack()
 	for t in targets:
 		if t == null or not t.is_alive():
 			continue
+		# Защита цели: физическая → defense(), магическая → magic_resist().
+		# Это consistent с attacker_power (поле vs метод).
+		var target_defense: int = t.defense() if not is_magic else t.magic_resist()
 		var result: Dictionary = BalanceScript.compute_attack(
 			attacker_power,
 			source.crit_chance,
 			source.crit_damage,
 			source.magic_pen,
-			t.defense() if not is_magic else source.magic_power,  # magic использует magic_resist
+			target_defense,
 			t.armor,
 			t.dodge,
 			is_magic,
