@@ -60,6 +60,7 @@ const RunStateScript = preload("res://core/progression/run_state.gd")
 const MetaProfileScript = preload("res://core/progression/meta_profile.gd")
 const BattleRunnerScriptForCtrl = preload("res://core/battle/battle_runner.gd")
 const BattleStateScriptForCtrl = preload("res://core/battle/battle_state.gd")
+const UnitsMetaScript = preload("res://core/data/units_meta.gd")
 
 
 
@@ -145,6 +146,7 @@ func _initialize() -> void:
 	_test_balance_max_round_and_hp_cap()
 	_test_run_controller_continue_below_max_round()
 	_test_run_controller_win_at_max_round()
+	_test_units_meta_all_units()
 
 	print("\n=== Result: %d passed, %d failed ===\n" % [_passed, _failed])
 
@@ -1413,5 +1415,29 @@ func _cleanup_ctrl(ctrl: Node) -> void:
 	if is_instance_valid(ctrl):
 		ctrl.queue_free()
 	await process_frame
+
+
+# === S3.1.5 Reward screen ===
+
+func _test_units_meta_all_units() -> void:
+	print("[test] S3.1.5: UnitsMeta all_ids + ids_by_tier")
+	var all: Array[StringName] = UnitsMetaScript.all_ids()
+	_assert(all.size() >= 12, "12+ unit ids в реестре (got %d)" % all.size())
+	# Tier 1: warrior, archer, cleric (3 шт в content).
+	var tier1: Array[StringName] = UnitsMetaScript.ids_by_tier(1)
+	_assert(tier1.size() >= 3, "tier 1 >= 3 (got %d)" % tier1.size())
+	_assert(&"warrior" in tier1 and &"archer" in tier1 and &"cleric" in tier1, "tier 1 содержит warrior/archer/cleric")
+	# Tier 2: mage, guardian, assassin, druid, berserker, beast, cavalry, warrior_v2.
+	var tier2: Array[StringName] = UnitsMetaScript.ids_by_tier(2)
+	_assert(tier2.size() >= 5, "tier 2 >= 5 (got %d)" % tier2.size())
+	_assert(&"mage" in tier2, "tier 2 содержит mage")
+	# Tier 3: paladin, necromancer, knight, elementalist (4 шт).
+	var tier3: Array[StringName] = UnitsMetaScript.ids_by_tier(3)
+	_assert(tier3.size() >= 4, "tier 3 >= 4 (got %d)" % tier3.size())
+	_assert(&"paladin" in tier3 and &"knight" in tier3, "tier 3 содержит paladin+knight")
+	# Tier 0 — пусто.
+	var tier0: Array[StringName] = UnitsMetaScript.ids_by_tier(0)
+	_assert(tier0.is_empty(), "tier 0 пусто (got %d)" % tier0.size())
+
 
 
