@@ -1,0 +1,19 @@
+[gd_resource type="Resource" script_class="AbilityDef" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://core/data/ability_def.gd" id="1_abilitydef"]
+[ext_resource type="Resource" path="res://content/effects/instances/cleave_basic.tres" id="2_cleave"]
+
+[resource]
+script = ExtResource("1_abilitydef")
+id = &"cleave"
+display_name = "Рассечение"
+description = "Бьёт цель и всех врагов в 1 клетке от неё. 15 физ. урона."
+cooldown = 5.0
+mana_cost = 15
+targeting = 0
+range = 1
+aoe_radius = 0
+aoe_width = 0
+aoe_length = 0
+effects = Array[Resource]([ExtResource("2_cleave")])
+trigger = 0

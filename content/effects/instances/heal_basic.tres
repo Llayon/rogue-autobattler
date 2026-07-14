@@ -1,0 +1,9 @@
+[gd_resource type="Resource" script_class="HealEffect" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://core/effects/heal_effect.gd" id="1_heal"]
+
+[resource]
+script = ExtResource("1_heal")
+kind = 1
+amount = 30
+variance = 0.0

@@ -1,0 +1,12 @@
+[gd_resource type="Resource" script_class="ChainLightningEffect" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://core/effects/chain_lightning_effect.gd" id="1_chain"]
+
+[resource]
+script = ExtResource("1_chain")
+kind = 0
+base_damage = 30
+bounce_count = 3
+decay = 0.7
+is_magic = true
+scales_with_magic_power = true

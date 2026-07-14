@@ -1,0 +1,23 @@
+[gd_resource type="Resource" script_class="StatusDef" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://core/data/status_def.gd" id="1_statusdef"]
+
+[resource]
+script = ExtResource("1_statusdef")
+id = &"attack_up"
+display_name = "Усиление атаки"
+description = "+50% к атаке."
+duration = 5.0
+tick_interval = 0.0
+attack_modifier = 0.5
+defense_modifier = 0.0
+move_speed_modifier = 0.0
+attack_speed_modifier = 0.0
+is_percent_modifier = true
+blocks_actions = false
+is_harmful = false
+stackable = false
+max_stacks = 1
+dot_damage = 0
+dot_heal = 0
+dot_damage_kind = 0

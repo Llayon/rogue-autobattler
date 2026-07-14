@@ -1,0 +1,37 @@
+[gd_resource type="Resource" script_class="UnitDef" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://core/data/unit_def.gd" id="1_unitdef"]
+[ext_resource type="Resource" path="res://content/abilities/cleave.tres" id="2_cleave"]
+
+[resource]
+script = ExtResource("1_unitdef")
+id = &"berserker"
+display_name = "Берсерк"
+team = 0
+max_hp = 130
+attack = 22
+defense = 5
+magic_power = 0
+magic_resist = 3
+attack_speed = 1.2
+move_speed = 1.2
+attack_range = 1
+sight_range = 8
+crit_chance = 0.25
+crit_damage = 2.0
+dodge = 0.0
+armor = 0
+healing_received = 1.0
+shield_strength = 1.0
+lifesteal = 0.4
+thorns = 0.0
+magic_pen = 0.0
+cdr = 0.0
+tenacity = 0.0
+health_regen = 0.0
+max_mana = 50
+mana_regen = 1.0
+tier = 2
+cost = 4
+abilities = Array[Resource]([ExtResource("2_cleave")])
+description = "Вампир-берсерк. 40% lifesteal, высокий crit. Cleave на соседей."

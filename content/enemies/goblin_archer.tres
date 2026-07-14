@@ -1,0 +1,37 @@
+[gd_resource type="Resource" script_class="UnitDef" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://core/data/unit_def.gd" id="1_unitdef"]
+[ext_resource type="Resource" path="res://content/abilities/fireball.tres" id="2_fireball"]
+
+[resource]
+script = ExtResource("1_unitdef")
+id = &"goblin_archer"
+display_name = "Гоблин-лучник"
+team = 1
+max_hp = 50
+attack = 10
+defense = 2
+magic_power = 2
+magic_resist = 2
+attack_speed = 1.0
+move_speed = 1.2
+attack_range = 4
+sight_range = 7
+crit_chance = 0.15
+crit_damage = 2.0
+dodge = 0.1
+armor = 0
+healing_received = 1.0
+shield_strength = 1.0
+lifesteal = 0.0
+thorns = 0.0
+magic_pen = 0.0
+cdr = 0.0
+tenacity = 0.0
+health_regen = 0.0
+max_mana = 0
+mana_regen = 0.0
+tier = 1
+cost = 0
+abilities = Array[Resource]([ExtResource("2_fireball")])
+description = "Дальнобойный лучник. Атакует на расстоянии 4, dodge, средний crit."

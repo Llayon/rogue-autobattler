@@ -1,0 +1,37 @@
+[gd_resource type="Resource" script_class="UnitDef" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://core/data/unit_def.gd" id="1_unitdef"]
+[ext_resource type="Resource" path="res://content/abilities/slow.tres" id="2_slow"]
+
+[resource]
+script = ExtResource("1_unitdef")
+id = &"necromancer"
+display_name = "Некромант"
+team = 0
+max_hp = 95
+attack = 6
+defense = 5
+magic_power = 22
+magic_resist = 10
+attack_speed = 0.8
+move_speed = 1.0
+attack_range = 1
+sight_range = 8
+crit_chance = 0.05
+crit_damage = 1.5
+dodge = 0.0
+armor = 0
+healing_received = 0.8
+shield_strength = 1.0
+lifesteal = 0.0
+thorns = 0.0
+magic_pen = 0.4
+cdr = 0.3
+tenacity = 0.0
+health_regen = 0.0
+max_mana = 180
+mana_regen = 4.0
+tier = 3
+cost = 7
+abilities = Array[Resource]([ExtResource("2_slow")])
+description = "Суммонер. 30% CDR, 40% magic pen. Slow для контроля."

@@ -106,6 +106,26 @@ func try_move_along_line(combatant, target_cell: Vector2i, distance: int) -> boo
 	return moved_any
 
 
+## Возвращает Combatant-ов в радиусе radius (включая center_cell, если занята).
+## Если team != -1, фильтрует по команде.
+## Используется для AOE эффектов (Cleave, Stun Bomb, etc).
+func find_in_radius(center_cell: Vector2i, radius: int, team: int = -1) -> Array:
+	var result: Array = []
+	if grid == null:
+		return result
+	for c in grid.all_cells():
+		var dist: int = absi(c.x - center_cell.x) + absi(c.y - center_cell.y)
+		if dist > radius:
+			continue
+		var occupant = grid.at(c)
+		if occupant == null:
+			continue
+		if team != -1 and occupant.team != team:
+			continue
+		result.append(occupant)
+	return result
+
+
 ## Спавнит юнита рядом с source. Возвращает созданного Combatant или null.
 func summon_near(source, def: Resource) -> Variant:
 	if source == null or def == null:

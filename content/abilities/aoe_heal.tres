@@ -1,0 +1,19 @@
+[gd_resource type="Resource" script_class="AbilityDef" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://core/data/ability_def.gd" id="1_abilitydef"]
+[ext_resource type="Resource" path="res://content/effects/instances/heal_aoe.tres" id="2_heal"]
+
+[resource]
+script = ExtResource("1_abilitydef")
+id = &"aoe_heal"
+display_name = "Массовое лечение"
+description = "Восстанавливает 50 HP всем союзникам."
+cooldown = 10.0
+mana_cost = 50
+targeting = 8
+range = 100
+aoe_radius = 0
+aoe_width = 0
+aoe_length = 0
+effects = Array[Resource]([ExtResource("2_heal")])
+trigger = 0

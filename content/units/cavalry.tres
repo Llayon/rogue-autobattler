@@ -1,0 +1,36 @@
+[gd_resource type="Resource" script_class="UnitDef" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://core/data/unit_def.gd" id="1_unitdef"]
+
+[resource]
+script = ExtResource("1_unitdef")
+id = &"cavalry"
+display_name = "Кавалерист"
+team = 0
+max_hp = 160
+attack = 14
+defense = 10
+magic_power = 2
+magic_resist = 6
+attack_speed = 1.0
+move_speed = 2.0
+attack_range = 1
+sight_range = 10
+crit_chance = 0.15
+crit_damage = 1.8
+dodge = 0.2
+armor = 10
+healing_received = 1.0
+shield_strength = 1.0
+lifesteal = 0.0
+thorns = 0.0
+magic_pen = 0.0
+cdr = 0.0
+tenacity = 0.2
+health_regen = 0.0
+max_mana = 50
+mana_regen = 1.0
+tier = 2
+cost = 5
+abilities = Array[Resource]([])
+description = "Быстрый всадник. x2 скорость, dodge, средняя защита. Идеален для флангов."

@@ -1,0 +1,19 @@
+[gd_resource type="Resource" script_class="AbilityDef" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://core/data/ability_def.gd" id="1_abilitydef"]
+[ext_resource type="Resource" path="res://content/effects/instances/regen_apply.tres" id="2_regen"]
+
+[resource]
+script = ExtResource("1_abilitydef")
+id = &"regen"
+display_name = "Регенерация"
+description = "Восстанавливает 5 HP/сек союзнику в течение 5 секунд."
+cooldown = 8.0
+mana_cost = 30
+targeting = 1
+range = 4
+aoe_radius = 0
+aoe_width = 0
+aoe_length = 0
+effects = Array[Resource]([ExtResource("2_regen")])
+trigger = 0

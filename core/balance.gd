@@ -68,6 +68,29 @@ static func enemy_count_for_round(round_index: int) -> int:
 	return best
 
 
+## Пул врагов для каждого раунда. Tier 1 в первых раундах, tier 2 с раунда 3,
+## tier 3 (boss) только в финальных раундах. Это single source of truth —
+## run_controller использует эту функцию для spawn.
+const ENEMY_POOL_BY_TIER: Dictionary = {
+	1: [&"goblin", &"goblin_archer"],
+	2: [&"orc_warrior", &"skeleton_mage"],
+	3: [&"troll_chief"],
+}
+
+
+## Возвращает массив id врагов (StringName), подходящих для данного раунда.
+## Tier подмешивается: 70% tier=round_index//3+1, 30% — соседние tier.
+static func enemy_pool_for_round(round_index: int) -> Array:
+	var tier: int = clampi(round_index / 4 + 1, 1, 3)
+	return ENEMY_POOL_BY_TIER.get(tier, [&"goblin"])
+
+
+## HP multiplier для врагов по раунду: раунд 1 = 1.0x, раунд 10 = 1.6x.
+## Линейный рост: каждый раунд +6.7% HP.
+static func enemy_hp_multiplier(round_index: int) -> float:
+	return 1.0 + 0.067 * float(round_index - 1)
+
+
 ## Возвращает координату Y для заднего ряда команды.
 static func back_row_y(team: int) -> int:
 	return 0 if team == 1 else GRID_HEIGHT - 1  # 0=ENEMY (верх), 1=PLAYER (низ)

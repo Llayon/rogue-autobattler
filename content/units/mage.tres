@@ -1,7 +1,8 @@
-[gd_resource type="Resource" script_class="UnitDef" load_steps=3 format=3]
+[gd_resource type="Resource" script_class="UnitDef" load_steps=4 format=3]
 
 [ext_resource type="Script" path="res://core/data/unit_def.gd" id="1_unitdef"]
 [ext_resource type="Resource" path="res://content/abilities/fireball.tres" id="2_fireball"]
+[ext_resource type="Resource" path="res://content/abilities/chain_lightning.tres" id="3_chain"]
 
 [resource]
 script = ExtResource("1_unitdef")
@@ -19,5 +20,5 @@ attack_range = 4
 sight_range = 8
 tier = 2
 cost = 2
-abilities = Array[Resource]([ExtResource("2_fireball")])
-description = "Хрупкий, но мощный заклинатель."
+abilities = Array[Resource]([ExtResource("2_fireball"), ExtResource("3_chain")])
+description = "Хрупкий, но мощный заклинатель. Fireball + Chain Lightning."

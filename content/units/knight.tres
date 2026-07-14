@@ -1,0 +1,36 @@
+[gd_resource type="Resource" script_class="UnitDef" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://core/data/unit_def.gd" id="1_unitdef"]
+
+[resource]
+script = ExtResource("1_unitdef")
+id = &"knight"
+display_name = "Рыцарь"
+team = 0
+max_hp = 180
+attack = 16
+defense = 14
+magic_power = 4
+magic_resist = 8
+attack_speed = 0.9
+move_speed = 1.1
+attack_range = 1
+sight_range = 8
+crit_chance = 0.1
+crit_damage = 1.8
+dodge = 0.0
+armor = 25
+healing_received = 1.0
+shield_strength = 1.0
+lifesteal = 0.0
+thorns = 0.15
+magic_pen = 0.0
+cdr = 0.0
+tenacity = 0.4
+health_regen = 0.5
+max_mana = 80
+mana_regen = 1.5
+tier = 3
+cost = 7
+abilities = Array[Resource]([])
+description = "Универсальный танк. Высокий HP, защита, броня. 40% иммунитет к статусам."

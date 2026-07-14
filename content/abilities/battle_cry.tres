@@ -1,0 +1,19 @@
+[gd_resource type="Resource" script_class="AbilityDef" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://core/data/ability_def.gd" id="1_abilitydef"]
+[ext_resource type="Resource" path="res://content/effects/instances/attack_up_apply.tres" id="2_buff"]
+
+[resource]
+script = ExtResource("1_abilitydef")
+id = &"battle_cry"
+display_name = "Боевой клич"
+description = "+50% к атаке на 5 секунд."
+cooldown = 8.0
+mana_cost = 25
+targeting = 5
+range = 0
+aoe_radius = 0
+aoe_width = 0
+aoe_length = 0
+effects = Array[Resource]([ExtResource("2_buff")])
+trigger = 0

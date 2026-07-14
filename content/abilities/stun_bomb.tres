@@ -1,0 +1,19 @@
+[gd_resource type="Resource" script_class="AbilityDef" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://core/data/ability_def.gd" id="1_abilitydef"]
+[ext_resource type="Resource" path="res://content/effects/instances/stun_bomb.tres" id="2_stun"]
+
+[resource]
+script = ExtResource("1_abilitydef")
+id = &"stun_bomb"
+display_name = "Оглушающая бомба"
+description = "Оглушает всех врагов в радиусе 2 на 1.5 секунды."
+cooldown = 10.0
+mana_cost = 35
+targeting = 2
+range = 4
+aoe_radius = 2
+aoe_width = 0
+aoe_length = 0
+effects = Array[Resource]([ExtResource("2_stun")])
+trigger = 0

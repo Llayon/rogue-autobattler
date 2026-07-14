@@ -170,11 +170,19 @@ func _refresh_shop() -> void:
 
 
 func _spawn_enemy_wave(round_index: int) -> Array:
-	# Количество врагов берётся из Balance (single source of truth).
+	# Количество врагов и пул берутся из Balance (single source of truth).
 	var n: int = BalanceScript.enemy_count_for_round(round_index)
-	var goblin: Resource = ContentDB_static.get_by_id(&"goblin")
+	var pool: Array = BalanceScript.enemy_pool_for_round(round_index)
+	var hp_mult: float = BalanceScript.enemy_hp_multiplier(round_index)
 	var result: Array = []
 	for i in n:
-		if goblin != null:
-			result.append(goblin)
+		var pool_id: StringName = pool[Rng.randi_range(0, pool.size() - 1)] if not pool.is_empty() else &"goblin"
+		var enemy_def: Resource = ContentDB_static.get_by_id(pool_id)
+		if enemy_def == null:
+			continue
+		# HP scaling по раунду: применяем через временный def clone.
+		# Клонируем Resource через .duplicate() — Godot поддерживает это.
+		var scaled: Resource = enemy_def.duplicate()
+		scaled.max_hp = int(round(float(scaled.max_hp) * hp_mult))
+		result.append(scaled)
 	return result
