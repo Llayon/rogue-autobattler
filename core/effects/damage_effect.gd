@@ -20,10 +20,10 @@ func apply(ctx, source, targets: Array) -> Array:
 	var results: Array = []
 	if not has_valid_targets(targets):
 		return results
-	# Атакующая сила: для magic используем magic_power (поле), для физики — attack() (метод с модификаторами).
-	# Это consistent с тем что magic_power не имеет статус-модификаторов в нашей модели,
-	# а attack() модифицируется баффами/дебаффами (через _apply_modifier).
-	var attacker_power: int = source.magic_power if (is_magic and scales_with_magic_power) else source.attack()
+	# Атакующая сила: для magic используем magic_power_base (поле), для физики — attack() (метод с модификаторами).
+	# Magic: нет magic_power() метода, используем поле напрямую (consistency с attacker_power: поле vs метод).
+	# TODO: добавить magic_power() метод с модификаторами, если понадобятся status-effects на magic power.
+	var attacker_power: int = source.magic_power_base if (is_magic and scales_with_magic_power) else source.attack()
 	for t in targets:
 		if t == null or not t.is_alive():
 			continue
