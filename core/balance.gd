@@ -105,6 +105,66 @@ static func compute_damage(base: int, defense: int, is_magic: bool, variance: fl
 	return maxi(1, int(round(raw * (100.0 / (100.0 + float(eff_def))))))
 
 
+## v4: Pathfinder 2e style Degrees of Success.
+## Использует d20 + modifier vs DC для классификации (crit/success/failure).
+## Бросок: d20 + (attack_power - dc).
+## Returns {dealt, outcome, dodged, is_crit, is_failure}.
+##
+## Пример: warrior attack=20, target defense=15 → attack_bonus = 5.
+## Roll 10 + 5 = 15 vs DC 15 → SUCCESS.
+## Roll 15 + 5 = 20 vs DC 15 → CRIT_SUCCESS (>= DC + 10 = 25? нет, 20 < 25).
+## Хм, для crit success нужен либо natural 20, либо total >= DC + 10.
+## Чтобы DC был "сложный" обычно делают bonus - DC < 0 при низких уровнях.
+##
+## Этот вариант — альтернатива compute_attack. Используется когда DoS включен.
+static func compute_attack_dos(
+	attacker_attack: int,
+	target_defense: int,
+	target_armor: int,
+	target_dodge: float,
+	is_magic: bool,
+	attacker_magic_pen: float,
+	base_variance: float
+) -> Dictionary:
+	const DoSScript = preload("res://core/dos.gd")
+	# Dodge roll (не использует DoS — это отдельная проверка).
+	if Rng.chance(target_dodge):
+		return {"dealt": 0, "outcome": DoSScript.FAILURE, "dodged": true, "is_crit": false, "is_failure": true}
+	# Magic pen.
+	var dc: int = target_defense
+	if is_magic:
+		dc = int(round(float(target_defense) * (1.0 - attacker_magic_pen)))
+	# DC с учётом armor (flat, но меньше).
+	dc += int(float(target_armor) * ARMOR_WEIGHT)
+	# Bonus = attack - DC (отрицательный если слабый attacker).
+	var bonus: int = maxi(0, attacker_attack - dc)  # Бонус не меньше 0 — это attack roll bonus.
+	# DC для DoS = просто defense (без bonus modifier).
+	var dos_dc: int = dc
+	# Roll d20 + bonus.
+	var roll: int = Rng.randi_range(1, 20)
+	var total: int = roll + bonus
+	# Classify.
+	var outcome: int = DoSScript.classify(roll, bonus, dos_dc)
+	# Variance применяется только если SUCCESS или CRIT_SUCCESS.
+	var vf: float = 1.0
+	if outcome == DoSScript.SUCCESS or outcome == DoSScript.CRIT_SUCCESS:
+		vf = 1.0 + Rng.randf_range(-base_variance, base_variance)
+	# Damage multiplier.
+	var mult: float = DoSScript.damage_multiplier(outcome)
+	if outcome == DoSScript.FAILURE or outcome == DoSScript.CRIT_FAILURE:
+		# Crit fail / fail — damage = 0 или half.
+		if outcome == DoSScript.FAILURE:
+			# Failure: target takes half damage.
+			var half_dmg: int = maxi(1, int(round(float(attacker_attack) * 0.5)))
+			return {"dealt": half_dmg, "outcome": outcome, "dodged": false, "is_crit": false, "is_failure": true}
+		# Crit failure: 0 damage.
+		return {"dealt": 0, "outcome": outcome, "dodged": false, "is_crit": false, "is_failure": true}
+	# CRIT_SUCCESS или SUCCESS.
+	var raw: float = float(attacker_attack) * mult * vf
+	var final: int = maxi(1, int(round(raw * (100.0 / (100.0 + float(dc))))))
+	return {"dealt": final, "outcome": outcome, "dodged": false, "is_crit": outcome == DoSScript.CRIT_SUCCESS, "is_failure": false}
+
+
 ## v3: расширенная формула урона.
 ## Учитывает: crit, dodge (callers-side), magic_pen, armor (flat).
 ## Возвращает {dealt, is_crit, dodged}.

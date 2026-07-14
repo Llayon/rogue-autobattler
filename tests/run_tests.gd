@@ -32,6 +32,8 @@ const UnitDefScript = preload("res://core/data/unit_def.gd")
 
 const StatusDefScript = preload("res://core/data/status_def.gd")
 
+const DoSScript = preload("res://core/dos.gd")
+
 const AbilityDefScript = preload("res://core/data/ability_def.gd")
 
 const TeamScript = preload("res://core/data/team.gd")
@@ -130,8 +132,11 @@ func _initialize() -> void:
 	_test_magic_resist_method()
 	_test_magic_resist_modifier_status()
 	_test_apply_modifier_safe_for_missing_fields()
-
-	_test_magic_resist_method()
+	_test_dos_classify()
+	_test_dos_natural_crit()
+	_test_dos_damage_multiplier()
+	_test_dos_status_amplifier()
+	_test_balance_compute_attack_dos()
 
 	print("\n=== Result: %d passed, %d failed ===\n" % [_passed, _failed])
 
@@ -1250,3 +1255,83 @@ func _test_ability_mana_cost() -> void:
 	AbilityResolverScript.cast(ability, caster, ctx, target)
 
 	_assert(caster.mana.current_mana == 0, "не хватило mana — каст не прошёл")
+
+
+func _test_dos_classify() -> void:
+	print("[test] DoS.classify базовые cases")
+	_assert(DoSScript.classify(20, 0, 100) == DoSScript.CRIT_SUCCESS,
+		"natural 20 = CRIT_SUCCESS даже против DC 100")
+	_assert(DoSScript.classify(1, 100, 0) == DoSScript.CRIT_FAILURE,
+		"natural 1 = CRIT_FAILURE даже с modifier 100")
+	_assert(DoSScript.classify(15, 5, 10) == DoSScript.CRIT_SUCCESS,
+		"15 + 5 = 20 vs DC 10 = CRIT_SUCCESS")
+	_assert(DoSScript.classify(10, 5, 10) == DoSScript.SUCCESS,
+		"10 + 5 = 15 vs DC 10 = SUCCESS")
+	_assert(DoSScript.classify(8, 0, 10) == DoSScript.FAILURE,
+		"8 vs DC 10 = FAILURE")
+	_assert(DoSScript.classify(1, 0, 20) == DoSScript.CRIT_FAILURE,
+		"natural 1 = CRIT_FAILURE")
+
+
+func _test_dos_natural_crit() -> void:
+	print("[test] DoS natural 20/1 обходят total check")
+	_assert(DoSScript.classify(20, -10, 50) == DoSScript.CRIT_SUCCESS,
+		"natural 20 = CRIT_SUCCESS даже если DC >> total")
+	_assert(DoSScript.classify(1, 50, 30) == DoSScript.CRIT_FAILURE,
+		"natural 1 = CRIT_FAILURE даже если bonus >> DC")
+
+
+func _test_dos_damage_multiplier() -> void:
+	print("[test] DoS.damage_multiplier")
+	_assert(DoSScript.damage_multiplier(DoSScript.CRIT_SUCCESS) == 2.0,
+		"CRIT_SUCCESS = 2x")
+	_assert(DoSScript.damage_multiplier(DoSScript.SUCCESS) == 1.0,
+		"SUCCESS = 1x")
+	_assert(DoSScript.damage_multiplier(DoSScript.FAILURE) == 0.5,
+		"FAILURE = 0.5x")
+	_assert(DoSScript.damage_multiplier(DoSScript.CRIT_FAILURE) == 0.0,
+		"CRIT_FAILURE = 0x")
+
+
+func _test_dos_status_amplifier() -> void:
+	print("[test] DoS status_should_apply + status_amplifier")
+	_assert(DoSScript.status_should_apply(DoSScript.CRIT_SUCCESS) == true,
+		"CRIT_SUCCESS: apply status")
+	_assert(DoSScript.status_should_apply(DoSScript.SUCCESS) == true,
+		"SUCCESS: apply status")
+	_assert(DoSScript.status_should_apply(DoSScript.FAILURE) == false,
+		"FAILURE: НЕ apply status")
+	_assert(DoSScript.status_should_apply(DoSScript.CRIT_FAILURE) == false,
+		"CRIT_FAILURE: НЕ apply status")
+	_assert(DoSScript.status_amplifier(DoSScript.CRIT_SUCCESS) == 2,
+		"CRIT_SUCCESS: amplify x2")
+	_assert(DoSScript.status_amplifier(DoSScript.SUCCESS) == 1,
+		"SUCCESS: amplify x1")
+	_assert(DoSScript.status_amplifier(DoSScript.FAILURE) == 1,
+		"FAILURE: amplify x1")
+	_assert(DoSScript.status_amplifier(DoSScript.CRIT_FAILURE) == 1,
+		"CRIT_FAILURE: amplify x1")
+
+
+func _test_balance_compute_attack_dos() -> void:
+	print("[test] Balance.compute_attack_dos")
+	var r1: Dictionary = BalanceScript.compute_attack_dos(50, 0, 0, 1.0, false, 0.0, 0.0)
+	_assert(r1.dodged == true and r1.dealt == 0, "100% dodge = dodged")
+	var hits: int = 0
+	var crits: int = 0
+	var fails: int = 0
+	var dodges: int = 0
+	for i in 200:
+		var r: Dictionary = BalanceScript.compute_attack_dos(50, 5, 0, 0.0, false, 0.0, 0.0)
+		if r.dodged:
+			dodges += 1
+		elif r.is_crit:
+			crits += 1
+		elif r.is_failure:
+			fails += 1
+		else:
+			hits += 1
+	_assert(crits >= 5, "200 бросков: >=5 crit (got %d)" % crits)
+	_assert(dodges == 0, "dodge = 0% → 0 dodges")
+
+
