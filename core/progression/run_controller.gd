@@ -131,6 +131,10 @@ func _on_battle_ended() -> void:
 		state.gold += BalanceScript.WIN_BONUS_GOLD + state.round_index
 		GameBus.emit_gold_changed(state.gold)
 		state.round_index += 1
+		# S3.1: победа на MAX_ROUND завершает ран.
+		if state.round_index > BalanceScript.MAX_ROUND:
+			_end_run(true)
+			return
 		_set_phase(Phase.PREP)
 		_refresh_shop()
 		GameBus.emit_round_started(state.round_index)

@@ -11,6 +11,11 @@ const STARTING_GOLD: int = 10                # золото в начале ра
 const STARTING_LIVES: int = 1                # сколько раз можно проиграть
 const STARTING_UNIT_IDS: Array[StringName] = [&"warrior", &"archer"]
 
+# === Прогрессия рана ===
+# S3.1: финальный раунд рана. Победа на этом раунде = _end_run(true).
+const MAX_ROUND: int = 10
+# Бонусное золото за прохождение раунда (поверх WIN_BONUS_GOLD + round_index).
+
 # === Экономика ===
 const WIN_BONUS_GOLD: int = 5                # базовый бонус за победу
 const WIN_BONUS_PER_ROUND: int = 1           # +1 за каждый раунд (итого: 5+round)
@@ -85,10 +90,12 @@ static func enemy_pool_for_round(round_index: int) -> Array:
 	return ENEMY_POOL_BY_TIER.get(tier, [&"goblin"])
 
 
-## HP multiplier для врагов по раунду: раунд 1 = 1.0x, раунд 10 = 1.6x.
-## Линейный рост: каждый раунд +6.7% HP.
+## HP multiplier для врагов по раунду: раунд 1 = 1.0x, раунд MAX_ROUND = максимум.
+## Линейный рост до MAX_ROUND, после — cap (для совместимости со старыми сохранениями).
+## Формула: 1.0 + 0.067 * (min(round, MAX_ROUND) - 1).
 static func enemy_hp_multiplier(round_index: int) -> float:
-	return 1.0 + 0.067 * float(round_index - 1)
+	var clamped: int = mini(round_index, MAX_ROUND)
+	return 1.0 + 0.067 * float(clamped - 1)
 
 
 ## Возвращает координату Y для заднего ряда команды.

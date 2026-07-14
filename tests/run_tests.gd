@@ -55,6 +55,11 @@ const ManaComponentScript = preload("res://core/battle/mana_component.gd")
 const RegenComponentScript = preload("res://core/battle/regen_component.gd")
 
 const BalanceScript = preload("res://core/balance.gd")
+const RunControllerScript = preload("res://core/progression/run_controller.gd")
+const RunStateScript = preload("res://core/progression/run_state.gd")
+const MetaProfileScript = preload("res://core/progression/meta_profile.gd")
+const BattleRunnerScriptForCtrl = preload("res://core/battle/battle_runner.gd")
+const BattleStateScriptForCtrl = preload("res://core/battle/battle_state.gd")
 
 
 
@@ -137,6 +142,9 @@ func _initialize() -> void:
 	_test_dos_damage_multiplier()
 	_test_dos_status_amplifier()
 	_test_balance_compute_attack_dos()
+	_test_balance_max_round_and_hp_cap()
+	_test_run_controller_continue_below_max_round()
+	_test_run_controller_win_at_max_round()
 
 	print("\n=== Result: %d passed, %d failed ===\n" % [_passed, _failed])
 
@@ -1333,5 +1341,77 @@ func _test_balance_compute_attack_dos() -> void:
 			hits += 1
 	_assert(crits >= 5, "200 бросков: >=5 crit (got %d)" % crits)
 	_assert(dodges == 0, "dodge = 0% → 0 dodges")
+
+
+# === S3.1 Run progression (Sprint 3.1: win check + HP cap) ===
+
+func _test_balance_max_round_and_hp_cap() -> void:
+	print("[test] S3.1: MAX_ROUND + enemy_hp_multiplier cap")
+	# MAX_ROUND константа существует и = 10.
+	_assert(BalanceScript.MAX_ROUND == 10, "MAX_ROUND = 10 (got %d)" % BalanceScript.MAX_ROUND)
+	# HP multiplier нарастает до MAX_ROUND.
+	_assert(BalanceScript.enemy_hp_multiplier(1) == 1.0, "round 1 = 1.0x")
+	_assert(BalanceScript.enemy_hp_multiplier(10) > 1.0, "round 10 > 1.0x")
+	# Cap: раунды > MAX_ROUND не растут.
+	var hp_at_10: float = BalanceScript.enemy_hp_multiplier(10)
+	_assert(BalanceScript.enemy_hp_multiplier(11) == hp_at_10, "round 11 capped at round 10 value (got %f vs %f)" % [BalanceScript.enemy_hp_multiplier(11), hp_at_10])
+	_assert(BalanceScript.enemy_hp_multiplier(20) == hp_at_10, "round 20 still capped at round 10")
+
+
+func _test_run_controller_continue_below_max_round() -> void:
+	print("[test] S3.1: RunController продолжает после 5-й победы (round < MAX)")
+	# Подготовка: RunController в headless tree.
+	var ctrl: Node = RunControllerScript.new()
+	get_root().add_child.call_deferred(ctrl)
+	await process_frame
+	# Детерминированный seed.
+	ctrl.start_run(42)
+	# Сымитируем 5 побед подряд: round_index=5, wins=4; после _on_battle_ended → round_index=6, PREP.
+	ctrl.state.round_index = 5
+	ctrl.state.wins = 4
+	# Запускаем бой, чтобы создать runner.
+	var ok: bool = ctrl.start_battle()
+	_assert(ok == true, "start_battle на PREP с юнитами = true")
+	_assert(ctrl.phase == RunControllerScript.Phase.BATTLE, "phase = BATTLE после start_battle")
+	# Подменяем: бой завершился победой player.
+	ctrl.runner.state.phase = BattleStateScriptForCtrl.Phase.ENDED
+	ctrl.runner.state.winner_team = 0
+	ctrl.tick_battle(0.1)
+	# Проверяем: round_index 6, phase PREP, wins=5, НЕ GAMEOVER.
+	_assert(ctrl.state.round_index == 6, "round_index 5→6 (got %d)" % ctrl.state.round_index)
+	_assert(ctrl.state.wins == 5, "wins 4→5 (got %d)" % ctrl.state.wins)
+	_assert(ctrl.phase == RunControllerScript.Phase.PREP, "phase = PREP после победы (got %d)" % ctrl.phase)
+	_cleanup_ctrl(ctrl)
+
+
+func _test_run_controller_win_at_max_round() -> void:
+	print("[test] S3.1: RunController побеждает на MAX_ROUND (10) → GAMEOVER + run_ended(true)")
+	var ctrl: Node = RunControllerScript.new()
+	get_root().add_child.call_deferred(ctrl)
+	await process_frame
+	ctrl.start_run(42)
+	# Сымитируем 10-ю победу: round_index=10, wins=9; после _on_battle_ended → round_index=11, GAMEOVER, won=true.
+	ctrl.state.round_index = BalanceScript.MAX_ROUND
+	ctrl.state.wins = BalanceScript.MAX_ROUND - 1
+	# Ловим сигнал run_ended.
+	var won_flag: Array = [null]  # boxed, чтобы lambda видела
+	ctrl.run_ended.connect(func(w: bool) -> void: won_flag[0] = w)
+	ctrl.start_battle()
+	# Бой завершился победой player.
+	ctrl.runner.state.phase = BattleStateScriptForCtrl.Phase.ENDED
+	ctrl.runner.state.winner_team = 0
+	ctrl.tick_battle(0.1)
+	# Проверяем: round_index 11, phase GAMEOVER, wins=10, run_ended(true).
+	_assert(ctrl.state.round_index == BalanceScript.MAX_ROUND + 1, "round_index 10→11 (got %d)" % ctrl.state.round_index)
+	_assert(ctrl.state.wins == BalanceScript.MAX_ROUND, "wins 9→10 (got %d)" % ctrl.state.wins)
+	_assert(ctrl.phase == RunControllerScript.Phase.GAMEOVER, "phase = GAMEOVER после 10-й победы (got %d)" % ctrl.phase)
+	_assert(won_flag[0] == true, "run_ended(true) emitted (got %s)" % str(won_flag[0]))
+	_cleanup_ctrl(ctrl)
+
+
+func _cleanup_ctrl(ctrl: Node) -> void:
+	if is_instance_valid(ctrl):
+		ctrl.queue_free()
+	await process_frame
 
 
