@@ -222,6 +222,8 @@ func _initialize() -> void:
 	# S5.2: Encounter Map UI
 	_test_encounter_map_ui_resources_exist()
 	_test_encounter_map_ui_layout_and_button_states()
+	_test_encounter_map_ui_selection_signal()
+	_test_encounter_map_scene_preview_progression()
 
 	print("\n=== Result: %d passed, %d failed ===\n" % [_passed, _failed])
 
@@ -2572,3 +2574,53 @@ func _test_encounter_map_ui_layout_and_button_states() -> void:
 	_assert(enabled_count == available.size(),
 		"enabled count equals available count (%d)" % available.size())
 	view.free()
+
+
+func _test_encounter_map_ui_selection_signal() -> void:
+	print("[test] S5.2: EncounterMapView emits only available node selection")
+	Rng.seed_run(5203)
+	var map = EncounterMapScript.new()
+	map.generate(5203)
+	var view_script = load("res://scenes/encounter/encounter_map_view.gd")
+	var view: Control = view_script.new()
+	view.size = Vector2(1152, 648)
+	view.set_map(map)
+	var selected: Array[int] = []
+	view.node_selected.connect(func(node_id: int) -> void: selected.append(node_id))
+	var available: Array[int] = map.get_available_next_ids()
+	var locked_id: int = -1
+	for node in map.get_all_nodes():
+		if node.id not in available:
+			locked_id = node.id
+			break
+	view._on_node_pressed(locked_id)
+	_assert(selected.is_empty(), "locked node does not emit")
+	view._on_node_pressed(available[0])
+	_assert(selected == [available[0]], "available node emits exactly once")
+	_assert(map.get_current_node_id() == -1, "view does not mutate EncounterMap")
+	view.free()
+
+
+func _test_encounter_map_scene_preview_progression() -> void:
+	print("[test] S5.2: preview scene advances map and refreshes status")
+	var scene: Node = _instantiate_scene("res://scenes/encounter/encounter_map_scene.tscn")
+	_assert(scene != null, "preview scene instantiates")
+	if scene == null:
+		return
+	get_root().add_child.call_deferred(scene)
+	await process_frame
+	_assert(scene.has_method("_on_node_selected"), "preview handles node_selected")
+	_assert(scene.encounter_map != null, "preview generated EncounterMap")
+	_assert(scene.map_view != null, "preview has map_view")
+	_assert(scene.status_label != null, "preview has status label")
+	var available: Array[int] = scene.encounter_map.get_available_next_ids()
+	var chosen_id: int = available[0]
+	scene._on_node_selected(chosen_id)
+	_assert(scene.encounter_map.get_current_node_id() == chosen_id,
+		"preview applies choose_next")
+	_assert(scene.status_label.text.find("Layer 1") >= 0,
+		"status shows selected first layer")
+	_assert(scene.map_view.get_map() == scene.encounter_map,
+		"view refreshed with preview map")
+	scene.queue_free()
+	await process_frame
