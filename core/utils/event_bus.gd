@@ -26,6 +26,8 @@ signal xp_changed(new_xp: int, new_level: int)
 # S3.1.5: reward screen signals
 signal reward_offered(unit_ids: Array[StringName])
 signal reward_chosen(unit_id: StringName, slot: int)
+# S3.2: meta progression unlock signal
+signal unit_unlocked(unit_id: StringName)
 
 
 ## Возвращает инстанс шины событий (autoload или созданный вручную в тестах).
@@ -117,3 +119,11 @@ static func emit_reward_chosen(unit_id: StringName, slot: int) -> void:
 	var inst: Node = _instance()
 	if inst != null:
 		inst.reward_chosen.emit(unit_id, slot)
+
+
+## S3.2: meta progression — игрок разблокировал нового юнита за пределами рана.
+## Используется UI для показа уведомления "Вы разблокировали X!".
+static func emit_unit_unlocked(unit_id: StringName) -> void:
+	var inst: Node = _instance()
+	if inst != null:
+		inst.unit_unlocked.emit(unit_id)

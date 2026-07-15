@@ -162,6 +162,12 @@ func _end_run(won: bool) -> void:
 	profile.total_runs += 1
 	if won:
 		profile.total_wins += 1
+		# S3.2: за каждую победу — unlock юнита в meta profile.
+		# META_UNLOCKS_PER_WIN=1 по умолчанию (расширяется в балансе).
+		for _i in BalanceScript.META_UNLOCKS_PER_WIN:
+			var new_id: StringName = UnlockManager.grant_random_unit(profile, state.round_index)
+			if new_id != &"":
+				GameBus.emit_unit_unlocked(new_id)
 	profile.best_round = maxi(profile.best_round, state.round_index)
 	UnlockManager.award_souls(profile, state.round_index)
 	SaveService.save_meta(profile)

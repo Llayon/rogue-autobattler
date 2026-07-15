@@ -160,6 +160,9 @@ func _initialize() -> void:
 	_test_meta_unlock_grant_random_determinism()
 	_test_meta_unlock_grant_random_all_unlocked()
 	_test_meta_unlock_tier_weighted_round()
+	_test_run_controller_meta_unlock_on_win()
+	_test_run_controller_no_unlock_on_defeat()
+	_test_meta_save_roundtrip()
 
 	print("\n=== Result: %d passed, %d failed ===\n" % [_passed, _failed])
 
@@ -1636,6 +1639,61 @@ func _test_meta_unlock_tier_weighted_round() -> void:
 	_assert(tier_counts[2] + tier_counts[3] == 50, "round 9 → все tier 2 или 3 (got %d)" % (tier_counts[2] + tier_counts[3]))
 	# Должны быть оба (tier-weighted, не только target).
 	_assert(tier_counts[3] >= tier_counts[2], "tier 3 ≥ tier 2 (got %d vs %d)" % [tier_counts[3], tier_counts[2]])
+
+
+func _test_run_controller_meta_unlock_on_win() -> void:
+	print("[test] S3.2: RunController выдаёт unlock после _end_run(true)")
+	var ctrl: Node = RunControllerScript.new()
+	get_root().add_child.call_deferred(ctrl)
+	await process_frame
+	# Свежий профиль без extra unlocks. start_run() внутри вызовет load_meta()
+	# из user://saves — это может вернуть ранее сохранённый профиль, поэтому
+	# перезаписываем на новый ДО _end_run.
+	ctrl.start_run(42)
+	ctrl.profile = MetaProfileScript.new()
+	var size_before: int = ctrl.profile.unlocked_units.size()
+	# Ловим unit_unlocked signal.
+	var unlocked_box: Array = [null]
+	var bus: Node = get_root().get_node_or_null("EventBus")
+	if bus != null:
+		bus.unit_unlocked.connect(func(uid: StringName) -> void: unlocked_box[0] = uid)
+	# Имитируем победу на MAX_ROUND (state уже после всех побед).
+	ctrl.state.round_index = BalanceScript.MAX_ROUND
+	ctrl.state.wins = BalanceScript.MAX_ROUND - 1
+	ctrl._end_run(true)
+	_assert(ctrl.profile.unlocked_units.size() == size_before + 1,
+		"+1 unlock после победы (was %d, now %d)" % [size_before, ctrl.profile.unlocked_units.size()])
+	if bus != null:
+		_assert(unlocked_box[0] != null and unlocked_box[0] != &"",
+			"unit_unlocked signal emitted (got %s)" % str(unlocked_box[0]))
+	_cleanup_ctrl(ctrl)
+
+
+func _test_run_controller_no_unlock_on_defeat() -> void:
+	print("[test] S3.2: defeat на ран не даёт unlock")
+	var ctrl: Node = RunControllerScript.new()
+	get_root().add_child.call_deferred(ctrl)
+	await process_frame
+	ctrl.start_run(42)
+	ctrl.profile = MetaProfileScript.new()
+	var size_before: int = ctrl.profile.unlocked_units.size()
+	ctrl._end_run(false)
+	_assert(ctrl.profile.unlocked_units.size() == size_before,
+		"defeat → 0 новых unlock (was %d, now %d)" % [size_before, ctrl.profile.unlocked_units.size()])
+	_cleanup_ctrl(ctrl)
+
+
+func _test_meta_save_roundtrip() -> void:
+	print("[test] S3.2: MetaProfile save → load сохраняет unlocked_units")
+	var p: MetaProfile = MetaProfileScript.new()
+	UnlockManager.grant_unit(p, &"mage")
+	UnlockManager.grant_unit(p, &"paladin")
+	var ok: bool = SaveService.save_meta(p)
+	_assert(ok, "save_meta returned true")
+	var loaded: MetaProfile = SaveService.load_meta()
+	_assert(loaded != null, "load_meta не null")
+	_assert(loaded.unlocked_units.has(&"mage"), "mage в unlocked после load")
+	_assert(loaded.unlocked_units.has(&"paladin"), "paladin в unlocked после load")
 
 
 
