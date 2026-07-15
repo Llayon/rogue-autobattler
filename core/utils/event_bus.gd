@@ -28,6 +28,9 @@ signal reward_offered(unit_ids: Array[StringName])
 signal reward_chosen(unit_id: StringName, slot: int)
 # S3.2: meta progression unlock signal
 signal unit_unlocked(unit_id: StringName)
+# S3.3: save/load в середине рана
+signal run_saved(seed: int)
+signal run_resumed(seed: int)
 
 
 ## Возвращает инстанс шины событий (autoload или созданный вручную в тестах).
@@ -127,3 +130,17 @@ static func emit_unit_unlocked(unit_id: StringName) -> void:
 	var inst: Node = _instance()
 	if inst != null:
 		inst.unit_unlocked.emit(unit_id)
+
+
+## S3.3: state рана сохранён на диск. UI может показать "Saved".
+static func emit_run_saved(seed_value: int) -> void:
+	var inst: Node = _instance()
+	if inst != null:
+		inst.run_saved.emit(seed_value)
+
+
+## S3.3: state рана загружен с диска через resume_run(). UI переходит в PREP.
+static func emit_run_resumed(seed_value: int) -> void:
+	var inst: Node = _instance()
+	if inst != null:
+		inst.run_resumed.emit(seed_value)

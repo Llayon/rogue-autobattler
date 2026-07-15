@@ -50,6 +50,8 @@ func start_run(seed_value: int = 0) -> void:
 	_refresh_shop()
 	run_started.emit()
 	GameBus.emit_round_started(state.round_index)
+	# S3.3: auto-save после создания state (если игрок сразу выйдет).
+	save_now()
 	GameLog.info("run", "Run started", {"seed": seed_value, "starting": state.player_unit_ids.size()})
 
 
@@ -127,6 +129,9 @@ func tick_battle(dt: float) -> void:
 
 func _on_battle_ended() -> void:
 	var winner: int = runner.state.winner_team
+	# S3.3: auto-save ПОСЛЕ боя, ДО перехода в PREP/REWARD/GAMEOVER.
+	# Это гарантирует, что state на диске = последний завершённый бой.
+	save_now()
 	if winner == 0:
 		state.wins += 1
 		state.gold += BalanceScript.WIN_BONUS_GOLD + state.round_index
@@ -170,10 +175,36 @@ func _end_run(won: bool) -> void:
 				GameBus.emit_unit_unlocked(new_id)
 	profile.best_round = maxi(profile.best_round, state.round_index)
 	UnlockManager.award_souls(profile, state.round_index)
+	# S3.3: ран завершён — current_run_seed = 0 (нечего продолжать).
+	_clear_active_run()
 	SaveService.save_meta(profile)
-	SaveService.save_run(state)
 	run_ended.emit(won)
 	GameLog.info("run", "Run ended", {"round": state.round_index, "won": won})
+
+
+# === S3.3: Save/Load в середине рана ===
+
+## Сохраняет текущий state + обновляет profile.current_run_seed.
+## Вызывай вручную (кнопка "Save") или из auto-save хуков.
+## Возвращает true если сохранено успешно.
+func save_now() -> bool:
+	if state == null or state.seed == 0:
+		GameLog.warn("run", "save_now: no active state")
+		return false
+	var ok: bool = SaveService.save_run(state)
+	if ok and profile != null:
+		profile.current_run_seed = state.seed
+		SaveService.save_meta(profile)
+		GameBus.emit_run_saved(state.seed)
+		GameLog.info("run", "Run saved", {"seed": state.seed, "round": state.round_index})
+	return ok
+
+
+## S3.3: сбрасывает active run marker. Вызывается при _end_run.
+func _clear_active_run() -> void:
+	if profile != null and profile.current_run_seed != 0:
+		profile.current_run_seed = 0
+		# meta save уже вызывается в _end_run — здесь не дублируем.
 
 
 ## S3.1.5: переход в фазу REWARD после победы (кроме round 1).
@@ -181,6 +212,8 @@ func _enter_reward() -> void:
 	reward.generate_offer(state.round_index)
 	_set_phase(Phase.REWARD)
 	GameBus.emit_reward_offered(reward.offered_ids())
+	# S3.3: auto-save после генерации offer.
+	save_now()
 	GameLog.info("run", "Reward offered", {"round": state.round_index, "ids": reward.offered_ids()})
 
 

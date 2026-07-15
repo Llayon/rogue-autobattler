@@ -167,6 +167,10 @@ func _initialize() -> void:
 	_test_meta_profile_current_run_seed()
 	_test_save_service_has_run_and_list()
 	_test_save_service_get_current_run_seed()
+	_test_run_controller_save_now()
+	_test_run_controller_save_now_signal()
+	_test_run_controller_end_run_clears_active()
+	_test_run_controller_save_after_battle()
 
 	print("\n=== Result: %d passed, %d failed ===\n" % [_passed, _failed])
 
@@ -1743,6 +1747,79 @@ func _test_save_service_get_current_run_seed() -> void:
 	_assert(ok2, "save_run(777) ok")
 	_assert(SaveService.has_active_run(p) == true, "has_active_run = true (file exists)")
 	SaveService.delete_run(777)
+
+
+func _test_run_controller_save_now() -> void:
+	print("[test] S3.3: RunController.save_now() — пишет state + current_run_seed")
+	var ctrl: Node = RunControllerScript.new()
+	get_root().add_child.call_deferred(ctrl)
+	await process_frame
+	ctrl.start_run(123)
+	ctrl.profile = MetaProfileScript.new()
+	ctrl.profile.current_run_seed = 0
+	ctrl.state.gold = 50
+	var ok: bool = ctrl.save_now()
+	_assert(ok, "save_now() = true")
+	_assert(ctrl.profile.current_run_seed == 123, "current_run_seed = 123 (got %d)" % ctrl.profile.current_run_seed)
+	_assert(SaveService.has_run(123), "file run_123.tres exists")
+	var loaded: RunState = SaveService.load_run(123)
+	_assert(loaded != null, "load_run(123) not null")
+	_assert(loaded.gold == 50, "gold сохранён (got %d)" % loaded.gold)
+	SaveService.delete_run(123)
+	_cleanup_ctrl(ctrl)
+
+
+func _test_run_controller_save_now_signal() -> void:
+	print("[test] S3.3: save_now() emit run_saved signal")
+	var ctrl: Node = RunControllerScript.new()
+	get_root().add_child.call_deferred(ctrl)
+	await process_frame
+	ctrl.start_run(456)
+	ctrl.profile = MetaProfileScript.new()
+	var saved_box: Array = [null]
+	var bus: Node = get_root().get_node_or_null("EventBus")
+	if bus != null:
+		bus.run_saved.connect(func(s: int) -> void: saved_box[0] = s)
+	ctrl.save_now()
+	if bus != null:
+		_assert(saved_box[0] == 456, "run_saved(456) emitted (got %s)" % str(saved_box[0]))
+	SaveService.delete_run(456)
+	_cleanup_ctrl(ctrl)
+
+
+func _test_run_controller_end_run_clears_active() -> void:
+	print("[test] S3.3: _end_run очищает current_run_seed")
+	var ctrl: Node = RunControllerScript.new()
+	get_root().add_child.call_deferred(ctrl)
+	await process_frame
+	ctrl.start_run(555)
+	ctrl.profile = MetaProfileScript.new()
+	ctrl.profile.current_run_seed = 555
+	ctrl._end_run(true)
+	_assert(ctrl.profile.current_run_seed == 0, "current_run_seed = 0 после _end_run (got %d)" % ctrl.profile.current_run_seed)
+	SaveService.delete_run(555)
+	_cleanup_ctrl(ctrl)
+
+
+func _test_run_controller_save_after_battle() -> void:
+	print("[test] S3.3: auto-save после _on_battle_ended")
+	var ctrl: Node = RunControllerScript.new()
+	get_root().add_child.call_deferred(ctrl)
+	await process_frame
+	ctrl.start_run(888)
+	ctrl.profile = MetaProfileScript.new()
+	ctrl.state.round_index = 1
+	ctrl.state.wins = 0
+	ctrl.start_battle()
+	ctrl.runner.state.phase = BattleStateScriptForCtrl.Phase.ENDED
+	ctrl.runner.state.winner_team = 0
+	ctrl.tick_battle(0.1)
+	_assert(SaveService.has_run(888), "file run_888.tres exists after battle")
+	var loaded: RunState = SaveService.load_run(888)
+	_assert(loaded != null, "load не null")
+	_assert(loaded.round_index == 2, "round_index = 2 в save (got %d)" % loaded.round_index)
+	SaveService.delete_run(888)
+	_cleanup_ctrl(ctrl)
 
 
 
