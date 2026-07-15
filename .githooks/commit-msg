@@ -25,7 +25,9 @@ case "$COMMIT_MSG" in
 esac
 
 # Pattern: type(scope): subject
-PATTERN='^(feat|fix|chore|test|docs|refactor|perf)\([a-z0-9.]+\): [a-z][^.]*$'
+# Subject: ANY letter (upper or lower) start, no trailing period.
+# Allow any character except period at end (filename patterns like .md are common).
+PATTERN='^(feat|fix|chore|test|docs|refactor|perf)\([a-z0-9.]+\): [^.]+[^.]$'
 
 if ! echo "$COMMIT_MSG" | grep -qE "$PATTERN"; then
 	echo ""
