@@ -192,6 +192,8 @@ func _initialize() -> void:
 	_test_battle_view_attack_meter_draw_safe()
 	_test_damage_dealt_signal_emits()
 	_test_battle_view_damage_number_storage()
+	_test_battle_scene_round_summary_on_win()
+	_test_battle_scene_round_summary_on_defeat()
 
 	print("\n=== Result: %d passed, %d failed ===\n" % [_passed, _failed])
 
@@ -2135,6 +2137,57 @@ func _make_simple_def(id: StringName, hp: int) -> Resource:
 	def.max_hp = hp
 	def.attack = 10
 	return def
+
+
+func _test_battle_scene_round_summary_on_win() -> void:
+	print("[test] S4.2: BattleScene показывает round_summary после battle_ended (win)")
+	var scene: Control = BattleSceneScript.new()
+	get_root().add_child.call_deferred(scene)
+	await process_frame
+	if not is_instance_valid(scene):
+		return
+	scene.run_controller.start_run(42)
+	scene.run_controller.profile = MetaProfileScript.new()
+	scene.run_controller.state.round_index = 1
+	scene.run_controller.state.wins = 0
+	scene.run_controller.start_battle()
+	scene.run_controller.runner.state.phase = BattleStateScriptForCtrl.Phase.ENDED
+	scene.run_controller.runner.state.winner_team = 0
+	scene.run_controller.tick_battle(0.1)
+	await process_frame
+	_assert(scene._summary_pending == true,
+		"_summary_pending = true после win (got %s)" % str(scene._summary_pending))
+	_assert(scene.summary_label != null and is_instance_valid(scene.summary_label),
+		"summary_label создан в _show_round_summary")
+	if scene.summary_label != null and is_instance_valid(scene.summary_label):
+		_assert(scene.summary_label.text.find("Round") >= 0,
+			"summary содержит 'Round' (got '%s')" % scene.summary_label.text)
+		_assert(scene.summary_label.text.find("gold") >= 0,
+			"summary содержит 'gold' (got '%s')" % scene.summary_label.text)
+	scene.queue_free()
+	await process_frame
+
+
+func _test_battle_scene_round_summary_on_defeat() -> void:
+	print("[test] S4.2: BattleScene round_summary на defeat = 'Defeat!'")
+	var scene: Control = BattleSceneScript.new()
+	get_root().add_child.call_deferred(scene)
+	await process_frame
+	if not is_instance_valid(scene):
+		return
+	scene.run_controller.start_run(42)
+	scene.run_controller.profile = MetaProfileScript.new()
+	scene.run_controller.start_battle()
+	scene.run_controller.runner.state.phase = BattleStateScriptForCtrl.Phase.ENDED
+	scene.run_controller.runner.state.winner_team = 1  # enemy wins
+	scene.run_controller.tick_battle(0.1)
+	await process_frame
+	_assert(scene._summary_pending == true, "pending = true")
+	if scene.summary_label != null and is_instance_valid(scene.summary_label):
+		_assert(scene.summary_label.text.find("Defeat") >= 0,
+			"summary содержит 'Defeat' (got '%s')" % scene.summary_label.text)
+	scene.queue_free()
+	await process_frame
 
 
 

@@ -15,6 +15,9 @@ var hud_round_label: Label
 var hud_gold_label: Label
 var hud_wins_label: Label
 var hud_lives_label: Label
+# === S4.2: end-of-round summary ===
+var summary_label: Label = null
+var _summary_pending: bool = false
 var speed: float = 1.0
 var _bus: Node = null  # EventBus instance (autoload) или локальный
 
@@ -151,8 +154,39 @@ func _unhandled_input(event: InputEvent) -> void:
 					run_controller.start_run(Rng.randi_range(1, 999999))
 
 
-func _on_battle_ended(_winner: int) -> void:
-	pass
+func _on_battle_ended(winner_team: int) -> void:
+	# S4.2: end-of-round summary — показываем 1.5s после боя.
+	if winner_team == 0:
+		var gold_earned: int = BalanceScript.WIN_BONUS_GOLD + run_controller.state.round_index - 1
+		_show_round_summary("Round %d cleared! +%d gold" % [
+			run_controller.state.round_index - 1,
+			gold_earned
+		])
+	else:
+		_show_round_summary("Defeat!")
+	_refresh_hud()
+
+
+## S4.2: показывает summary Label на 1.5s, затем удаляет.
+func _show_round_summary(text: String) -> void:
+	# Удалить предыдущий summary если ещё висит.
+	if summary_label != null and is_instance_valid(summary_label):
+		summary_label.queue_free()
+	summary_label = Label.new()
+	summary_label.text = text
+	summary_label.add_theme_color_override("font_color", Color(1, 0.95, 0.3))
+	summary_label.set_anchors_preset(Control.PRESET_CENTER_TOP)
+	summary_label.position = Vector2(360, 60)
+	summary_label.add_theme_font_size_override("font_size", 24)
+	summary_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(summary_label)
+	_summary_pending = true
+	# Через 1.5s убрать (если ран продолжается).
+	await get_tree().create_timer(1.5).timeout
+	if is_instance_valid(summary_label):
+		summary_label.queue_free()
+	summary_label = null
+	_summary_pending = false
 
 
 func _on_unit_died(_c) -> void:
