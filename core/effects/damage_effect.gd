@@ -49,6 +49,9 @@ func apply(ctx, source, targets: Array) -> Array:
 		t.take_damage(result.dealt, source)
 		var dealt: int = pre_hp - t.health.current_hp
 		GameBus.emit_unit_damaged(t, dealt, source)
+		# S4.2: emit damage_dealt для floating numbers в BattleView.
+		if dealt > 0:
+			GameBus.emit_damage_dealt(t, dealt, source)
 		results.append({
 			"target": t,
 			"applied": true,

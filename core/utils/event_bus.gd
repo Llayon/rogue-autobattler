@@ -31,6 +31,8 @@ signal unit_unlocked(unit_id: StringName)
 # S3.3: save/load в середине рана
 signal run_saved(seed: int)
 signal run_resumed(seed: int)
+# S4.2: floating damage numbers (для BattleView overlay)
+signal damage_dealt(target, amount: int, source)
 
 
 ## Возвращает инстанс шины событий (autoload или созданный вручную в тестах).
@@ -144,3 +146,10 @@ static func emit_run_resumed(seed_value: int) -> void:
 	var inst: Node = _instance()
 	if inst != null:
 		inst.run_resumed.emit(seed_value)
+
+
+## S4.2: emit при нанесении урона. UI показывает floating number.
+static func emit_damage_dealt(target, amount: int, source) -> void:
+	var inst: Node = _instance()
+	if inst != null:
+		inst.damage_dealt.emit(target, amount, source)

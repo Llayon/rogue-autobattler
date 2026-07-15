@@ -14,10 +14,56 @@ const BAR_HEIGHT: int = 6
 @export var text_color: Color = Color(0.95, 0.95, 0.95)
 
 var _ctx: BattleContext = null
+# S4.2: floating damage numbers [{target_id, cell, amount, time_remaining}].
+var _damage_numbers: Array = []
 
 
 func set_context(ctx: BattleContext) -> void:
 	_ctx = ctx
+	queue_redraw()
+
+
+func _ready() -> void:
+	# S4.2: подписка на damage_dealt signal.
+	var bus: Node = _find_event_bus()
+	if bus != null:
+		bus.damage_dealt.connect(_on_damage_dealt)
+
+
+## S4.2: возвращает EventBus instance или null.
+func _find_event_bus() -> Node:
+	var tree: SceneTree = Engine.get_main_loop() as SceneTree
+	if tree == null:
+		return null
+	return tree.root.get_node_or_null("EventBus")
+
+
+## S4.2: callback для damage_dealt — добавляет floating number.
+func _on_damage_dealt(target, amount: int, _source) -> void:
+	if target == null:
+		return
+	var cell: Vector2i = target.cell if "cell" in target else Vector2i(-1, -1)
+	if cell.x < 0:
+		return
+	_damage_numbers.append({
+		"target_id": target.get_instance_id(),
+		"cell": cell,
+		"amount": amount,
+		"time_remaining": 0.6,
+	})
+	queue_redraw()
+
+
+func _process(delta: float) -> void:
+	# S4.2: TTL для damage numbers.
+	if _damage_numbers.is_empty():
+		return
+	var new_list: Array = []
+	for entry in _damage_numbers:
+		entry["time_remaining"] -= delta
+		if entry["time_remaining"] > 0.0:
+			new_list.append(entry)
+	_damage_numbers = new_list
 	queue_redraw()
 
 
@@ -73,3 +119,17 @@ func _draw() -> void:
 		var font: Font = ThemeDB.fallback_font
 		if font != null:
 			draw_string(font, pos + Vector2(0, -10), String(c.def_id), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, text_color)
+	# S4.2: floating damage numbers overlay (поверх юнитов).
+	if not _damage_numbers.is_empty():
+		var dmg_font: Font = ThemeDB.fallback_font
+		for entry in _damage_numbers:
+			var ec: Vector2i = entry["cell"]
+			if ec.x < 0 or ec.y < 0:
+				continue
+			var dmg_pos: Vector2 = Vector2(
+				origin_x + ec.x * CELL_SIZE + 8,
+				origin_y + ec.y * CELL_SIZE - 4
+			)
+			if dmg_font != null:
+				draw_string(dmg_font, dmg_pos, str(entry["amount"]),
+					HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(1, 0.3, 0.3))

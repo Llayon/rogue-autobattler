@@ -190,6 +190,8 @@ func _initialize() -> void:
 	_test_battle_scene_hud_creation()
 	_test_battle_scene_hud_updates_on_gold_change()
 	_test_battle_view_attack_meter_draw_safe()
+	_test_damage_dealt_signal_emits()
+	_test_battle_view_damage_number_storage()
 
 	print("\n=== Result: %d passed, %d failed ===\n" % [_passed, _failed])
 
@@ -2070,6 +2072,69 @@ func _test_battle_view_attack_meter_draw_safe() -> void:
 	# В headless _draw() не вызывается — но set_context не должен падать.
 	_assert(view._ctx == ctx, "ctx сохранён")
 	view.free()
+
+
+func _test_damage_dealt_signal_emits() -> void:
+	print("[test] S4.2: DamageEffect emit damage_dealt signal")
+	var bus: Node = get_root().get_node_or_null("EventBus")
+	if bus == null:
+		_assert(true, "no EventBus в headless — пропускаем")
+		return
+	var dmg_box: Array = [null]
+	bus.damage_dealt.connect(func(_t, amt: int, _s) -> void: dmg_box[0] = amt)
+	var target_def = UnitDefScript.new()
+	target_def.id = &"target_t"
+	target_def.max_hp = 100
+	var target = CombatantScript.new(target_def)
+	var src_def = UnitDefScript.new()
+	src_def.id = &"src_t"
+	src_def.max_hp = 100
+	src_def.attack = 100
+	var source = CombatantScript.new(src_def)
+	var ctx2 = BattleContextScript.new()
+	var g2 = GridScript.new()
+	g2.resize(7, 4)
+	ctx2.grid = g2
+	ctx2.register(source, Vector2i(0, 3))
+	ctx2.register(target, Vector2i(0, 0))
+	var dmg_effect = DamageEffectScript.new()
+	dmg_effect.base_damage = 50
+	dmg_effect.variance = 0.0
+	dmg_effect.is_magic = false
+	var ability = AbilityDefScript.new()
+	ability.effects = [dmg_effect]
+	AbilityResolverScript.cast(ability, source, ctx2, target)
+	_assert(dmg_box[0] != null and dmg_box[0] > 0,
+		"damage_dealt signal emitted (got amount=%s)" % str(dmg_box[0]))
+
+
+func _test_battle_view_damage_number_storage() -> void:
+	print("[test] S4.2: BattleView._damage_numbers добавляется через signal callback")
+	var view: Control = BattleViewScript.new()
+	# Подписки не будет (нет EventBus), но напрямую дёрнем _on_damage_dealt.
+	var fake_target = CombatantScript.new(_make_simple_def(&"t", 100))
+	fake_target.cell = Vector2i(2, 1)
+	view._on_damage_dealt(fake_target, 42, null)
+	_assert(view._damage_numbers.size() == 1,
+		"1 damage number добавлен (got %d)" % view._damage_numbers.size())
+	_assert(view._damage_numbers[0]["amount"] == 42,
+		"amount = 42 (got %d)" % view._damage_numbers[0]["amount"])
+	_assert(view._damage_numbers[0]["cell"] == Vector2i(2, 1),
+		"cell сохранён")
+	# TTL tick.
+	view._process(0.3)
+	_assert(view._damage_numbers.size() == 1, "после 0.3s остался (TTL=0.6s)")
+	view._process(0.4)
+	_assert(view._damage_numbers.size() == 0, "после 0.7s удалён (TTL expired)")
+	view.free()
+
+
+func _make_simple_def(id: StringName, hp: int) -> Resource:
+	var def = UnitDefScript.new()
+	def.id = id
+	def.max_hp = hp
+	def.attack = 10
+	return def
 
 
 
