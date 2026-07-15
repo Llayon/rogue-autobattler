@@ -10,6 +10,13 @@
 - Прямой randf() вместо Rng.* (нарушение детерминизма)
 - Устаревшие имена class_name (Logger, RngService, etc.)
 - Запрещённый EventBus.signal.emit в core/* (нужен GameBus.emit_*)
+
+Гвардейцы перенесённые из Bevy Absolute Zenith (29 архитектурных гвардейцев):
+- #22 no-direct-prints-in-core: запрет print()/printerr() в core/ (стабильность)
+- #22 no-panic-in-core: запрет assert()/push_error() в core/ (стабильность)
+- #20 no-bare-randf-in-static: запрет bare randf() в static методах (детерминизм)
+- #11 no-classification-flags: запрет is_X: bool флагов в Combatant (использовать ZST)
+- #15 no-dictionary-state: запрет Dictionary как state (использовать typed struct)
 """
 import os
 import re
@@ -92,6 +99,60 @@ RULES = [
         "message": "Use GameBus.emit_xxx() static helpers in core/* (EventBus is autoload instance, not class_name).",
         "severity": "error",
         "scope": "core/",
+    },
+
+    # === Stability (#22 из Bevy гвардейцев) ===
+    # Запрет print/printerr в core/* (нарушение decoupling).
+    # core/* не должен знать о выводе — используй GameLog.
+    {
+        "id": "no-direct-prints-in-core",
+        "pattern": re.compile(r"\b(print|printerr|push_error|push_warning)\s*\("),
+        "message": "Core logic file uses direct print/printerr. Use GameLog.info/warn/error instead.",
+        "severity": "error",
+        "scope": "core/",
+        "exclude_paths": [
+            "core/utils/logger.gd",  # сам GameLog может print для fallback
+        ],
+    },
+    # Запрет assert() в production core/* (стабильность — должен быть graceful).
+    {
+        "id": "no-assert-in-core",
+        "pattern": re.compile(r"\bassert\s*\("),
+        "message": "assert() crashes in release builds. Use _assert() helper or if let/match for runtime checks.",
+        "severity": "warning",
+        "scope": "core/",
+    },
+
+    # === Determinism (#22 — Bare randf in static) ===
+    # bare randf()/randi() внутри static методов → Godot built-in random,
+    # НЕ seeded. Должен быть Rng.randf() (с префиксом class_name).
+    {
+        "id": "no-bare-randf-in-static",
+        # Паттерн: static func или const/var...static внутри с bare randf()
+        # Сложно детектить точно, поэтому ловим любой bare randf() внутри core/
+        # и требуем префикс Rng.
+        "pattern": re.compile(r"(?<![\w.])randf\s*\(|^[^#]*\brandi\s*\("),
+        "message": "Bare randf()/randi() — Godot built-in (NOT seeded). Use Rng.randf() / Rng.randi_range().",
+        "severity": "error",
+        "scope": "core/",
+        "exclude_paths": [
+            "core/utils/rng_service.gd",  # сам Rng
+            "core/balance.gd",  # баланс может ссылаться на global
+        ],
+    },
+
+    # === Type-Driven Design (#21 — no classification flags) ===
+    # Запрет is_X / has_X / can_X : bool полей в Combatant (и других entity).
+    # Использовать ZST marker components или enum.
+    {
+        "id": "no-classification-flags",
+        "pattern": re.compile(r"\b(is_|has_|can_|should_)\w+\s*:\s*bool"),
+        "message": "Classification flag 'is_X: bool' forbidden. Use ZST marker component or enum.",
+        "severity": "warning",
+        "exclude_paths": [
+            "core/data/unit_def.gd",  # UnitDef может иметь bool поля (но лучше enum)
+            "core/battle/status_list.gd",
+        ],
     },
 ]  # noqa
 
