@@ -221,6 +221,7 @@ func _initialize() -> void:
 	_test_rng_pick_unique_determinism()
 	# S5.2: Encounter Map UI
 	_test_encounter_map_ui_resources_exist()
+	_test_encounter_map_ui_layout_and_button_states()
 
 	print("\n=== Result: %d passed, %d failed ===\n" % [_passed, _failed])
 
@@ -2535,3 +2536,39 @@ func _test_encounter_map_ui_resources_exist() -> void:
 	_assert(scene is Control, "Encounter Map scene root = Control")
 	if scene != null:
 		scene.free()
+
+
+func _test_encounter_map_ui_layout_and_button_states() -> void:
+	print("[test] S5.2: EncounterMapView lays out DAG and locks unavailable nodes")
+	Rng.seed_run(5202)
+	var map = EncounterMapScript.new()
+	map.generate(5202)
+	var view_script = load("res://scenes/encounter/encounter_map_view.gd")
+	var view: Control = view_script.new()
+	view.size = Vector2(1152, 648)
+	view.set_map(map)
+	var positions: Dictionary = view.get_node_positions()
+	var buttons: Dictionary = view.get_node_buttons()
+	_assert(positions.size() == map.size(),
+		"layout has one position per node (%d)" % map.size())
+	_assert(buttons.size() == map.size(),
+		"view has one Button per node (%d)" % map.size())
+	var first = map.get_layer_nodes(1)[0]
+	var boss = map.get_layer_nodes(10)[0]
+	_assert(positions.has(first.id) and positions.has(boss.id),
+		"layout contains first node and boss")
+	if positions.has(first.id) and positions.has(boss.id):
+		_assert(positions[boss.id].y < positions[first.id].y,
+			"boss is above first layer")
+	_assert(view.get_edge_count() > 0, "DAG edges are prepared for drawing")
+	var available: Array[int] = map.get_available_next_ids()
+	var enabled_count: int = 0
+	for node_id in buttons:
+		var button: Button = buttons[node_id]
+		if not button.disabled:
+			enabled_count += 1
+		_assert(button.disabled == (node_id not in available),
+			"node %d enabled iff available" % node_id)
+	_assert(enabled_count == available.size(),
+		"enabled count equals available count (%d)" % available.size())
+	view.free()
