@@ -25,6 +25,19 @@ const REWARD_TIER_BASE_WEIGHT: float = 0.6  # 60% — основной tier дл
 const REWARD_TIER_MINUS_WEIGHT: float = 0.3  # 30% — tier-1 (если >0)
 const REWARD_TIER_PLUS_WEIGHT: float = 0.1   # 10% — tier+1 (если <4)
 
+# === Meta progression (S3.2) ===
+# За каждую победу в ране разблокировать META_UNLOCKS_PER_WIN юнитов.
+# 1 = консервативный темп: 10 побед → 10 новых юнитов в коллекции.
+const META_UNLOCKS_PER_WIN: int = 1
+# Souls (мета-валюта) за каждый завершённый раунд. Сейчас жёстко 1 — выносим в константу.
+const META_SOULS_PER_ROUND: int = 1
+# Cap souls, чтобы MetaProfile не уходил в переполнение.
+const META_SOULS_CAP: int = 99999
+# Tier-вeсa для meta unlock (как в reward screen, для консистентности).
+const META_TIER_BASE_WEIGHT: float = 0.6
+const META_TIER_MINUS_WEIGHT: float = 0.3
+const META_TIER_PLUS_WEIGHT: float = 0.1
+
 # === Экономика ===
 const WIN_BONUS_GOLD: int = 5                # базовый бонус за победу
 const WIN_BONUS_PER_ROUND: int = 1           # +1 за каждый раунд (итого: 5+round)
