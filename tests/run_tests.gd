@@ -219,6 +219,8 @@ func _initialize() -> void:
 	_test_encounter_map_choose_invalid()
 	_test_encounter_map_strict_determinism_100_seeds()
 	_test_rng_pick_unique_determinism()
+	# S5.2: Encounter Map UI
+	_test_encounter_map_ui_resources_exist()
 
 	print("\n=== Result: %d passed, %d failed ===\n" % [_passed, _failed])
 
@@ -2509,3 +2511,27 @@ func _test_rng_pick_unique_determinism() -> void:
 
 
 
+
+
+# === S5.2: Encounter Map UI ===
+
+func _test_encounter_map_ui_resources_exist() -> void:
+	print("[test] S5.2: Encounter Map UI scene contract")
+	var script_exists: bool = ResourceLoader.exists("res://scenes/encounter/encounter_map_view.gd")
+	var scene_exists: bool = ResourceLoader.exists("res://scenes/encounter/encounter_map_scene.tscn")
+	_assert(script_exists, "EncounterMapView script exists")
+	_assert(scene_exists, "Encounter Map scene exists")
+	if not script_exists or not scene_exists:
+		return
+	var script = load("res://scenes/encounter/encounter_map_view.gd")
+	var view: Control = script.new()
+	_assert(view.has_method("set_map"), "EncounterMapView.set_map() exists")
+	_assert(view.has_method("get_map"), "EncounterMapView.get_map() exists")
+	var map = EncounterMapScript.new()
+	view.set_map(map)
+	_assert(view.get_map() == map, "EncounterMapView stores assigned map")
+	view.free()
+	var scene: Node = _instantiate_scene("res://scenes/encounter/encounter_map_scene.tscn")
+	_assert(scene is Control, "Encounter Map scene root = Control")
+	if scene != null:
+		scene.free()
