@@ -1,0 +1,56 @@
+#!/bin/sh
+# commit-msg hook: enforce Conventional Commits format.
+# Allowed: type(scope): subject
+#   type: feat | fix | chore | test | docs | refactor | perf
+#   scope: lowercase alphanumeric + dots (s3.1, s5.1, rng, ui, etc.)
+#
+# Subject rules:
+#   - max 72 chars
+#   - lowercase after scope:
+#   - imperative mood ("add" not "added")
+#   - no trailing period
+
+COMMIT_MSG_FILE=$1
+COMMIT_MSG=$(head -n 1 "$COMMIT_MSG_FILE")
+
+# Allow merge / revert / fixup commits to bypass.
+case "$COMMIT_MSG" in
+	"Merge "*|\
+	"Revert "*|\
+	"fixup! "*|\
+	"squash! "*|\
+	"amend! "*)
+		exit 0
+		;;
+esac
+
+# Pattern: type(scope): subject
+PATTERN='^(feat|fix|chore|test|docs|refactor|perf)\([a-z0-9.]+\): [a-z][^.]*$'
+
+if ! echo "$COMMIT_MSG" | grep -qE "$PATTERN"; then
+	echo ""
+	echo "❌ COMMIT REJECTED — invalid Conventional Commits format"
+	echo ""
+	echo "Got:      $COMMIT_MSG"
+	echo ""
+	echo "Required: <type>(<scope>): <subject>"
+	echo "Example:  feat(s5.1): EncounterMap generates DAG with tier weights"
+	echo ""
+	echo "Types:    feat | fix | chore | test | docs | refactor | perf"
+	echo "Scope:    lowercase alphanumeric (s3.1, s5.1, rng, ui, core, ...)"
+	echo "Subject:  lowercase, ≤72 chars, imperative, no period"
+	echo ""
+	exit 1
+fi
+
+# Length check (excluding newline).
+LEN=${#COMMIT_MSG}
+if [ "$LEN" -gt 72 ]; then
+	echo ""
+	echo "❌ COMMIT REJECTED — subject too long ($LEN > 72 chars)"
+	echo "Got: $COMMIT_MSG"
+	echo ""
+	exit 1
+fi
+
+exit 0
