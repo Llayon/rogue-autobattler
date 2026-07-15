@@ -275,7 +275,6 @@ func _assert(cond: bool, msg: String) -> void:
 
 
 
-
 func _make_unit_def(id: StringName, hp: int = 100, atk: int = 10, team: int = 0) -> Resource:
 
 	var d: Resource = UnitDefScript.new()
@@ -440,7 +439,7 @@ func _test_combatant_take_damage() -> void:
 
 	c.take_damage(30, null)
 
-	_assert(c.shield == 0 and c.health.current_hp == 90, "shield absorbs first")
+	_assert(c.health.shield == 0 and c.health.current_hp == 90, "shield absorbs first")
 
 
 
@@ -478,11 +477,12 @@ func _test_combatant_basic_attack() -> void:
 
 	print("[test] Combatant basic_attack формула")
 
+	RngServiceScript.seed_run(2024)
+
 	var atk: Resource = _make_unit_def(&"atk", 100, 20)
 
 	var def: Resource = _make_unit_def(&"def", 100, 5, 1)
-
-	def.defense_base = 0
+	def.defense = 0
 
 	var a = CombatantScript.new(atk)
 
@@ -490,7 +490,7 @@ func _test_combatant_basic_attack() -> void:
 
 	a.basic_attack(b)
 
-	_assert(b.health.current_hp == 80, "basic_attack на 20 (defense=0)")
+	_assert(b.health.current_hp == 80, "basic_attack на 20 (defense=0) (got %d)" % b.health.current_hp)
 
 	b.defense_base = 100
 
@@ -746,13 +746,13 @@ func _test_health_component_isolation() -> void:
 
 	h.take_damage(30)
 
-	_assert(h.health.current_hp == 70, "took 30 dmg")
+	_assert(h.current_hp == 70, "took 30 dmg")
 
 	h.add_shield(20)
 
 	h.take_damage(30)
 
-	_assert(h.shield == 0 and h.health.current_hp == 60, "shield absorbs first")
+	_assert(h.shield == 0 and h.current_hp == 60, "shield absorbs first")
 
 	h.take_damage(100)
 
@@ -762,7 +762,7 @@ func _test_health_component_isolation() -> void:
 
 	_assert(h.heal(50) == 0, "no heal on dead")
 
-	_assert(h.health.current_hp == 0, "HP остался 0")
+	_assert(h.current_hp == 0, "HP остался 0")
 
 
 
