@@ -39,7 +39,7 @@ static func randi_range(from: int, to: int) -> int:
 
 ## Возвращает true с вероятностью chance (0.0..1.0).
 static func chance(chance: float) -> bool:
-	return randf() < chance
+	return Rng.randf() < chance
 
 
 ## Возвращает случайный элемент массива (или null если пустой).
@@ -50,9 +50,15 @@ static func pick(arr: Array) -> Variant:
 
 
 ## Возвращает массив длиной count из уникальных элементов arr (без повторов).
+## Детерминировано: Fisher-Yates через Rng.randf (НЕ использует Array.shuffle()).
 static func pick_unique(arr: Array, count: int) -> Array:
 	var pool: Array = arr.duplicate()
-	pool.shuffle()
+	# Fisher-Yates shuffle через seeded Rng.
+	for i in range(pool.size() - 1, 0, -1):
+		var j: int = int(Rng.randf() * float(i + 1))
+		var tmp: Variant = pool[i]
+		pool[i] = pool[j]
+		pool[j] = tmp
 	var n: int = mini(count, pool.size())
 	return pool.slice(0, n)
 

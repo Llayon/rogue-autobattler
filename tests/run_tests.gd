@@ -217,6 +217,8 @@ func _initialize() -> void:
 	_test_encounter_map_first_layer_is_combat()
 	_test_encounter_map_choose_next_basic()
 	_test_encounter_map_choose_invalid()
+	_test_encounter_map_strict_determinism_100_seeds()
+	_test_rng_pick_unique_determinism()
 
 	print("\n=== Result: %d passed, %d failed ===\n" % [_passed, _failed])
 
@@ -2466,6 +2468,44 @@ func _test_encounter_map_choose_invalid() -> void:
 	map.start_run()
 	var ok: bool = map.choose_next(99999)
 	_assert(ok == false, "invalid_id → false")
+
+
+func _test_encounter_map_strict_determinism_100_seeds() -> void:
+	print("[test] S5.1: STRICT determinism — 100 seed'ов дают идентичную карту при повторе")
+	# Первый прогон: сохраняем fingerprint каждой карты.
+	var fingerprints: Dictionary = {}
+	for seed_value in range(100):
+		Rng.seed_run(seed_value)
+		var map = EncounterMapScript.new()
+		map.generate(seed_value)
+		# Fingerprint: типы на каждом слое + parent/child связи.
+		var fp: String = ""
+		for n in map.get_all_nodes():
+			fp += "%d:%d:%d:%s;" % [n.id, n.depth, n.type, str(n.parent_ids) + "->" + str(n.child_ids)]
+		fingerprints[seed_value] = fp
+	# Второй прогон: проверяем идентичность.
+	for seed_value in range(100):
+		Rng.seed_run(seed_value)
+		var map = EncounterMapScript.new()
+		map.generate(seed_value)
+		var fp: String = ""
+		for n in map.get_all_nodes():
+			fp += "%d:%d:%d:%s;" % [n.id, n.depth, n.type, str(n.parent_ids) + "->" + str(n.child_ids)]
+		_assert(fingerprints[seed_value] == fp,
+			"seed %d: карта изменилась между прогонами" % seed_value)
+
+
+func _test_rng_pick_unique_determinism() -> void:
+	print("[test] S5.1: Rng.pick_unique — детерминизм через Rng.* методы (НЕ Array.shuffle)")
+	# pick_unique использует pool.shuffle() который НЕ seeded — этот тест
+	# проверяет наш текущий баг и должен FAIL пока мы не починим Rng.
+	Rng.seed_run(42)
+	var arr: Array = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+	var pick1: Array = Rng.pick_unique(arr, 5)
+	Rng.seed_run(42)
+	var pick2: Array = Rng.pick_unique(arr, 5)
+	_assert(pick1 == pick2,
+		"Rng.pick_unique детерминизм (got %s vs %s)" % [str(pick1), str(pick2)])
 
 
 
