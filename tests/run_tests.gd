@@ -66,6 +66,10 @@ const RewardScreenScript = preload("res://core/progression/reward_screen.gd")
 const MainSceneScript = preload("res://scenes/main.gd")
 const BattleSceneScript = preload("res://scenes/battle/battle_scene.gd")
 const BattleViewScript = preload("res://scenes/battle/battle_view.gd")
+# S5.1: encounter map
+const EncounterTypeScript = preload("res://core/encounter/encounter_type.gd")
+const EncounterNodeScript = preload("res://core/encounter/encounter_node.gd")
+const EncounterMapScript = preload("res://core/encounter/encounter_map.gd")
 
 
 
@@ -202,6 +206,17 @@ func _initialize() -> void:
 	_test_combatant_move_to_with_anim()
 	_test_battle_runner_ticks_visual_state()
 	_test_battle_runner_removes_faded_combatants()
+	# S5.1: encounter map
+	_test_encounter_node_basic()
+	_test_encounter_type_enum_values()
+	_test_encounter_type_is_combat()
+	_test_encounter_type_display_name()
+	_test_encounter_map_generate_structure()
+	_test_encounter_map_determinism()
+	_test_encounter_map_boss_at_layer_10()
+	_test_encounter_map_first_layer_is_combat()
+	_test_encounter_map_choose_next_basic()
+	_test_encounter_map_choose_invalid()
 
 	print("\n=== Result: %d passed, %d failed ===\n" % [_passed, _failed])
 
@@ -2319,6 +2334,138 @@ func _test_battle_runner_removes_faded_combatants() -> void:
 			found = true
 			break
 	_assert(not found, "combatant удалён из ctx.combatant_registry")
+
+
+# === S5.1: Encounter map core ===
+
+func _test_encounter_node_basic() -> void:
+	print("[test] S5.1: EncounterNode — basic fields")
+	var node = EncounterNodeScript.new(1, EncounterTypeScript.Kind.COMBAT, 1)
+	_assert(node.id == 1, "id = 1")
+	_assert(node.type == EncounterTypeScript.Kind.COMBAT, "type = COMBAT")
+	_assert(node.depth == 1, "depth = 1 (round_index)")
+	_assert(node.parent_ids.is_empty(), "parent_ids пуст (root)")
+	_assert(node.child_ids.is_empty(), "child_ids пуст (leaf)")
+	_assert(node.visited == false, "visited = false init")
+	_assert(node.is_combat() == true, "is_combat = true для COMBAT")
+
+
+func _test_encounter_type_enum_values() -> void:
+	print("[test] S5.1: EncounterType enum имеет все 8 типов")
+	var types: Array[int] = [
+		EncounterTypeScript.Kind.COMBAT,
+		EncounterTypeScript.Kind.ELITE,
+		EncounterTypeScript.Kind.HEAL,
+		EncounterTypeScript.Kind.TREASURE,
+		EncounterTypeScript.Kind.MERCHANT,
+		EncounterTypeScript.Kind.REST,
+		EncounterTypeScript.Kind.SHRINE,
+		EncounterTypeScript.Kind.BOSS,
+	]
+	_assert(types.size() == 8, "8 типов (got %d)" % types.size())
+	# Все должны быть разные int.
+	for i in types.size():
+		for j in range(i + 1, types.size()):
+			_assert(types[i] != types[j],
+				"типы уникальны (%d vs %d)" % [types[i], types[j]])
+
+
+func _test_encounter_type_is_combat() -> void:
+	print("[test] S5.1: EncounterType.is_combat() правильно классифицирует")
+	_assert(EncounterTypeScript.is_combat(EncounterTypeScript.Kind.COMBAT) == true, "COMBAT is combat")
+	_assert(EncounterTypeScript.is_combat(EncounterTypeScript.Kind.ELITE) == true, "ELITE is combat")
+	_assert(EncounterTypeScript.is_combat(EncounterTypeScript.Kind.BOSS) == true, "BOSS is combat")
+	_assert(EncounterTypeScript.is_combat(EncounterTypeScript.Kind.HEAL) == false, "HEAL NOT combat")
+	_assert(EncounterTypeScript.is_combat(EncounterTypeScript.Kind.TREASURE) == false, "TREASURE NOT combat")
+	_assert(EncounterTypeScript.is_combat(EncounterTypeScript.Kind.REST) == false, "REST NOT combat")
+
+
+func _test_encounter_type_display_name() -> void:
+	print("[test] S5.1: EncounterType.display_name()")
+	_assert(EncounterTypeScript.display_name(EncounterTypeScript.Kind.COMBAT) == "Combat", "Combat")
+	_assert(EncounterTypeScript.display_name(EncounterTypeScript.Kind.BOSS) == "Boss", "Boss")
+	_assert(EncounterTypeScript.display_name(EncounterTypeScript.Kind.HEAL) == "Heal", "Heal")
+
+
+func _test_encounter_map_generate_structure() -> void:
+	print("[test] S5.1: EncounterMap.generate(seed) создаёт валидный граф")
+	Rng.seed_run(42)
+	var map = EncounterMapScript.new()
+	map.generate(42)
+	var nodes: Array = map.get_all_nodes()
+	_assert(nodes.size() >= 10, ">= 10 нодов (got %d)" % nodes.size())
+	# Каждый слой depth=1..10 должен иметь хотя бы 1 нод.
+	for d in 10:
+		var has_at_depth: bool = false
+		for n in nodes:
+			if n.depth == d + 1:
+				has_at_depth = true
+				break
+		_assert(has_at_depth, "слой %d имеет хотя бы 1 нод" % (d + 1))
+	_assert(map.is_valid(), "is_valid() = true")
+
+
+func _test_encounter_map_determinism() -> void:
+	print("[test] S5.1: тот же seed = та же карта (детерминизм)")
+	Rng.seed_run(100)
+	var m1 = EncounterMapScript.new()
+	m1.generate(100)
+	Rng.seed_run(100)
+	var m2 = EncounterMapScript.new()
+	m2.generate(100)
+	var types1: Array = m1.get_layer_types()
+	var types2: Array = m2.get_layer_types()
+	_assert(types1 == types2,
+		"детерминизм: тот же seed → те же типы (got %s vs %s)" % [str(types1), str(types2)])
+
+
+func _test_encounter_map_boss_at_layer_10() -> void:
+	print("[test] S5.1: Boss находится на слое 10")
+	Rng.seed_run(777)
+	var map = EncounterMapScript.new()
+	map.generate(777)
+	var boss_count: int = 0
+	for n in map.get_all_nodes():
+		if n.type == EncounterTypeScript.Kind.BOSS:
+			_assert(n.depth == 10, "boss на depth=10 (got %d)" % n.depth)
+			boss_count += 1
+	_assert(boss_count >= 1, "хотя бы 1 boss (got %d)" % boss_count)
+
+
+func _test_encounter_map_first_layer_is_combat() -> void:
+	print("[test] S5.1: слой 1 — только combat (стартовый набор)")
+	Rng.seed_run(42)
+	var map = EncounterMapScript.new()
+	map.generate(42)
+	for n in map.get_layer_nodes(1):
+		_assert(n.type == EncounterTypeScript.Kind.COMBAT,
+			"слой 1 = COMBAT (got %s)" % EncounterTypeScript.display_name(n.type))
+
+
+func _test_encounter_map_choose_next_basic() -> void:
+	print("[test] S5.1: EncounterMap.choose_next(id) переходит по графу")
+	Rng.seed_run(123)
+	var map = EncounterMapScript.new()
+	map.generate(123)
+	var first_id: int = map.start_run()
+	_assert(first_id >= 0, "start_run вернул id")
+	_assert(map.get_current_node_id() == first_id, "current = first_id")
+	var available: Array = map.get_available_next_ids()
+	_assert(not available.is_empty(), "есть available ноды")
+	var next_id: int = available[0]
+	var ok: bool = map.choose_next(next_id)
+	_assert(ok, "choose_next вернул true")
+	_assert(map.get_current_node_id() == next_id, "current обновился")
+
+
+func _test_encounter_map_choose_invalid() -> void:
+	print("[test] S5.1: choose_next(invalid_id) → false")
+	Rng.seed_run(42)
+	var map = EncounterMapScript.new()
+	map.generate(42)
+	map.start_run()
+	var ok: bool = map.choose_next(99999)
+	_assert(ok == false, "invalid_id → false")
 
 
 
