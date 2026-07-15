@@ -36,18 +36,29 @@ RULES = [
     # Ловит: c.current_hp / c.defense / c.attack без скобок.
     # Не ловит: c.health.current_hp (есть . перед current_hp),
     #           c.defense() (есть скобка после),
+    #           c.attack_range / c.attack_speed (field, не method — \b после attack),
     #           def.defense = 0 (присваивание, не чтение),
     #           @export var defense = 0.
+    #
+    # Используем \b после field name чтобы не ловить attack_range/attack_speed (поля).
+    # Negative lookahead (?![\w\(=\.\[]) требует чтобы следующий символ НЕ был:
+    #   word char (т.е. не часть identifier), `(`, `=`, `.`, `[`
     {
         "id": "combatant-callable-as-field",
-        "pattern": re.compile(r"(?<![\w\.])(c|t|target|attacker|defender|source)\.(current_hp|defense|attack|attack_speed|move_speed|magic_resist|attack_range|defense_base|magic_power_base)(?!\s*\(|\s*[\.\[]|\s*=|\s*$)"),
+        "pattern": re.compile(
+            r"(?<![\w\.])(c|t|target|attacker|defender|source)"
+            r"\.(attack|defense|magic_resist|current_hp)"
+            r"(?![\w\(=\.\[])"
+        ),
         "message": "Combatant.{1}() is a method, not a property. After refactor: c.health.current_hp / c.defense() / c.attack() etc.",
         "severity": "error",
         "exclude_paths": ["tests/", "core/battle/combatant.gd", "core/data/unit_def.gd"],
     },
     {
         "id": "combatant-magic-power-field",
-        "pattern": re.compile(r"(?<![\w\.])\w+\.magic_power\b(?!_base|\s*\()"),
+        # magic_power — это поле UnitDef, не Combatant. Ловим обращение в Combatant-контексте.
+        # Negative lookahead: НЕ magic_power_base (Combatant field), НЕ метод (().
+        "pattern": re.compile(r"(?<![\w\.])combatant\.magic_power\b(?!_base|\s*\(|\s*=)"),
         "message": "Combatant поле называется magic_power_base, не magic_power. See {0}",
         "severity": "error",
         "exclude_paths": ["core/data/unit_def.gd", "content/"],
