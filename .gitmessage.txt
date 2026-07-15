@@ -1,0 +1,23 @@
+# <type>(<scope>): <short description>
+#
+# TYPE: feat | fix | chore | test | docs | refactor | perf
+# SCOPE: lowercase sprint/version (s3.1, s3.1.5, s5.1) or area (rng, ui, core, content)
+# SUBJECT: ≤72 chars, imperative mood ("add" not "added"), no period, lowercase
+#
+# Example: feat(s3.1.5): RunController grants meta unlock on win
+#
+# --- COMMIT BODY (optional, recommended for non-trivial changes) ---
+# Why:
+# - motivation behind this change
+#
+# What:
+# - concrete files/areas changed
+#
+# Verification:
+# - tests run, manual checks, smoke results
+#
+# Risks:
+# - follow-up concerns, monitoring needed
+# --- END ---
+#
+# Lines starting with '#' are ignored. Write your message above this line.
