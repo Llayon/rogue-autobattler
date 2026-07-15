@@ -183,6 +183,10 @@ func _initialize() -> void:
 	_test_run_state_unit_states_default_empty()
 	# S5.4 Task 1: start_run initializes unit_states
 	_test_run_controller_start_run_initializes_unit_states()
+	# S5.4 Task 2: HEAL actually heals unit_states.current_hp
+	_test_run_controller_heal_effect_heals_unit_states()
+	# S5.4 Task 2: REST heals current_hp AND keeps bonus_attack for next battle
+	_test_run_controller_rest_effect_heals_unit_states()
 	_test_run_controller_resume_run()
 	_test_run_controller_resume_run_no_save()
 	_test_run_controller_resume_run_signal()
@@ -2918,3 +2922,54 @@ func _test_run_controller_start_run_initializes_unit_states() -> void:
 		var id: StringName = ctrl.state.player_unit_ids[i]
 		_assert(us.unit_id == id, "unit_id[%d] = %s" % [i, id])
 	_cleanup_ctrl(ctrl)
+
+
+func _test_run_controller_heal_effect_heals_unit_states() -> void:
+	print("[test] S5.4: HEAL adds hp_ratio * max_hp additively to current_hp")
+	var ctrl: Node = RunControllerScript.new()
+	get_root().add_child.call_deferred(ctrl)
+	await process_frame
+	ctrl.start_run(42)
+	ctrl._enter_map()
+	# Set current_hp = 1 (minimal) so delta is unambiguous.
+	for us in ctrl.state.unit_states:
+		us.current_hp = 1
+	var before: Array = []
+	for us in ctrl.state.unit_states:
+		before.append(us.current_hp)
+	var heal_node = EncounterNodeScript.new(110, EncounterTypeScript.Kind.HEAL, 1)
+	ctrl._apply_service_effect(heal_node)
+	for i in ctrl.state.unit_states.size():
+		var us = ctrl.state.unit_states[i]
+		var expected_delta: int = int(round(float(us.max_hp) * BalanceScript.MAP_HEAL_HP_RATIO))
+		var actual_delta: int = us.current_hp - before[i]
+		_assert(actual_delta == expected_delta,
+			"HEAL delta = max_hp * 0.4 = %d (got %d, max_hp=%d)" % [expected_delta, actual_delta, us.max_hp])
+	_assert(ctrl.state.lives == BalanceScript.STARTING_LIVES + 1,
+		"lives +1 (got %d)" % ctrl.state.lives)
+	_cleanup_ctrl(ctrl)
+
+
+func _test_run_controller_rest_effect_heals_unit_states() -> void:
+	print("[test] S5.4: REST adds 50% of max_hp (more than HEAL's 40%)")
+	var ctrl: Node = RunControllerScript.new()
+	get_root().add_child.call_deferred(ctrl)
+	await process_frame
+	ctrl.start_run(42)
+	ctrl._enter_map()
+	for us in ctrl.state.unit_states:
+		us.current_hp = 1
+	var before: Array = []
+	for us in ctrl.state.unit_states:
+		before.append(us.current_hp)
+	var rest_node = EncounterNodeScript.new(111, EncounterTypeScript.Kind.REST, 1)
+	ctrl._apply_service_effect(rest_node)
+	for i in ctrl.state.unit_states.size():
+		var us = ctrl.state.unit_states[i]
+		var expected_delta: int = int(round(float(us.max_hp) * BalanceScript.MAP_REST_HP_RATIO))
+		var actual_delta: int = us.current_hp - before[i]
+		_assert(actual_delta == expected_delta,
+			"REST delta = max_hp * 0.5 = %d (got %d)" % [expected_delta, actual_delta])
+	_cleanup_ctrl(ctrl)
+
+

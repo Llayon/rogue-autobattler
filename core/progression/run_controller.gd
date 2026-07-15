@@ -16,7 +16,8 @@ const GridScript = preload("res://core/battle/grid.gd")
 const BalanceScript = preload("res://core/balance.gd")
 const EncounterMapScript = preload("res://core/encounter/encounter_map.gd")
 const EncounterTypeScript = preload("res://core/encounter/encounter_type.gd")
-const RunUnitStateScript = preload("res://core/progression/run_unit_state.gd")
+# S5.4: RunUnitState имеет class_name — ссылаемся напрямую, без const.
+# const RunUnitStateScript = preload("res://core/progression/run_unit_state.gd")
 
 var state: RunState = RunState.new()
 var shop: Shop = Shop.new()
@@ -57,7 +58,7 @@ func start_run(seed_value: int = 0) -> void:
 	for id in state.player_unit_ids:
 		var def: Resource = ContentDB_static.get_by_id(id)
 		var max_hp: int = def.max_hp if def != null else 100
-		state.unit_states.append(RunUnitStateScript.new(id, max_hp, -1))
+		state.unit_states.append(RunUnitState.new(id, max_hp, -1))
 	_set_phase(Phase.PREP)
 	_refresh_shop()
 	run_started.emit()
@@ -378,22 +379,18 @@ func _apply_service_effect(node) -> void:
 
 ## HEAL: восстанавливает HP-ratio всем юнитам + 1 жизнь (cap).
 func _apply_heal_effect() -> void:
-	var heal_amount: int = int(round(BalanceScript.MAP_HEAL_HP_RATIO * 100.0))
-	# HP восстанавливается напрямую на max_hp ratio (текущий hp + ratio * max_hp, capped).
+	# HEAL: hp + 40% от max_hp, additive поверх current_hp.
 	for id in state.player_unit_ids:
 		var def: Resource = ContentDB_static.get_by_id(id)
 		if def == null:
 			continue
-		var max_hp: int = def.max_hp
-		# Healed = ratio * max_hp (от max, не от текущего — упрощение).
-		var hp_now: int = _get_player_unit_hp(id)
-		var new_hp: int = mini(max_hp, hp_now + int(round(float(max_hp) * BalanceScript.MAP_HEAL_HP_RATIO)))
-		_set_player_unit_hp(id, new_hp)
+		var heal_amount: int = int(round(float(def.max_hp) * BalanceScript.MAP_HEAL_HP_RATIO))
+		_heal_unit_state(id, heal_amount)
 	# +1 жизнь cap = STARTING_LIVES * 2 (можно перенести в Balance).
 	state.lives = mini(state.lives + 1, BalanceScript.STARTING_LIVES * 2)
 	GameBus.emit_lives_changed(state.lives)
 	GameLog.info("run", "HEAL: restored HP + 1 life",
-		{"heal_amount": heal_amount, "lives": state.lives})
+		{"hp_ratio": BalanceScript.MAP_HEAL_HP_RATIO, "lives": state.lives})
 
 
 ## TREASURE: +gold + 1 meta unlock юнита.
@@ -419,11 +416,9 @@ func _apply_rest_effect() -> void:
 		var def: Resource = ContentDB_static.get_by_id(id)
 		if def == null:
 			continue
-		var max_hp: int = def.max_hp
-		var new_hp: int = mini(max_hp,
-			int(round(float(max_hp) * BalanceScript.MAP_REST_HP_RATIO)))
-		_set_player_unit_hp(id, new_hp)
-		# +attack bonus — модифицируем State (для трекинга), не Resource.
+		var heal_amount: int = int(round(float(def.max_hp) * BalanceScript.MAP_REST_HP_RATIO))
+		_heal_unit_state(id, heal_amount)
+	# +attack bonus — модифицируем State (для трекинга), не Resource.
 	state.meta_modifiers["rest_attack_bonus"] = int(state.meta_modifiers.get("rest_attack_bonus", 0)) + BalanceScript.MAP_REST_ATTACK_BONUS
 	GameLog.info("run", "REST",
 		{"hp_restore_pct": BalanceScript.MAP_REST_HP_RATIO,
@@ -448,10 +443,8 @@ func _apply_shrine_effect() -> void:
 				var def: Resource = ContentDB_static.get_by_id(id)
 				if def == null:
 					continue
-				var max_hp: int = def.max_hp
-				var new_hp: int = mini(int(round(float(max_hp) * 1.5)),
-					int(round(float(max_hp) * BalanceScript.MAP_SHRINE_HP_BONUS / 100.0 + _get_player_unit_hp(id))))
-				_set_player_unit_hp(id, new_hp)
+				var heal_amount: int = maxi(1, int(round(float(def.max_hp) * BalanceScript.MAP_SHRINE_HP_BONUS / 100.0)))
+				_heal_unit_state(id, heal_amount)
 			GameLog.info("run", "SHRINE: HP +%d" % BalanceScript.MAP_SHRINE_HP_BONUS)
 		_:
 			# +attack (мультик) — увеличиваем meta_modifiers
@@ -459,17 +452,48 @@ func _apply_shrine_effect() -> void:
 			GameLog.info("run", "SHRINE: attack +%d" % BalanceScript.MAP_SHRINE_ATTACK_BONUS)
 
 
-## S5.3: получить HP игрока. Упрощение — возвращает max_hp (по факту мы
-## не отслеживаем HP на уровне state, Combatant хранит в бою). Heal работает
-## относительно max_hp, что означает "исцеление на MAP возвращает к max".
-func _get_player_unit_hp(_id: StringName) -> int:
-	return 0
+## S5.4: получить HP игрока из unit_states. -1 sentinel (not yet initialized) → max_hp.
+func _get_player_unit_hp(id: StringName) -> int:
+	var us = _find_unit_state(id)
+	if us == null:
+		var def: Resource = ContentDB_static.get_by_id(id)
+		return def.max_hp if def != null else 100
+	return us.effective_hp()
 
 
-## S5.3: установить HP игрока (для тестов и эффектов). В v1 — no-op,
-## эффекты работают в относительных терминах.
-func _set_player_unit_hp(_id: StringName, _new_hp: int) -> void:
-	pass
+## S5.4: установить HP игрока в unit_states. current_hp = -1 (sentinel) → используем max_hp как fallback.
+func _set_player_unit_hp(id: StringName, new_hp: int) -> void:
+	var us = _find_unit_state(id)
+	if us == null:
+		# Юнит не в unit_states (например, добавлен после start_run). Создаём entry.
+		var def: Resource = ContentDB_static.get_by_id(id)
+		var max_hp: int = def.max_hp if def != null else 100
+		us = RunUnitState.new(id, max_hp, new_hp)
+		state.unit_states.append(us)
+	else:
+		us.current_hp = new_hp
+
+
+## S5.4: helper — найти RunUnitState по unit_id, или null если не найден.
+func _find_unit_state(id: StringName) -> RunUnitState:
+	for us in state.unit_states:
+		if us.unit_id == id:
+			return us
+	return null
+
+
+## S5.4: применить heal к unit_state (или max_hp если current_hp == -1 sentinel).
+func _heal_unit_state(id: StringName, heal_amount: int) -> int:
+	var us = _find_unit_state(id)
+	if us == null:
+		return 0
+	if us.current_hp <= 0:
+		return 0  # мёртвые не хилируются
+	if us.max_hp <= 0:
+		return 0
+	var actual_heal: int = mini(us.max_hp - us.current_hp, heal_amount)
+	us.current_hp = mini(us.max_hp, us.current_hp + heal_amount)
+	return actual_heal
 
 
 ## S5.3: вызывается из _on_battle_ended() после REWARD.
