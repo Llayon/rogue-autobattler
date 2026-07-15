@@ -62,6 +62,10 @@ const BattleRunnerScriptForCtrl = preload("res://core/battle/battle_runner.gd")
 const BattleStateScriptForCtrl = preload("res://core/battle/battle_state.gd")
 const UnitsMetaScript = preload("res://core/data/units_meta.gd")
 const RewardScreenScript = preload("res://core/progression/reward_screen.gd")
+# S4.1: scene scripts
+const MainSceneScript = preload("res://scenes/main.gd")
+const BattleSceneScript = preload("res://scenes/battle/battle_scene.gd")
+const BattleViewScript = preload("res://scenes/battle/battle_view.gd")
 
 
 
@@ -174,6 +178,14 @@ func _initialize() -> void:
 	_test_run_controller_resume_run()
 	_test_run_controller_resume_run_no_save()
 	_test_run_controller_resume_run_signal()
+	# S4.1: scene smoke tests
+	_test_main_scene_parses()
+	_test_main_scene_tscn_loads()
+	_test_battle_scene_extends_control()
+	_test_battle_scene_tscn_loads()
+	_test_battle_scene_eventbus_subscribe_no_crash()
+	_test_battle_view_extends_control()
+	_test_battle_view_with_real_context()
 
 	print("\n=== Result: %d passed, %d failed ===\n" % [_passed, _failed])
 
@@ -1448,6 +1460,17 @@ func _cleanup_ctrl(ctrl: Node) -> void:
 	await process_frame
 
 
+# === S4.1: helpers для scene smoke tests ===
+
+## Загружает .tscn как PackedScene и инстанцирует.
+## Возвращает Node или null если путь битый.
+func _instantiate_scene(packed_path: String) -> Node:
+	var packed: PackedScene = load(packed_path) as PackedScene
+	if packed == null:
+		return null
+	return packed.instantiate()
+
+
 # === S3.1.5 Reward screen ===
 
 func _test_units_meta_all_units() -> void:
@@ -1891,6 +1914,90 @@ func _test_run_controller_resume_run_signal() -> void:
 	_assert(ctrl.state.round_index == 1, "state.round_index = 1 (start state) (got %d)" % ctrl.state.round_index)
 	SaveService.delete_run(321)
 	_cleanup_ctrl(ctrl)
+
+
+# === S4.1: scene smoke tests ===
+
+func _test_main_scene_parses() -> void:
+	print("[test] S4.1: main.gd extends Node и парсится")
+	var script: GDScript = MainSceneScript as GDScript
+	_assert(script != null, "main.gd загружается как GDScript")
+	var inst: Node = MainSceneScript.new()
+	_assert(inst != null, "main.gd.new() инстанцируется")
+	_assert(inst is Node, "instance это Node (для add_child)")
+	_assert(inst.has_method("_ready"), "_ready() определён")
+	inst.free()
+
+
+func _test_main_scene_tscn_loads() -> void:
+	print("[test] S4.1: main.tscn грузится через PackedScene")
+	var node: Node = _instantiate_scene("res://scenes/main.tscn")
+	_assert(node != null, "main.tscn инстанцируется без ошибок")
+	if node != null:
+		_assert(node is Node, "main.tscn root = Node")
+		node.free()
+
+
+func _test_battle_scene_extends_control() -> void:
+	print("[test] S4.1: battle_scene.gd extends Control (для _draw/queue_redraw)")
+	var inst: Node = BattleSceneScript.new()
+	_assert(inst is Control, "battle_scene это Control (got %s)" % str(typeof(inst)))
+	_assert(inst.has_method("_ready"), "_ready() определён")
+	_assert(inst.has_method("_process"), "_process() определён")
+	inst.free()
+
+
+func _test_battle_scene_tscn_loads() -> void:
+	print("[test] S4.1: battle_scene.tscn грузится через PackedScene")
+	var node: Node = _instantiate_scene("res://scenes/battle/battle_scene.tscn")
+	_assert(node != null, "battle_scene.tscn инстанцируется без ошибок")
+	if node != null:
+		_assert(node is Control, "battle_scene.tscn root = Control")
+		node.free()
+
+
+func _test_battle_scene_eventbus_subscribe_no_crash() -> void:
+	print("[test] S4.1: BattleScene add_child без EventBus не падает")
+	var scene: Control = BattleSceneScript.new()
+	get_root().add_child.call_deferred(scene)
+	await process_frame
+	_assert(is_instance_valid(scene), "scene жив после add_child")
+	if is_instance_valid(scene):
+		_assert(scene.run_controller != null, "run_controller создан в _ready()")
+		_assert(scene.battle_view != null, "battle_view создан в _ready()")
+		_assert(scene.status_label != null, "status_label создан в _ready()")
+		_assert(scene.battle_view is Control, "battle_view extends Control")
+		# Bus может быть null в headless тестах — должно быть обработано.
+		if scene._bus == null:
+			_assert(scene._find_event_bus() == null, "_find_event_bus() null-safe")
+		scene.queue_free()
+	await process_frame
+
+
+func _test_battle_view_extends_control() -> void:
+	print("[test] S4.1: BattleView extends Control + set_context() null-safe")
+	var view: Control = BattleViewScript.new()
+	_assert(view is Control, "BattleView extends Control (для _draw)")
+	_assert(view.has_method("set_context"), "set_context() существует")
+	_assert(view.has_method("_draw"), "_draw() существует (визуализатор)")
+	view.set_context(null)  # null-safe не должно падать
+	_assert(view._ctx == null, "ctx = null после set_context(null)")
+	view.free()
+
+
+func _test_battle_view_with_real_context() -> void:
+	print("[test] S4.1: BattleView.set_context(real ctx) + queue_redraw() smoke")
+	var ctx = BattleContextScript.new()
+	var g = GridScript.new()
+	g.resize(7, 4)
+	ctx.grid = g
+	var view: Control = BattleViewScript.new()
+	view.set_context(ctx)
+	view.queue_redraw()
+	_assert(view._ctx == ctx, "ctx сохранён в view")
+	_assert(view._ctx.grid.width() == 7, "grid.width() = 7 через view._ctx (got %d)" % view._ctx.grid.width())
+	_assert(view._ctx.grid.height() == 4, "grid.height() = 4 через view._ctx (got %d)" % view._ctx.grid.height())
+	view.free()
 
 
 
