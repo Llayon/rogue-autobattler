@@ -163,6 +163,10 @@ func _initialize() -> void:
 	_test_run_controller_meta_unlock_on_win()
 	_test_run_controller_no_unlock_on_defeat()
 	_test_meta_save_roundtrip()
+	# S3.3: save/load
+	_test_meta_profile_current_run_seed()
+	_test_save_service_has_run_and_list()
+	_test_save_service_get_current_run_seed()
 
 	print("\n=== Result: %d passed, %d failed ===\n" % [_passed, _failed])
 
@@ -1694,6 +1698,51 @@ func _test_meta_save_roundtrip() -> void:
 	_assert(loaded != null, "load_meta не null")
 	_assert(loaded.unlocked_units.has(&"mage"), "mage в unlocked после load")
 	_assert(loaded.unlocked_units.has(&"paladin"), "paladin в unlocked после load")
+
+
+# === S3.3 Save/Load в середине рана ===
+
+func _test_meta_profile_current_run_seed() -> void:
+	print("[test] S3.3: MetaProfile.current_run_seed поле")
+	var p: MetaProfile = MetaProfileScript.new()
+	_assert(p.current_run_seed == 0, "по умолчанию current_run_seed = 0 (got %d)" % p.current_run_seed)
+	p.current_run_seed = 12345
+	_assert(p.current_run_seed == 12345, "set/get roundtrip (got %d)" % p.current_run_seed)
+
+
+func _test_save_service_has_run_and_list() -> void:
+	print("[test] S3.3: SaveService.has_run + delete_run")
+	var rs: RunState = RunStateScript.new()
+	rs.seed = 42
+	rs.gold = 50
+	rs.round_index = 3
+	var ok: bool = SaveService.save_run(rs)
+	_assert(ok, "save_run(42) ok")
+	_assert(SaveService.has_run(42), "has_run(42) = true")
+	_assert(not SaveService.has_run(99999), "has_run(99999) = false (no save)")
+	_assert(not SaveService.has_run(0), "has_run(0) = false (sentinel)")
+	var list: Array[int] = SaveService.list_runs()
+	_assert(list.has(42), "list_runs содержит 42 (got %s)" % str(list))
+	var deleted: bool = SaveService.delete_run(42)
+	_assert(deleted, "delete_run(42) = true")
+	_assert(not SaveService.has_run(42), "после delete has_run(42) = false")
+	_assert(SaveService.delete_run(42) == false, "повторный delete = false")
+
+
+func _test_save_service_get_current_run_seed() -> void:
+	print("[test] S3.3: SaveService.get_current_run_seed + has_active_run")
+	var p: MetaProfile = MetaProfileScript.new()
+	_assert(SaveService.get_current_run_seed(p) == 0, "пустой профиль → 0")
+	p.current_run_seed = 777
+	_assert(SaveService.get_current_run_seed(p) == 777, "current_run_seed=777 → return 777")
+	_assert(SaveService.has_active_run(p) == false, "has_active_run = false (no file)")
+	# Save actual run.
+	var rs: RunState = RunStateScript.new()
+	rs.seed = 777
+	var ok2: bool = SaveService.save_run(rs)
+	_assert(ok2, "save_run(777) ok")
+	_assert(SaveService.has_active_run(p) == true, "has_active_run = true (file exists)")
+	SaveService.delete_run(777)
 
 
 

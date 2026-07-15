@@ -19,6 +19,11 @@ const SAVE_VERSION: int = 1
 # Мета-валюта.
 @export var soul_currency: int = 0
 
+# S3.3: pointer на текущий активный ран. 0 = нет активного.
+# Устанавливается при save_run, сбрасывается на _end_run.
+# Один активный ран в момент времени — singleplayer roguelike pattern.
+@export var current_run_seed: int = 0
+
 # Настройки.
 @export var battle_speed: float = 1.0   # 1.0 / 2.0 / 4.0
 @export var show_damage_numbers: bool = true
@@ -34,6 +39,7 @@ func to_dict() -> Dictionary:
 		"best_round": best_round,
 		"total_units_killed": total_units_killed,
 		"soul_currency": soul_currency,
+		"current_run_seed": current_run_seed,
 		"battle_speed": battle_speed,
 		"show_damage_numbers": show_damage_numbers,
 	}
