@@ -4,6 +4,7 @@ extends Control
 
 const RUN_CONTROLLER_SCRIPT: GDScript = preload("res://core/progression/run_controller.gd")
 const BATTLE_VIEW_SCRIPT: GDScript = preload("res://scenes/battle/battle_view.gd")
+const ENCOUNTER_MAP_SCENE_SCRIPT: GDScript = preload("res://scenes/encounter/encounter_map_scene.gd")
 const BalanceScript: GDScript = preload("res://core/balance.gd")
 
 var run_controller: Node
@@ -20,6 +21,8 @@ var summary_label: Label = null
 var _summary_pending: bool = false
 var speed: float = 1.0
 var _bus: Node = null  # EventBus instance (autoload) или локальный
+# === S5.3: encounter map overlay on MAP phase ===
+var encounter_map_scene: Control = null
 
 
 func _ready() -> void:
@@ -38,6 +41,8 @@ func _ready() -> void:
 	run_controller = RUN_CONTROLLER_SCRIPT.new()
 	run_controller.name = "RunController"
 	add_child(run_controller)
+	# S5.3: encounter map overlay.
+	_build_encounter_map_overlay()
 	# EventBus.
 	_bus = _find_event_bus()
 	if _bus != null:
@@ -45,6 +50,9 @@ func _ready() -> void:
 		_bus.unit_died.connect(_on_unit_died)
 		_bus.round_started.connect(_on_round_started)
 		_bus.gold_changed.connect(_on_gold_changed)
+	# Подписываемся на phase_changed для show/hide encounter map.
+	if run_controller.has_signal("phase_changed"):
+		run_controller.phase_changed.connect(_on_run_phase_changed)
 	# Начинаем ран.
 	run_controller.start_run(42)
 	_refresh_hud()
@@ -195,3 +203,29 @@ func _on_unit_died(_c) -> void:
 
 func _on_round_started(_round: int) -> void:
 	_refresh_hud()
+
+
+# === S5.3: encounter map overlay ===
+
+## Создает encounter_map_scene, лежит поверх battle_view, скрыт initial.
+func _build_encounter_map_overlay() -> void:
+	encounter_map_scene = ENCOUNTER_MAP_SCENE_SCRIPT.new()
+	encounter_map_scene.name = "EncounterMapOverlay"
+	encounter_map_scene.set_anchors_preset(Control.PRESET_FULL_RECT)
+	encounter_map_scene.visible = false
+	encounter_map_scene.mouse_filter = Control.MOUSE_FILTER_STOP
+	add_child(encounter_map_scene)
+
+
+## S5.3: реакция на phase_changed — показать encounter map на MAP phase.
+func _on_run_phase_changed(new_phase: int) -> void:
+	if encounter_map_scene == null or run_controller == null:
+		return
+	if new_phase == RUN_CONTROLLER_SCRIPT.Phase.MAP:
+		# Передать карту из контроллера в scene для отображения.
+		var map = run_controller.get_encounter_map()
+		if map != null:
+			encounter_map_scene.set_encounter_map(map)
+		encounter_map_scene.visible = true
+	else:
+		encounter_map_scene.visible = false

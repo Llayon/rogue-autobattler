@@ -240,6 +240,9 @@ func _initialize() -> void:
 	_test_run_controller_shrine_node_random_buff()
 	# S5.3: Phase flow win -> MAP
 	_test_run_controller_phase_flow_to_map()
+	# S5.3: BattleScene wiring for MAP phase
+	_test_battle_scene_has_encounter_map_view()
+	_test_battle_scene_shows_encounter_map_on_map_phase()
 
 	print("\n=== Result: %d passed, %d failed ===\n" % [_passed, _failed])
 
@@ -2843,3 +2846,49 @@ func _test_run_controller_phase_flow_to_map() -> void:
 		"skip_reward round 2 -> MAP (got %d)" % ctrl.phase)
 	_assert(ctrl.encounter_map != null, "encounter_map created on MAP entry")
 	_cleanup_ctrl(ctrl)
+
+
+func _test_battle_scene_has_encounter_map_view() -> void:
+	print("[test] S5.3: BattleScene создает EncounterMapScene при _ready")
+	var scene: Control = BattleSceneScript.new()
+	get_root().add_child.call_deferred(scene)
+	await process_frame
+	if not is_instance_valid(scene):
+		return
+	_assert(scene.encounter_map_scene != null,
+		"encounter_map_scene создан в _ready()")
+	_assert(scene.encounter_map_scene is Control,
+		"encounter_map_scene extends Control (got %s)" % str(typeof(scene.encounter_map_scene)))
+	# По умолчанию — скрыт.
+	_assert(scene.encounter_map_scene.visible == false,
+		"encounter_map_scene скрыт initial (got %s)" % str(scene.encounter_map_scene.visible))
+	scene.queue_free()
+	await process_frame
+
+
+func _test_battle_scene_shows_encounter_map_on_map_phase() -> void:
+	print("[test] S5.3: BattleScene показывает encounter map на MAP phase, скрывает на остальных")
+	var scene: Control = BattleSceneScript.new()
+	get_root().add_child.call_deferred(scene)
+	await process_frame
+	if not is_instance_valid(scene):
+		return
+	# PREP — скрыт.
+	scene.run_controller.start_run(42)
+	await process_frame
+	_assert(scene.encounter_map_scene.visible == false,
+		"encounter_map_scene скрыт на PREP (got %s)" % str(scene.encounter_map_scene.visible))
+	# Force MAP phase.
+	scene.run_controller._enter_map()
+	await process_frame
+	_assert(scene.encounter_map_scene.visible == true,
+		"encounter_map_scene показан на MAP (got %s)" % str(scene.encounter_map_scene.visible))
+	_assert(scene.encounter_map_scene.encounter_map == scene.run_controller.encounter_map,
+	"scene.encounter_map_scene получил encounter_map из RunController")
+	# Снова PREP — снова скрыт.
+	scene.run_controller._set_phase(0)
+	await process_frame
+	_assert(scene.encounter_map_scene.visible == false,
+	"encounter_map_scene снова скрыт на PREP (got %s)" % str(scene.encounter_map_scene.visible))
+	scene.queue_free()
+	await process_frame
