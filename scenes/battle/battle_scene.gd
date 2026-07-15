@@ -4,15 +4,24 @@ extends Control
 
 const RUN_CONTROLLER_SCRIPT: GDScript = preload("res://core/progression/run_controller.gd")
 const BATTLE_VIEW_SCRIPT: GDScript = preload("res://scenes/battle/battle_view.gd")
+const BalanceScript: GDScript = preload("res://core/balance.gd")
 
 var run_controller: Node
 var battle_view: Control
 var status_label: Label
+# === S4.2: HUD bar ===
+var hud: PanelContainer
+var hud_round_label: Label
+var hud_gold_label: Label
+var hud_wins_label: Label
+var hud_lives_label: Label
 var speed: float = 1.0
 var _bus: Node = null  # EventBus instance (autoload) или локальный
 
 
 func _ready() -> void:
+	# S4.2: HUD bar (поверх battle_view).
+	_build_hud()
 	# UI.
 	battle_view = BATTLE_VIEW_SCRIPT.new()
 	battle_view.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -32,8 +41,55 @@ func _ready() -> void:
 		_bus.battle_ended.connect(_on_battle_ended)
 		_bus.unit_died.connect(_on_unit_died)
 		_bus.round_started.connect(_on_round_started)
+		_bus.gold_changed.connect(_on_gold_changed)
 	# Начинаем ран.
 	run_controller.start_run(42)
+	_refresh_hud()
+
+
+# === S4.2: HUD ===
+
+func _build_hud() -> void:
+	# Top-wide полоса 48px с 4 labels.
+	hud = PanelContainer.new()
+	hud.name = "HUD"
+	hud.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	hud.custom_minimum_size = Vector2(0, 48)
+	hud.mouse_filter = Control.MOUSE_FILTER_IGNORE  # не ловим клики
+	add_child(hud)
+	var hbox: HBoxContainer = HBoxContainer.new()
+	hbox.add_theme_constant_override("separation", 24)
+	hbox.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hud.add_child(hbox)
+	hud_round_label = _make_hud_label("Round 1")
+	hud_gold_label = _make_hud_label("Gold: 0")
+	hud_wins_label = _make_hud_label("Wins: 0")
+	hud_lives_label = _make_hud_label("Lives: 0")
+	hbox.add_child(hud_round_label)
+	hbox.add_child(hud_gold_label)
+	hbox.add_child(hud_wins_label)
+	hbox.add_child(hud_lives_label)
+
+
+func _make_hud_label(initial_text: String) -> Label:
+	var label: Label = Label.new()
+	label.text = initial_text
+	label.add_theme_color_override("font_color", Color.WHITE)
+	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	return label
+
+
+func _refresh_hud() -> void:
+	if hud == null or run_controller == null or run_controller.state == null:
+		return
+	hud_round_label.text = "Round %d" % run_controller.state.round_index
+	hud_gold_label.text = "Gold: %d" % run_controller.state.gold
+	hud_wins_label.text = "Wins: %d" % run_controller.state.wins
+	hud_lives_label.text = "Lives: %d" % run_controller.state.lives
+
+
+func _on_gold_changed(_new_value: int) -> void:
+	_refresh_hud()
 
 
 ## Возвращает инстанс EventBus (autoload "EventBus" из project.godot),
@@ -104,4 +160,4 @@ func _on_unit_died(_c) -> void:
 
 
 func _on_round_started(_round: int) -> void:
-	pass
+	_refresh_hud()

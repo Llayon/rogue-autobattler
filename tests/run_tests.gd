@@ -186,6 +186,9 @@ func _initialize() -> void:
 	_test_battle_scene_eventbus_subscribe_no_crash()
 	_test_battle_view_extends_control()
 	_test_battle_view_with_real_context()
+	# S4.2: Battle UI
+	_test_battle_scene_hud_creation()
+	_test_battle_scene_hud_updates_on_gold_change()
 
 	print("\n=== Result: %d passed, %d failed ===\n" % [_passed, _failed])
 
@@ -1998,6 +2001,48 @@ func _test_battle_view_with_real_context() -> void:
 	_assert(view._ctx.grid.width() == 7, "grid.width() = 7 через view._ctx (got %d)" % view._ctx.grid.width())
 	_assert(view._ctx.grid.height() == 4, "grid.height() = 4 через view._ctx (got %d)" % view._ctx.grid.height())
 	view.free()
+
+
+# === S4.2: Battle UI ===
+
+func _test_battle_scene_hud_creation() -> void:
+	print("[test] S4.2: BattleScene создаёт HUD bar в _ready()")
+	var scene: Control = BattleSceneScript.new()
+	get_root().add_child.call_deferred(scene)
+	await process_frame
+	if is_instance_valid(scene):
+		_assert(scene.hud != null, "hud создан")
+		_assert(scene.hud_round_label != null, "round_label создан")
+		_assert(scene.hud_gold_label != null, "gold_label создан")
+		_assert(scene.hud_wins_label != null, "wins_label создан")
+		_assert(scene.hud_lives_label != null, "lives_label создан")
+		_assert(scene.hud_round_label.text.find("Round") >= 0,
+			"round_label содержит 'Round' (got '%s')" % scene.hud_round_label.text)
+		_assert(scene.hud_gold_label.text.find("Gold") >= 0,
+			"gold_label содержит 'Gold' (got '%s')" % scene.hud_gold_label.text)
+		scene.queue_free()
+	await process_frame
+
+
+func _test_battle_scene_hud_updates_on_gold_change() -> void:
+	print("[test] S4.2: HUD обновляется при gold_changed signal")
+	var scene: Control = BattleSceneScript.new()
+	get_root().add_child.call_deferred(scene)
+	await process_frame
+	var bus: Node = get_root().get_node_or_null("EventBus")
+	if is_instance_valid(scene) and bus != null:
+		# start_run эмитит gold_changed (10) — HUD уже обновлён.
+		scene.run_controller.start_run(42)
+		await process_frame
+		_assert(scene.hud_gold_label.text.find("10") >= 0,
+			"gold_label показывает 10 после start_run (got '%s')" % scene.hud_gold_label.text)
+		# Эмулируем покупку.
+		bus.gold_changed.emit(7)
+		await process_frame
+		_assert(scene.hud_gold_label.text.find("7") >= 0,
+			"gold_label обновлён до '7' (got '%s')" % scene.hud_gold_label.text)
+		scene.queue_free()
+	await process_frame
 
 
 
