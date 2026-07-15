@@ -44,6 +44,8 @@ var abilities: Array = []  # Array[AbilityDef]
 
 # === Позиция (владелец — BattleContext) ===
 var cell: Vector2i = Vector2i(-1, -1)
+# S4.3: предыдущая клетка для плавного lerp при move.
+var prev_cell: Vector2i = Vector2i(-1, -1)
 
 # === Компоненты ===
 var health: HealthComponent = HealthComponent.new()
@@ -56,6 +58,21 @@ var regen = RegenComponentScript.new()
 # === Runtime ===
 var ai_controller = null
 var just_summoned: bool = false
+
+# === S4.3: Visual state ===
+## flash_alpha: 0..1, 1 = full white flash (hit feedback)
+## fade_alpha: 0..1, 1 = fully visible, 0 = invisible (dead)
+## pos_lerp: 0..1, 1 = animating from prev_cell, 0 = settled at cell
+## is_dying: true после смерти (fade_alpha decrement)
+var visual_state: Dictionary = {
+	"flash_alpha": 0.0,
+	"fade_alpha": 1.0,
+	"is_dying": false,
+	"pos_lerp": 0.0,
+}
+const FLASH_DECAY_PER_SEC: float = 1.0 / 0.15
+const FADE_DECAY_PER_SEC: float = 1.0 / 0.4
+const POS_LERP_DECAY_PER_SEC: float = 1.0 / 0.2
 
 
 ## Конструктор: принимает UnitDef и опционально overrides.
@@ -111,6 +128,12 @@ func is_alive() -> bool:
 
 func take_damage(amount: int, source) -> int:
 	var dealt: int = health.take_damage(amount)
+	# S4.3: trigger visual flash на hit, и fade на death.
+	if dealt > 0:
+		visual_state["flash_alpha"] = 1.0
+		if not health.is_alive() and not visual_state["is_dying"]:
+			visual_state["is_dying"] = true
+			visual_state["fade_alpha"] = 1.0
 	if not health.is_alive():
 		GameBus.emit_unit_died(self)
 	# Thorns: если есть source и он жив, возвращаем часть урона.
@@ -119,6 +142,22 @@ func take_damage(amount: int, source) -> int:
 		if thorns_dmg > 0:
 			source.take_damage(thorns_dmg, self)
 	return dealt
+
+
+## S4.3: тикает visual_state (вызывается из BattleRunner.step()).
+## Decrement flash_alpha, fade_alpha (если is_dying), pos_lerp.
+func _tick_visual(dt: float) -> void:
+	visual_state["flash_alpha"] = maxf(0.0, visual_state["flash_alpha"] - FLASH_DECAY_PER_SEC * dt)
+	if visual_state["is_dying"]:
+		visual_state["fade_alpha"] = maxf(0.0, visual_state["fade_alpha"] - FADE_DECAY_PER_SEC * dt)
+	visual_state["pos_lerp"] = maxf(0.0, visual_state["pos_lerp"] - POS_LERP_DECAY_PER_SEC * dt)
+
+
+## S4.3: перемещение с анимацией. Сохраняет prev_cell, выставляет pos_lerp=1.
+func move_to_with_anim(new_cell: Vector2i) -> void:
+	prev_cell = cell
+	cell = new_cell
+	visual_state["pos_lerp"] = 1.0
 
 
 func heal(amount: int) -> int:

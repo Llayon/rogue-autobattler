@@ -194,6 +194,12 @@ func _initialize() -> void:
 	_test_battle_view_damage_number_storage()
 	_test_battle_scene_round_summary_on_win()
 	_test_battle_scene_round_summary_on_defeat()
+	# S4.3: visual feedback
+	_test_combatant_visual_state_init()
+	_test_combatant_take_damage_triggers_flash()
+	_test_combatant_take_damage_death_triggers_dying()
+	_test_combatant_visual_state_tick()
+	_test_combatant_move_to_with_anim()
 
 	print("\n=== Result: %d passed, %d failed ===\n" % [_passed, _failed])
 
@@ -2188,6 +2194,82 @@ func _test_battle_scene_round_summary_on_defeat() -> void:
 			"summary содержит 'Defeat' (got '%s')" % scene.summary_label.text)
 	scene.queue_free()
 	await process_frame
+
+
+# === S4.3: Visual feedback ===
+
+func _test_combatant_visual_state_init() -> void:
+	print("[test] S4.3: Combatant.visual_state инициализирован")
+	var def = UnitDefScript.new()
+	def.id = &"v_init"
+	def.max_hp = 100
+	var c = CombatantScript.new(def)
+	_assert(c.visual_state != null, "visual_state существует")
+	_assert(c.visual_state["flash_alpha"] == 0.0,
+		"flash_alpha = 0 init (got %f)" % c.visual_state["flash_alpha"])
+	_assert(c.visual_state["fade_alpha"] == 1.0,
+		"fade_alpha = 1 init (alive) (got %f)" % c.visual_state["fade_alpha"])
+	_assert(c.visual_state["is_dying"] == false, "is_dying = false init")
+	_assert(c.visual_state["pos_lerp"] == 0.0,
+		"pos_lerp = 0 init (settled)")
+
+
+func _test_combatant_take_damage_triggers_flash() -> void:
+	print("[test] S4.3: take_damage триггерит flash_alpha")
+	var def = UnitDefScript.new()
+	def.id = &"v_dmg"
+	def.max_hp = 100
+	var c = CombatantScript.new(def)
+	c.take_damage(50, null)
+	_assert(c.visual_state["flash_alpha"] > 0.0,
+		"flash_alpha > 0 после damage (got %f)" % c.visual_state["flash_alpha"])
+
+
+func _test_combatant_take_damage_death_triggers_dying() -> void:
+	print("[test] S4.3: lethal damage триггерит is_dying=true")
+	var def = UnitDefScript.new()
+	def.id = &"v_dead"
+	def.max_hp = 50
+	var c = CombatantScript.new(def)
+	c.take_damage(100, null)
+	_assert(c.visual_state["is_dying"] == true,
+		"is_dying = true после lethal damage (got %s)" % str(c.visual_state["is_dying"]))
+	_assert(c.visual_state["fade_alpha"] == 1.0,
+		"fade_alpha = 1 (начало fade) (got %f)" % c.visual_state["fade_alpha"])
+
+
+func _test_combatant_visual_state_tick() -> void:
+	print("[test] S4.3: _tick_visual(dt) decrement flash/fade/pos_lerp")
+	var def = UnitDefScript.new()
+	def.id = &"v_tick"
+	def.max_hp = 100
+	var c = CombatantScript.new(def)
+	c.visual_state["flash_alpha"] = 1.0
+	c.visual_state["pos_lerp"] = 1.0
+	c._tick_visual(0.05)
+	_assert(c.visual_state["flash_alpha"] < 1.0,
+		"flash_alpha decrement (got %f)" % c.visual_state["flash_alpha"])
+	_assert(c.visual_state["pos_lerp"] < 1.0,
+		"pos_lerp decrement (got %f)" % c.visual_state["pos_lerp"])
+	# After > 0.15s flash_alpha should be 0.
+	c.visual_state["flash_alpha"] = 1.0
+	c._tick_visual(0.2)
+	_assert(c.visual_state["flash_alpha"] == 0.0,
+		"flash_alpha = 0 после 0.2s (got %f)" % c.visual_state["flash_alpha"])
+
+
+func _test_combatant_move_to_with_anim() -> void:
+	print("[test] S4.3: move_to_with_anim обновляет prev_cell + pos_lerp=1")
+	var def = UnitDefScript.new()
+	def.id = &"v_move"
+	def.max_hp = 100
+	var c = CombatantScript.new(def)
+	c.cell = Vector2i(0, 3)
+	c.prev_cell = Vector2i(0, 3)
+	c.move_to_with_anim(Vector2i(1, 3))
+	_assert(c.cell == Vector2i(1, 3), "cell = (1,3)")
+	_assert(c.prev_cell == Vector2i(0, 3), "prev_cell = (0,3)")
+	_assert(c.visual_state["pos_lerp"] == 1.0, "pos_lerp = 1 (animation start)")
 
 
 
