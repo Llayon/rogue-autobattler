@@ -224,6 +224,10 @@ func _initialize() -> void:
 	_test_encounter_map_ui_layout_and_button_states()
 	_test_encounter_map_ui_selection_signal()
 	_test_encounter_map_scene_preview_progression()
+	# S5.3: RunController ↔ EncounterMap wiring
+	_test_run_controller_phase_map_service()
+	_test_run_state_current_encounter_id_default()
+	_test_balance_map_reward_constants()
 
 	print("\n=== Result: %d passed, %d failed ===\n" % [_passed, _failed])
 
@@ -2624,3 +2628,42 @@ func _test_encounter_map_scene_preview_progression() -> void:
 		"view refreshed with preview map")
 	scene.queue_free()
 	await process_frame
+
+
+# === S5.3 Task 1: Phase enum + RunState + Balance constants ===
+
+func _test_run_controller_phase_map_service() -> void:
+	print("[test] S5.3: Phase enum расширен MAP + SERVICE")
+	_assert(RunControllerScript.Phase.MAP == 4, "Phase.MAP = 4 (got %d)" % RunControllerScript.Phase.MAP)
+	_assert(RunControllerScript.Phase.SERVICE == 5, "Phase.SERVICE = 5 (got %d)" % RunControllerScript.Phase.SERVICE)
+	_assert(RunControllerScript.Phase.PREP == 0, "Phase.PREP остался 0")
+	_assert(RunControllerScript.Phase.BATTLE == 1, "Phase.BATTLE остался 1")
+	_assert(RunControllerScript.Phase.REWARD == 2, "Phase.REWARD остался 2")
+	_assert(RunControllerScript.Phase.GAMEOVER == 3, "Phase.GAMEOVER остался 3")
+
+
+func _test_run_state_current_encounter_id_default() -> void:
+	print("[test] S5.3: RunState.current_encounter_id + encounter_visited_ids default")
+	var s: RunState = RunStateScript.new()
+	_assert(s.current_encounter_id == -1, "current_encounter_id = -1 default (got %d)" % s.current_encounter_id)
+	_assert(s.encounter_visited_ids.is_empty(), "encounter_visited_ids пуст (got size %d)" % s.encounter_visited_ids.size())
+
+
+func _test_balance_map_reward_constants() -> void:
+	print("[test] S5.3: Balance.MAP_* reward constants для service effects")
+	_assert(BalanceScript.MAP_HEAL_HP_RATIO > 0.0 and BalanceScript.MAP_HEAL_HP_RATIO <= 1.0,
+		"MAP_HEAL_HP_RATIO в (0,1] (got %f)" % BalanceScript.MAP_HEAL_HP_RATIO)
+	_assert(BalanceScript.MAP_TREASURE_GOLD > 0,
+		"MAP_TREASURE_GOLD > 0 (got %d)" % BalanceScript.MAP_TREASURE_GOLD)
+	_assert(BalanceScript.MAP_MERCHANT_DISCOUNT > 0.0 and BalanceScript.MAP_MERCHANT_DISCOUNT <= 1.0,
+		"MAP_MERCHANT_DISCOUNT в (0,1] (got %f)" % BalanceScript.MAP_MERCHANT_DISCOUNT)
+	_assert(BalanceScript.MAP_REST_HP_RATIO > 0.0 and BalanceScript.MAP_REST_HP_RATIO <= 1.0,
+		"MAP_REST_HP_RATIO в (0,1] (got %f)" % BalanceScript.MAP_REST_HP_RATIO)
+	_assert(BalanceScript.MAP_REST_ATTACK_BONUS > 0,
+		"MAP_REST_ATTACK_BONUS > 0 (got %d)" % BalanceScript.MAP_REST_ATTACK_BONUS)
+	_assert(BalanceScript.MAP_SHRINE_GOLD_BONUS > 0,
+		"MAP_SHRINE_GOLD_BONUS > 0 (got %d)" % BalanceScript.MAP_SHRINE_GOLD_BONUS)
+	_assert(BalanceScript.MAP_SHRINE_HP_BONUS > 0,
+		"MAP_SHRINE_HP_BONUS > 0 (got %d)" % BalanceScript.MAP_SHRINE_HP_BONUS)
+	_assert(BalanceScript.MAP_SHRINE_ATTACK_BONUS > 0,
+		"MAP_SHRINE_ATTACK_BONUS > 0 (got %d)" % BalanceScript.MAP_SHRINE_ATTACK_BONUS)

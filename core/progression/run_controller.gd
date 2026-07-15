@@ -8,7 +8,7 @@ signal run_started
 signal run_ended(won: bool)
 signal phase_changed(phase: int)
 
-enum Phase { PREP, BATTLE, REWARD, GAMEOVER }
+enum Phase { PREP, BATTLE, REWARD, GAMEOVER, MAP, SERVICE }
 
 const CombatantScript = preload("res://core/battle/combatant.gd")
 const BattleRunnerScript = preload("res://core/battle/battle_runner.gd")

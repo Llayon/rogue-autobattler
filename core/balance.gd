@@ -40,6 +40,22 @@ const MAP_MIN_NODES_PER_LAYER: int = 2
 const MAP_MAX_NODES_PER_LAYER: int = 4
 const MAP_MAX_DEPTH: int = 10
 
+# === Encounter service effects (S5.3) ===
+# HEAL: восстановление HP-ratio всем юнитам игрока + 1 жизнь.
+const MAP_HEAL_HP_RATIO: float = 0.4
+# TREASURE: gold бонус + новый юнит в meta profile.
+const MAP_TREASURE_GOLD: int = 5
+# MERCHANT: скидка на магазин (для v2; v1 только переходит в PREP).
+const MAP_MERCHANT_DISCOUNT: float = 0.5
+# REST: heal + attack bonus всем юнитам игрока.
+const MAP_REST_HP_RATIO: float = 0.5
+const MAP_REST_ATTACK_BONUS: int = 1
+# SHRINE: 4 возможных buff'а — выбирается 1 случайно.
+const MAP_SHRINE_GOLD_BONUS: int = 5
+const MAP_SHRINE_HP_BONUS: int = 5
+const MAP_SHRINE_ATTACK_BONUS: int = 1
+# (HealingReceived buff не реализован в v1; зарезервировано для v2.)
+
 # === Meta progression (S3.2) ===
 # За каждую победу в ране разблокировать META_UNLOCKS_PER_WIN юнитов.
 # 1 = консервативный темп: 10 побед → 10 новых юнитов в коллекции.

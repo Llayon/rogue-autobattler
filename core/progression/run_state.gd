@@ -4,7 +4,7 @@ class_name RunState extends Resource
 ## Не включает состояние боя (BattleState) — это мета-обёртка:
 ## кто в команде, сколько золота, какой раунд, что в магазине.
 
-const SAVE_VERSION: int = 1
+const SAVE_VERSION: int = 2
 
 @export var version: int = SAVE_VERSION
 @export var seed: int = 0
@@ -26,6 +26,12 @@ const SAVE_VERSION: int = 1
 @export var wins: int = 0
 @export var losses: int = 0
 @export var units_killed: int = 0
+
+# S5.3: encounter map tracking.
+# Текущий encounter id, где находится игрок (DAG state). -1 = карта не начата.
+@export var current_encounter_id: int = -1
+# История посещённых encounter id (для сохранения и визуальной подсветки).
+@export var encounter_visited_ids: Array[int] = []
 
 # Модификаторы мета-прогрессии на этот ран.
 @export var meta_modifiers: Dictionary = {}
