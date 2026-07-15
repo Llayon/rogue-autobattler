@@ -16,6 +16,7 @@ const GridScript = preload("res://core/battle/grid.gd")
 const BalanceScript = preload("res://core/balance.gd")
 const EncounterMapScript = preload("res://core/encounter/encounter_map.gd")
 const EncounterTypeScript = preload("res://core/encounter/encounter_type.gd")
+const RunUnitStateScript = preload("res://core/progression/run_unit_state.gd")
 
 var state: RunState = RunState.new()
 var shop: Shop = Shop.new()
@@ -51,6 +52,12 @@ func start_run(seed_value: int = 0) -> void:
 	for id in BalanceScript.STARTING_UNIT_IDS:
 		if ContentDB_static.get_by_id(id) != null:
 			state.player_unit_ids.append(id)
+	# S5.4: инициализируем per-unit state (HP, max_hp, bonus_attack=0).
+	state.unit_states.clear()
+	for id in state.player_unit_ids:
+		var def: Resource = ContentDB_static.get_by_id(id)
+		var max_hp: int = def.max_hp if def != null else 100
+		state.unit_states.append(RunUnitStateScript.new(id, max_hp, -1))
 	_set_phase(Phase.PREP)
 	_refresh_shop()
 	run_started.emit()

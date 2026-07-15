@@ -179,6 +179,10 @@ func _initialize() -> void:
 	_test_run_controller_save_now_signal()
 	_test_run_controller_end_run_clears_active()
 	_test_run_controller_save_after_battle()
+	# S5.4 Task 1: RunUnitState default state
+	_test_run_state_unit_states_default_empty()
+	# S5.4 Task 1: start_run initializes unit_states
+	_test_run_controller_start_run_initializes_unit_states()
 	_test_run_controller_resume_run()
 	_test_run_controller_resume_run_no_save()
 	_test_run_controller_resume_run_signal()
@@ -2892,3 +2896,25 @@ func _test_battle_scene_shows_encounter_map_on_map_phase() -> void:
 	"encounter_map_scene снова скрыт на PREP (got %s)" % str(scene.encounter_map_scene.visible))
 	scene.queue_free()
 	await process_frame
+
+
+func _test_run_state_unit_states_default_empty() -> void:
+	print("[test] S5.4: RunState.unit_states default = []")
+	var s: RunState = RunStateScript.new()
+	_assert(s.unit_states.is_empty(), "unit_states empty (got size %d)" % s.unit_states.size())
+
+
+func _test_run_controller_start_run_initializes_unit_states() -> void:
+	print("[test] S5.4: start_run() creates unit_states for each player_unit_id")
+	var ctrl: Node = RunControllerScript.new()
+	get_root().add_child.call_deferred(ctrl)
+	await process_frame
+	ctrl.start_run(42)
+	_assert(ctrl.state.unit_states.size() == ctrl.state.player_unit_ids.size(),
+		"unit_states size == player_unit_ids size (%d vs %d)"
+		% [ctrl.state.unit_states.size(), ctrl.state.player_unit_ids.size()])
+	for i in ctrl.state.unit_states.size():
+		var us = ctrl.state.unit_states[i]
+		var id: StringName = ctrl.state.player_unit_ids[i]
+		_assert(us.unit_id == id, "unit_id[%d] = %s" % [i, id])
+	_cleanup_ctrl(ctrl)

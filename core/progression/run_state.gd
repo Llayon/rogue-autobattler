@@ -4,7 +4,7 @@ class_name RunState extends Resource
 ## Не включает состояние боя (BattleState) — это мета-обёртка:
 ## кто в команде, сколько золота, какой раунд, что в магазине.
 
-const SAVE_VERSION: int = 2
+const SAVE_VERSION: int = 3
 
 @export var version: int = SAVE_VERSION
 @export var seed: int = 0
@@ -36,8 +36,16 @@ const SAVE_VERSION: int = 2
 # Модификаторы мета-прогрессии на этот ран.
 @export var meta_modifiers: Dictionary = {}
 
+# S5.4: per-unit state (HP, bonus_attack). Параллелен player_unit_ids.
+# Index в массиве соответствует index в player_unit_ids. Может быть короче,
+# если юнит был перемещён в bench или убит.
+@export var unit_states: Array = []  # Array[RunUnitState]
+
 
 func to_dict() -> Dictionary:
+	var unit_states_dicts: Array = []
+	for us in unit_states:
+		unit_states_dicts.append(us.to_dict())
 	return {
 		"version": version,
 		"seed": seed,
@@ -53,4 +61,7 @@ func to_dict() -> Dictionary:
 		"losses": losses,
 		"units_killed": units_killed,
 		"meta_modifiers": meta_modifiers.duplicate(),
+		"current_encounter_id": current_encounter_id,
+		"encounter_visited_ids": encounter_visited_ids.duplicate(),
+		"unit_states": unit_states_dicts,
 	}
