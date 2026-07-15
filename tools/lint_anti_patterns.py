@@ -141,7 +141,7 @@ RULES = [
         ],
     },
 
-    # === Type-Driven Design (#21 — no classification flags) ===
+# === Type-Driven Design (#21 — no classification flags) ===
     # Запрет is_X / has_X / can_X : bool полей в Combatant (и других entity).
     # Использовать ZST marker components или enum.
     {
@@ -152,6 +152,64 @@ RULES = [
         "exclude_paths": [
             "core/data/unit_def.gd",  # UnitDef может иметь bool поля (но лучше enum)
             "core/battle/status_list.gd",
+        ],
+    },
+
+    # === Godot-Specific Guards (docs/GODOT_PATTERNS.md) ===
+
+    # GP-7: core/* НЕ должен extends Node/Node2D/Control.
+    # Это для scenes/*, не для core/*. core/* — RefCounted или Resource.
+    {
+        "id": "no-node-in-core",
+        "pattern": re.compile(r"^extends\s+(Node|Node2D|Node3D|Control|Panel|Button|Label|CanvasItem)\s*$"),
+        "message": "core/* extends Node/Node2D/Control. Use RefCounted (logic) or Resource (data) instead.",
+        "severity": "error",
+        "scope": "core/",
+        "exclude_paths": [
+            "core/utils/",  # event_bus.gd extends Node (нужен для autoload instance)
+        ],
+    },
+
+    # GP-3: cross-file inheritance должен быть через строковый путь,
+    # не через class_name (parse error в headless).
+    {
+        "id": "cross-file-extends-class-name",
+        "pattern": re.compile(r"^class_name\s+\w+\s+extends\s+(?!RefCounted|Resource|Node|Node2D|Control)([A-Z]\w+)\s*$"),
+        "message": "Cross-file 'extends ClassName' breaks in headless. Use 'extends \"res://path/to/X.gd\"' instead.",
+        "severity": "error",
+    },
+
+    # GP-7 (variant): core/* should prefer RefCounted for logic.
+    {
+        "id": "core-prefer-refcounted",
+        "pattern": re.compile(r"^extends\s+Resource\s*$"),
+        "message": "core/* logic class extends Resource. Use RefCounted unless it's persistent data (.tres).",
+        "severity": "info",
+        "scope": "core/",
+        "exclude_paths": [
+            "core/data/",  # data classes legitimately extend Resource
+        ],
+    },
+
+    # GP-9: queue_free() только в scene/*, не в core/*.
+    # В core/* если объект — RefCounted, GC сам освободит.
+    {
+        "id": "no-queue-free-from-core",
+        "pattern": re.compile(r"\bqueue_free\s*\("),
+        "message": "queue_free() in core/* — core shouldn't manage Node lifecycle. Use queue_free only in scene/*.",
+        "severity": "warning",
+        "scope": "core/",
+    },
+
+    # GP-9: .free() (immediate) is dangerous — use queue_free() instead.
+    {
+        "id": "no-immediate-free",
+        "pattern": re.compile(r"\b\w+\.free\s*\(\s*\)"),
+        "message": "obj.free() is immediate and unsafe. Use obj.queue_free() to defer until current frame ends.",
+        "severity": "warning",
+        "exclude_paths": [
+            "tests/",
+            "tools/",
         ],
     },
 ]  # noqa
