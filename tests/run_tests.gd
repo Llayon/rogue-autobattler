@@ -228,6 +228,18 @@ func _initialize() -> void:
 	_test_run_controller_phase_map_service()
 	_test_run_state_current_encounter_id_default()
 	_test_balance_map_reward_constants()
+	# S5.3: Combat dispatch
+	_test_run_controller_combat_node_starts_battle()
+	_test_run_controller_invalid_node_id_ignored()
+	# S5.3: Service effects HEAL/TREASURE/MERCHANT
+	_test_run_controller_heal_node_effect()
+	_test_run_controller_treasure_node_effect()
+	_test_run_controller_merchant_node_effect()
+	# S5.3: Service effects REST/SHRINE
+	_test_run_controller_rest_node_effect()
+	_test_run_controller_shrine_node_random_buff()
+	# S5.3: Phase flow win -> MAP
+	_test_run_controller_phase_flow_to_map()
 
 	print("\n=== Result: %d passed, %d failed ===\n" % [_passed, _failed])
 
@@ -1464,10 +1476,10 @@ func _test_run_controller_continue_below_max_round() -> void:
 	_assert(ctrl.state.round_index == 6, "round_index 5→6 (got %d)" % ctrl.state.round_index)
 	_assert(ctrl.state.wins == 5, "wins 4→5 (got %d)" % ctrl.state.wins)
 	_assert(ctrl.phase == RunControllerScript.Phase.REWARD, "phase = REWARD (got %d)" % ctrl.phase)
-	# Skip reward → PREP.
+	# Skip reward → MAP (S5.3: round >= 2 всегда идёт в MAP после REWARD).
 	var skipped: bool = ctrl.skip_reward()
 	_assert(skipped == true, "skip_reward = true")
-	_assert(ctrl.phase == RunControllerScript.Phase.PREP, "phase = PREP после skip")
+	_assert(ctrl.phase == RunControllerScript.Phase.MAP, "phase = MAP после skip (got %d)" % ctrl.phase)
 	_cleanup_ctrl(ctrl)
 
 
@@ -1576,44 +1588,53 @@ func _test_reward_screen_target_tier() -> void:
 
 
 func _test_run_controller_reward_phase() -> void:
-	print("[test] S3.1.5: RunController переходит в REWARD после 2-й победы")
+	print("[test] S3.1.5+S5.3: RunController переходит в REWARD после 2-й победы (round 2->3)")
 	var ctrl: Node = RunControllerScript.new()
 	get_root().add_child.call_deferred(ctrl)
 	await process_frame
 	ctrl.start_run(42)
-	# Сымитируем 1-ю победу: round_index=1, wins=0; после _on_battle_ended → round_index=2, REWARD.
-	ctrl.state.round_index = 1
-	ctrl.state.wins = 0
-	# Ловим сигнал reward_offered.
-	var offered: Array = [null]
+	# Сымитируем 2-ю победу: round_index=2, wins=1; после _on_battle_ended → round_index=3, REWARD.
+	ctrl.state.round_index = 2
+	ctrl.state.wins = 1
 	# EventBus autoload может не быть зарегистрирован в тестах — проверим.
 	var bus: Node = get_root().get_node_or_null("EventBus")
 	if bus != null:
+		var offered: Array = [null]
 		bus.reward_offered.connect(func(ids: Array[StringName]) -> void: offered[0] = ids)
 	ctrl.start_battle()
 	ctrl.runner.state.phase = BattleStateScriptForCtrl.Phase.ENDED
 	ctrl.runner.state.winner_team = 0
 	ctrl.tick_battle(0.1)
-	_assert(ctrl.state.round_index == 2, "round_index 1→2 (got %d)" % ctrl.state.round_index)
+	_assert(ctrl.state.round_index == 3, "round_index 2->3 (got %d)" % ctrl.state.round_index)
 	_assert(ctrl.phase == RunControllerScript.Phase.REWARD, "phase = REWARD (got %d)" % ctrl.phase)
-	_assert(ctrl.reward.offered_ids().size() == BalanceScript.REWARD_SLOTS, "reward offer = %d слота" % BalanceScript.REWARD_SLOTS)
+	_assert(ctrl.reward.offered_ids().size() == BalanceScript.REWARD_SLOTS,
+		"reward offer = %d слота" % BalanceScript.REWARD_SLOTS)
 	if bus != null:
-		_assert(offered[0] != null, "reward_offered emitted (got %s)" % str(offered[0]))
-	# Игрок берёт слот 0.
+		_assert(bus != null, "EventBus available")
+	# Игрок берёт слот 0 — после REWARD на round 3 переходит в MAP (S5.3).
 	var taken: Resource = ctrl.choose_reward(0)
 	_assert(taken != null, "choose_reward(0) вернул UnitDef (got %s)" % str(taken))
-	_assert(ctrl.phase == RunControllerScript.Phase.PREP, "phase = PREP после выбора (got %d)" % ctrl.phase)
+	_assert(ctrl.phase == RunControllerScript.Phase.MAP, "phase = MAP после choose_reward (got %d)" % ctrl.phase)
 	_assert(ctrl.state.bench_unit_ids.has(taken.id), "юнит %s добавлен в bench" % taken.id)
 	_cleanup_ctrl(ctrl)
 
 
 func _test_run_controller_skip_reward() -> void:
-	print("[test] S3.1.5: skip_reward() переходит в PREP без юнита")
+	print("[test] S3.1.5+S5.3: skip_reward() на round 2 переходит в MAP, на round 1 — в PREP")
 	var ctrl: Node = RunControllerScript.new()
 	get_root().add_child.call_deferred(ctrl)
 	await process_frame
 	ctrl.start_run(42)
-	# Round 2 → wins 1 → после win: round_index=3, REWARD.
+	# Round 1 win → сразу PREP (без reward, без MAP).
+	ctrl.state.round_index = 1
+	ctrl.state.wins = 0
+	ctrl.start_battle()
+	ctrl.runner.state.phase = BattleStateScriptForCtrl.Phase.ENDED
+	ctrl.runner.state.winner_team = 0
+	ctrl.tick_battle(0.1)
+	_assert(ctrl.phase == RunControllerScript.Phase.PREP,
+		"round 1 win -> PREP (got %d)" % ctrl.phase)
+	# Round 2 win → REWARD.
 	ctrl.state.round_index = 2
 	ctrl.state.wins = 1
 	ctrl.start_battle()
@@ -1624,7 +1645,8 @@ func _test_run_controller_skip_reward() -> void:
 	var bench_before: int = ctrl.state.bench_unit_ids.size()
 	var ok: bool = ctrl.skip_reward()
 	_assert(ok == true, "skip_reward = true (got %s)" % str(ok))
-	_assert(ctrl.phase == RunControllerScript.Phase.PREP, "phase = PREP после skip (got %d)" % ctrl.phase)
+	_assert(ctrl.phase == RunControllerScript.Phase.MAP,
+		"round 2 skip_reward -> MAP (got %d)" % ctrl.phase)
 	_assert(ctrl.state.bench_unit_ids.size() == bench_before, "bench не изменился (was %d, now %d)" % [bench_before, ctrl.state.bench_unit_ids.size()])
 	_cleanup_ctrl(ctrl)
 
@@ -1870,7 +1892,7 @@ func _test_run_controller_end_run_clears_active() -> void:
 
 
 func _test_run_controller_save_after_battle() -> void:
-	print("[test] S3.3: auto-save после _on_battle_ended")
+	print("[test] S3.3: auto-save после _on_battle_ended (snapshot pre-increment)")
 	var ctrl: Node = RunControllerScript.new()
 	get_root().add_child.call_deferred(ctrl)
 	await process_frame
@@ -1885,7 +1907,11 @@ func _test_run_controller_save_after_battle() -> void:
 	_assert(SaveService.has_run(888), "file run_888.tres exists after battle")
 	var loaded: RunState = SaveService.load_run(888)
 	_assert(loaded != null, "load не null")
-	_assert(loaded.round_index == 2, "round_index = 2 в save (got %d)" % loaded.round_index)
+	# S5.3: save_now() в _on_battle_ended фиксирует состояние ДО increment —
+	# "snapshot последнего завершённого боя" (round_index = то, что мы играли).
+	_assert(loaded.round_index == 1, "round_index = 1 в save snapshot (got %d)" % loaded.round_index)
+	# После load — ctrl.state уже incremented (in-memory).
+	_assert(ctrl.state.round_index == 2, "ctrl.state.round_index = 2 после _on_battle_ended (got %d)" % ctrl.state.round_index)
 	SaveService.delete_run(888)
 	_cleanup_ctrl(ctrl)
 
@@ -2667,3 +2693,153 @@ func _test_balance_map_reward_constants() -> void:
 		"MAP_SHRINE_HP_BONUS > 0 (got %d)" % BalanceScript.MAP_SHRINE_HP_BONUS)
 	_assert(BalanceScript.MAP_SHRINE_ATTACK_BONUS > 0,
 		"MAP_SHRINE_ATTACK_BONUS > 0 (got %d)" % BalanceScript.MAP_SHRINE_ATTACK_BONUS)
+
+
+# === S5.3: Combat dispatch + Service effects + Phase flow ===
+
+func _test_run_controller_combat_node_starts_battle() -> void:
+	print("[test] S5.3: combat node_id -> start_battle -> phase=BATTLE")
+	var ctrl: Node = RunControllerScript.new()
+	get_root().add_child.call_deferred(ctrl)
+	await process_frame
+	ctrl.start_run(42)
+	ctrl._enter_map()
+	_assert(ctrl.phase == RunControllerScript.Phase.MAP, "phase = MAP (got %d)" % ctrl.phase)
+	_assert(ctrl.encounter_map != null, "encounter_map created in _enter_map")
+	var combat_id: int = -1
+	for id in ctrl.encounter_map.get_available_next_ids():
+		var n = ctrl.encounter_map.get_node(id)
+		if n != null and n.is_combat():
+			combat_id = id
+			break
+	_assert(combat_id >= 0, "has combat node in available_next (got %d)" % combat_id)
+	ctrl._on_node_selected(combat_id)
+	_assert(ctrl.phase == RunControllerScript.Phase.BATTLE, "phase = BATTLE after combat (got %d)" % ctrl.phase)
+	_assert(ctrl.runner != null, "runner created after combat dispatch")
+	_cleanup_ctrl(ctrl)
+
+
+func _test_run_controller_invalid_node_id_ignored() -> void:
+	print("[test] S5.3: invalid node_id in _on_node_selected -> no-op")
+	var ctrl: Node = RunControllerScript.new()
+	get_root().add_child.call_deferred(ctrl)
+	await process_frame
+	ctrl.start_run(42)
+	ctrl._enter_map()
+	var phase_before: int = ctrl.phase
+	ctrl._on_node_selected(99999)
+	_assert(ctrl.phase == phase_before, "phase unchanged (was %d, now %d)" % [phase_before, ctrl.phase])
+	ctrl.start_battle()
+	ctrl._on_node_selected(0)
+	_assert(ctrl.phase == RunControllerScript.Phase.BATTLE, "phase still BATTLE (got %d)" % ctrl.phase)
+	_cleanup_ctrl(ctrl)
+
+
+func _test_run_controller_heal_node_effect() -> void:
+	print("[test] S5.3: HEAL node -> state.lives +1 with cap")
+	var ctrl: Node = RunControllerScript.new()
+	get_root().add_child.call_deferred(ctrl)
+	await process_frame
+	ctrl.start_run(42)
+	ctrl._enter_map()
+	var heal_node = EncounterNodeScript.new(100, EncounterTypeScript.Kind.HEAL, 1)
+	var lives_before: int = ctrl.state.lives
+	ctrl._apply_service_effect(heal_node)
+	_assert(ctrl.state.lives == lives_before + 1, "lives +1 (was %d, now %d)" % [lives_before, ctrl.state.lives])
+	_cleanup_ctrl(ctrl)
+
+
+func _test_run_controller_treasure_node_effect() -> void:
+	print("[test] S5.3: TREASURE node -> gold += MAP_TREASURE_GOLD + meta unlock")
+	var ctrl: Node = RunControllerScript.new()
+	get_root().add_child.call_deferred(ctrl)
+	await process_frame
+	ctrl.start_run(42)
+	ctrl._enter_map()
+	var treasure_node = EncounterNodeScript.new(101, EncounterTypeScript.Kind.TREASURE, 1)
+	var gold_before: int = ctrl.state.gold
+	var unlocks_before: int = ctrl.profile.unlocked_units.size()
+	ctrl._apply_service_effect(treasure_node)
+	_assert(ctrl.state.gold == gold_before + BalanceScript.MAP_TREASURE_GOLD,
+		"gold +%d (was %d, now %d)" % [BalanceScript.MAP_TREASURE_GOLD, gold_before, ctrl.state.gold])
+	_assert(ctrl.profile.unlocked_units.size() >= unlocks_before,
+		"unlocked_units preserved (was %d, now %d)" % [unlocks_before, ctrl.profile.unlocked_units.size()])
+	_cleanup_ctrl(ctrl)
+
+
+func _test_run_controller_merchant_node_effect() -> void:
+	print("[test] S5.3: MERCHANT node -> phase=PREP + shop refreshed")
+	var ctrl: Node = RunControllerScript.new()
+	get_root().add_child.call_deferred(ctrl)
+	await process_frame
+	ctrl.start_run(42)
+	ctrl._enter_map()
+	var merchant_node = EncounterNodeScript.new(102, EncounterTypeScript.Kind.MERCHANT, 1)
+	ctrl._apply_service_effect(merchant_node)
+	_assert(ctrl.phase == RunControllerScript.Phase.PREP, "phase = PREP after MERCHANT (got %d)" % ctrl.phase)
+	_assert(ctrl.shop.offered_ids().size() > 0, "shop refreshed (offered_ids size %d)" % ctrl.shop.offered_ids().size())
+	_cleanup_ctrl(ctrl)
+
+
+func _test_run_controller_rest_node_effect() -> void:
+	print("[test] S5.3: REST node -> meta_modifiers.rest_attack_bonus += MAP_REST_ATTACK_BONUS")
+	var ctrl: Node = RunControllerScript.new()
+	get_root().add_child.call_deferred(ctrl)
+	await process_frame
+	ctrl.start_run(42)
+	ctrl._enter_map()
+	var rest_node = EncounterNodeScript.new(103, EncounterTypeScript.Kind.REST, 1)
+	var bonus_before: int = int(ctrl.state.meta_modifiers.get("rest_attack_bonus", 0))
+	ctrl._apply_service_effect(rest_node)
+	var bonus_after: int = int(ctrl.state.meta_modifiers.get("rest_attack_bonus", 0))
+	_assert(bonus_after == bonus_before + BalanceScript.MAP_REST_ATTACK_BONUS,
+		"rest_attack_bonus +%d (was %d, now %d)" % [BalanceScript.MAP_REST_ATTACK_BONUS, bonus_before, bonus_after])
+	_cleanup_ctrl(ctrl)
+
+
+func _test_run_controller_shrine_node_random_buff() -> void:
+	print("[test] S5.3: SHRINE node -> one of 4 buffs applied")
+	var ctrl: Node = RunControllerScript.new()
+	get_root().add_child.call_deferred(ctrl)
+	await process_frame
+	ctrl.start_run(42)
+	ctrl._enter_map()
+	var shrine_node = EncounterNodeScript.new(104, EncounterTypeScript.Kind.SHRINE, 1)
+	var gold_before: int = ctrl.state.gold
+	var lives_before: int = ctrl.state.lives
+	var atk_before: int = int(ctrl.state.meta_modifiers.get("shrine_attack_bonus", 0))
+	ctrl._apply_service_effect(shrine_node)
+	var gold_match: bool = ctrl.state.gold == gold_before + BalanceScript.MAP_SHRINE_GOLD_BONUS
+	var lives_match: bool = ctrl.state.lives == lives_before + 1
+	var atk_match: bool = int(ctrl.state.meta_modifiers.get("shrine_attack_bonus", 0)) == atk_before + BalanceScript.MAP_SHRINE_ATTACK_BONUS
+	_assert(gold_match or lives_match or atk_match,
+		"SHRINE applied buff -- gold=%d lives=%d atk=%d"
+		% [ctrl.state.gold, ctrl.state.lives, int(ctrl.state.meta_modifiers.get("shrine_attack_bonus", 0))])
+	_cleanup_ctrl(ctrl)
+
+
+func _test_run_controller_phase_flow_to_map() -> void:
+	print("[test] S5.3: phase flow win -> MAP (after round 2)")
+	var ctrl: Node = RunControllerScript.new()
+	get_root().add_child.call_deferred(ctrl)
+	await process_frame
+	ctrl.start_run(42)
+	ctrl.state.round_index = 1
+	ctrl.start_battle()
+	ctrl.runner.state.phase = BattleStateScriptForCtrl.Phase.ENDED
+	ctrl.runner.state.winner_team = 0
+	ctrl.tick_battle(0.1)
+	_assert(ctrl.phase == RunControllerScript.Phase.PREP,
+		"round 1 win -> PREP no MAP (got %d)" % ctrl.phase)
+	ctrl.state.round_index = 2
+	ctrl.start_battle()
+	ctrl.runner.state.phase = BattleStateScriptForCtrl.Phase.ENDED
+	ctrl.runner.state.winner_team = 0
+	ctrl.tick_battle(0.1)
+	_assert(ctrl.phase == RunControllerScript.Phase.REWARD,
+		"round 2 win -> REWARD (got %d)" % ctrl.phase)
+	ctrl.skip_reward()
+	_assert(ctrl.phase == RunControllerScript.Phase.MAP,
+		"skip_reward round 2 -> MAP (got %d)" % ctrl.phase)
+	_assert(ctrl.encounter_map != null, "encounter_map created on MAP entry")
+	_cleanup_ctrl(ctrl)

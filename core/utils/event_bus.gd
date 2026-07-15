@@ -22,6 +22,7 @@ signal round_ended(round_index: int, winner_team: int)
 signal battle_started
 signal battle_ended(winner_team: int)
 signal gold_changed(new_value: int)
+signal lives_changed(new_value: int)
 signal xp_changed(new_xp: int, new_level: int)
 # S3.1.5: reward screen signals
 signal reward_offered(unit_ids: Array[StringName])
@@ -100,6 +101,12 @@ static func emit_gold_changed(value: int) -> void:
 	var inst: Node = _instance()
 	if inst != null:
 		inst.gold_changed.emit(value)
+
+
+static func emit_lives_changed(value: int) -> void:
+	var inst: Node = _instance()
+	if inst != null:
+		inst.lives_changed.emit(value)
 
 
 static func emit_ability_cast(ability, caster, target) -> void:

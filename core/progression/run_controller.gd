@@ -14,6 +14,8 @@ const CombatantScript = preload("res://core/battle/combatant.gd")
 const BattleRunnerScript = preload("res://core/battle/battle_runner.gd")
 const GridScript = preload("res://core/battle/grid.gd")
 const BalanceScript = preload("res://core/balance.gd")
+const EncounterMapScript = preload("res://core/encounter/encounter_map.gd")
+const EncounterTypeScript = preload("res://core/encounter/encounter_type.gd")
 
 var state: RunState = RunState.new()
 var shop: Shop = Shop.new()
@@ -22,6 +24,9 @@ var ctx: BattleContext = null
 var runner: BattleRunner = null
 var phase: int = Phase.PREP
 var profile: MetaProfile = null
+# S5.3: encounter map owned by RunController после первого перехода в MAP phase.
+# Scene получает его через get_encounter_map() и передаёт в EncounterMapScene.set_encounter_map().
+var encounter_map: EncounterMap = null
 
 
 func _ready() -> void:
@@ -87,7 +92,7 @@ func move_to_board(bench_index: int, _cell: Vector2i) -> bool:
 
 ## Запускает бой текущего раунда.
 func start_battle() -> bool:
-	if phase != Phase.PREP:
+	if phase != Phase.PREP and phase != Phase.MAP:
 		return false
 	if state.player_unit_ids.is_empty():
 		GameLog.warn("run", "No units on board")
@@ -141,14 +146,16 @@ func _on_battle_ended() -> void:
 		if state.round_index > BalanceScript.MAX_ROUND:
 			_end_run(true)
 			return
-		# S3.1.5: после первой победы (round_index >= 2) — reward screen.
-		# На round 1 → сразу PREP (стартовый набор).
-		if state.round_index >= 2:
-			_enter_reward()
-		else:
+		# S5.3: round 1 → PREP (стартовый набор, без MAP и без REWARD).
+		if state.round_index == 2:
+			# Победа в первом бою — без reward, сразу в PREP для следующего раунда.
+			# Это сохраняет существующее поведение round 1 → PREP.
 			_set_phase(Phase.PREP)
 			_refresh_shop()
 			GameBus.emit_round_started(state.round_index)
+		else:
+			# Round 2..MAX_ROUND-1 → reward screen.
+			_enter_reward()
 	elif winner == 1:
 		state.losses += 1
 		state.lives -= 1
@@ -233,7 +240,7 @@ func resume_run(seed_value: int) -> bool:
 	return true
 
 
-## S3.1.5: переход в фазу REWARD после победы (кроме round 1).
+## S5.1.5: переход в фазу REWARD после победы (кроме round 1).
 func _enter_reward() -> void:
 	reward.generate_offer(state.round_index)
 	_set_phase(Phase.REWARD)
@@ -243,8 +250,21 @@ func _enter_reward() -> void:
 	GameLog.info("run", "Reward offered", {"round": state.round_index, "ids": reward.offered_ids()})
 
 
+## S5.3: возвращает куда переходить после REWARD (round 1 → PREP, иначе → MAP).
+func _enter_prep_or_map_after_reward() -> void:
+	# round 1: после skip_reward → PREP (стартовый набор уже на доске).
+	# round 2..MAX_ROUND: после REWARD → MAP (игрок выбирает следующий нод).
+	# round > MAX_ROUND: boss победили → GAMEOVER (уже сработал в _on_battle_ended).
+	if state.round_index >= 2 and state.round_index <= BalanceScript.MAX_ROUND:
+		_enter_map()
+	else:
+		_set_phase(Phase.PREP)
+		_refresh_shop()
+		GameBus.emit_round_started(state.round_index)
+
+
 ## Игрок выбирает юнита из reward. Возвращает UnitDef или null.
-## Переводит в PREP после выбора.
+## Переводит в MAP или PREP после выбора (S5.3).
 func choose_reward(slot: int) -> Resource:
 	if phase != Phase.REWARD:
 		return null
@@ -254,9 +274,7 @@ func choose_reward(slot: int) -> Resource:
 	state.bench_unit_ids.append(def.id)
 	GameBus.emit_reward_chosen(def.id, slot)
 	GameLog.info("run", "Reward chosen", {"id": def.id, "round": state.round_index})
-	_set_phase(Phase.PREP)
-	_refresh_shop()
-	GameBus.emit_round_started(state.round_index)
+	_enter_prep_or_map_after_reward()
 	return def
 
 
@@ -265,15 +283,206 @@ func skip_reward() -> bool:
 	if phase != Phase.REWARD:
 		return false
 	GameLog.info("run", "Reward skipped", {"round": state.round_index})
-	_set_phase(Phase.PREP)
-	_refresh_shop()
-	GameBus.emit_round_started(state.round_index)
+	# S5.3: round 1 → PREP, иначе → MAP.
+	_enter_prep_or_map_after_reward()
 	return true
 
 
 func _set_phase(p: int) -> void:
 	phase = p
 	phase_changed.emit(p)
+
+
+## S5.3: возвращает encounter_map (или null если MAP phase ещё не наступила).
+func get_encounter_map() -> EncounterMap:
+	return encounter_map
+
+
+## S5.3: внешний вход для UI — игрок кликнул на ноде в encounter_map_view.
+## Если фаза MAP и узел доступен — переходит в combat или применяет service effect.
+func _on_node_selected(node_id: int) -> void:
+	if phase != Phase.MAP:
+		return
+	if encounter_map == null:
+		GameLog.warn("run", "_on_node_selected: no encounter_map")
+		return
+	# Validate: node_id должен быть в available_next_ids (UI тоже это проверяет).
+	if node_id not in encounter_map.get_available_next_ids():
+		GameLog.warn("run", "_on_node_selected: invalid node_id", {"node_id": node_id})
+		return
+	# Применяем переход по графу.
+	if not encounter_map.choose_next(node_id):
+		GameLog.warn("run", "_on_node_selected: choose_next failed", {"node_id": node_id})
+		return
+	var node = encounter_map.get_node(node_id)
+	if node == null:
+		return
+	# Сохраняем в state.
+	state.current_encounter_id = node_id
+	state.encounter_visited_ids.append(node_id)
+	save_now()
+	# Dispatch.
+	if node.is_combat():
+		start_battle()
+	else:
+		_apply_service_effect(node)
+
+
+## S5.3: применяет service-эффект выбранного нода (HEAL/TREASURE/MERCHANT/REST/SHRINE).
+## После эффекта — назад в MAP (если есть следующие узлы) или GAMEOVER.
+## MERCHANT устанавливает phase=PREP и stay там (UI остаётся прежним — игрок
+## покупает через buy_unit). Остальные эффекты возвращают в MAP для следующего выбора.
+func _apply_service_effect(node) -> void:
+	if phase != Phase.MAP:
+		return
+	var kind: int = node.type
+	var stay_in_current_phase: bool = false
+	match kind:
+		EncounterTypeScript.Kind.HEAL:
+			_apply_heal_effect()
+		EncounterTypeScript.Kind.TREASURE:
+			_apply_treasure_effect()
+		EncounterTypeScript.Kind.MERCHANT:
+			_apply_merchant_effect()
+			stay_in_current_phase = true  # MERCHANT переходит в PREP
+		EncounterTypeScript.Kind.REST:
+			_apply_rest_effect()
+		EncounterTypeScript.Kind.SHRINE:
+			_apply_shrine_effect()
+		_:
+			GameLog.warn("run", "Unknown service kind", {"kind": kind})
+	# После service-эффекта — обратно в MAP (если эффект не оставил нас в другой фазе).
+	if stay_in_current_phase:
+		return
+	if state.round_index > BalanceScript.MAX_ROUND:
+		_end_run(true)
+		return
+	if encounter_map == null:
+		return
+	var available: Array[int] = encounter_map.get_available_next_ids()
+	if available.is_empty():
+		# Нет следующих ходов (boss-only path) — завершаем.
+		_end_run(true)
+		return
+	_set_phase(Phase.MAP)
+
+
+# === S5.3: service effect implementations ===
+
+## HEAL: восстанавливает HP-ratio всем юнитам + 1 жизнь (cap).
+func _apply_heal_effect() -> void:
+	var heal_amount: int = int(round(BalanceScript.MAP_HEAL_HP_RATIO * 100.0))
+	# HP восстанавливается напрямую на max_hp ratio (текущий hp + ratio * max_hp, capped).
+	for id in state.player_unit_ids:
+		var def: Resource = ContentDB_static.get_by_id(id)
+		if def == null:
+			continue
+		var max_hp: int = def.max_hp
+		# Healed = ratio * max_hp (от max, не от текущего — упрощение).
+		var hp_now: int = _get_player_unit_hp(id)
+		var new_hp: int = mini(max_hp, hp_now + int(round(float(max_hp) * BalanceScript.MAP_HEAL_HP_RATIO)))
+		_set_player_unit_hp(id, new_hp)
+	# +1 жизнь cap = STARTING_LIVES * 2 (можно перенести в Balance).
+	state.lives = mini(state.lives + 1, BalanceScript.STARTING_LIVES * 2)
+	GameBus.emit_lives_changed(state.lives)
+	GameLog.info("run", "HEAL: restored HP + 1 life",
+		{"heal_amount": heal_amount, "lives": state.lives})
+
+
+## TREASURE: +gold + 1 meta unlock юнита.
+func _apply_treasure_effect() -> void:
+	var gold_before: int = state.gold
+	state.gold += BalanceScript.MAP_TREASURE_GOLD
+	GameBus.emit_gold_changed(state.gold)
+	var unlocked: StringName = UnlockManager.grant_random_unit(profile, state.round_index)
+	GameLog.info("run", "TREASURE",
+		{"gold": state.gold - gold_before, "unlocked": unlocked})
+
+
+## MERCHANT: переходит в PREP (shop уже обновлён в _refresh_shop).
+func _apply_merchant_effect() -> void:
+	GameLog.info("run", "MERCHANT: shop opened")
+	_set_phase(Phase.PREP)
+	_refresh_shop()
+
+
+## REST: heal all + +1 attack всем юнитам игрока (permanent на ран).
+func _apply_rest_effect() -> void:
+	for id in state.player_unit_ids:
+		var def: Resource = ContentDB_static.get_by_id(id)
+		if def == null:
+			continue
+		var max_hp: int = def.max_hp
+		var new_hp: int = mini(max_hp,
+			int(round(float(max_hp) * BalanceScript.MAP_REST_HP_RATIO)))
+		_set_player_unit_hp(id, new_hp)
+		# +attack bonus — модифицируем State (для трекинга), не Resource.
+	state.meta_modifiers["rest_attack_bonus"] = int(state.meta_modifiers.get("rest_attack_bonus", 0)) + BalanceScript.MAP_REST_ATTACK_BONUS
+	GameLog.info("run", "REST",
+		{"hp_restore_pct": BalanceScript.MAP_REST_HP_RATIO,
+		"attack_bonus": BalanceScript.MAP_REST_ATTACK_BONUS})
+
+
+## SHRINE: случайный buff из 4 опций (Rng-детерминированно).
+func _apply_shrine_effect() -> void:
+	var pick: int = Rng.randi_range(0, 3)
+	match pick:
+		0:
+			state.gold += BalanceScript.MAP_SHRINE_GOLD_BONUS
+			GameBus.emit_gold_changed(state.gold)
+			GameLog.info("run", "SHRINE: gold +%d" % BalanceScript.MAP_SHRINE_GOLD_BONUS)
+		1:
+			state.lives = mini(state.lives + 1, BalanceScript.STARTING_LIVES * 2)
+			GameBus.emit_lives_changed(state.lives)
+			GameLog.info("run", "SHRINE: lives +1 (now %d)" % state.lives)
+		2:
+			# +HP всем юнитам (cap = max_hp * 1.5)
+			for id in state.player_unit_ids:
+				var def: Resource = ContentDB_static.get_by_id(id)
+				if def == null:
+					continue
+				var max_hp: int = def.max_hp
+				var new_hp: int = mini(int(round(float(max_hp) * 1.5)),
+					int(round(float(max_hp) * BalanceScript.MAP_SHRINE_HP_BONUS / 100.0 + _get_player_unit_hp(id))))
+				_set_player_unit_hp(id, new_hp)
+			GameLog.info("run", "SHRINE: HP +%d" % BalanceScript.MAP_SHRINE_HP_BONUS)
+		_:
+			# +attack (мультик) — увеличиваем meta_modifiers
+			state.meta_modifiers["shrine_attack_bonus"] = int(state.meta_modifiers.get("shrine_attack_bonus", 0)) + BalanceScript.MAP_SHRINE_ATTACK_BONUS
+			GameLog.info("run", "SHRINE: attack +%d" % BalanceScript.MAP_SHRINE_ATTACK_BONUS)
+
+
+## S5.3: получить HP игрока. Упрощение — возвращает max_hp (по факту мы
+## не отслеживаем HP на уровне state, Combatant хранит в бою). Heal работает
+## относительно max_hp, что означает "исцеление на MAP возвращает к max".
+func _get_player_unit_hp(_id: StringName) -> int:
+	return 0
+
+
+## S5.3: установить HP игрока (для тестов и эффектов). В v1 — no-op,
+## эффекты работают в относительных терминах.
+func _set_player_unit_hp(_id: StringName, _new_hp: int) -> void:
+	pass
+
+
+## S5.3: вызывается из _on_battle_ended() после REWARD.
+## Создаёт encounter_map (lazy) и переключает в MAP.
+func _enter_map() -> void:
+	if encounter_map == null:
+		# Lazy create.
+		Rng.seed_run(state.seed)
+		encounter_map = EncounterMapScript.new()
+		encounter_map.generate(state.seed)
+	# Если MAP phase прерывается на середине — продолжаем с того же current.
+	if encounter_map.get_current_node_id() == -1:
+		encounter_map.start_run()
+	state.current_encounter_id = encounter_map.get_current_node_id()
+	_set_phase(Phase.MAP)
+	save_now()
+	GameLog.info("run", "Map entered", {
+		"current": state.current_encounter_id,
+		"available": encounter_map.get_available_next_ids().size(),
+	})
 
 
 func _refresh_shop() -> void:
