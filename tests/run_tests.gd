@@ -171,6 +171,9 @@ func _initialize() -> void:
 	_test_run_controller_save_now_signal()
 	_test_run_controller_end_run_clears_active()
 	_test_run_controller_save_after_battle()
+	_test_run_controller_resume_run()
+	_test_run_controller_resume_run_no_save()
+	_test_run_controller_resume_run_signal()
 
 	print("\n=== Result: %d passed, %d failed ===\n" % [_passed, _failed])
 
@@ -1819,6 +1822,74 @@ func _test_run_controller_save_after_battle() -> void:
 	_assert(loaded != null, "load не null")
 	_assert(loaded.round_index == 2, "round_index = 2 в save (got %d)" % loaded.round_index)
 	SaveService.delete_run(888)
+	_cleanup_ctrl(ctrl)
+
+
+func _test_run_controller_resume_run() -> void:
+	print("[test] S3.3: RunController.resume_run(seed) загружает state")
+	# Save.
+	var save_ctrl: Node = RunControllerScript.new()
+	get_root().add_child.call_deferred(save_ctrl)
+	await process_frame
+	save_ctrl.start_run(789)
+	save_ctrl.profile = MetaProfileScript.new()
+	save_ctrl.state.gold = 75
+	save_ctrl.state.round_index = 5
+	save_ctrl.save_now()
+	_cleanup_ctrl(save_ctrl)
+
+	# Resume: новый контроллер загружает state из диска.
+	var ctrl: Node = RunControllerScript.new()
+	get_root().add_child.call_deferred(ctrl)
+	await process_frame
+	ctrl.profile = MetaProfileScript.new()
+	ctrl.profile.current_run_seed = 789
+	var ok: bool = ctrl.resume_run(789)
+	_assert(ok, "resume_run(789) = true")
+	_assert(ctrl.state.seed == 789, "state.seed = 789 (got %d)" % ctrl.state.seed)
+	_assert(ctrl.state.gold == 75, "state.gold = 75 (got %d)" % ctrl.state.gold)
+	_assert(ctrl.state.round_index == 5, "state.round_index = 5 (got %d)" % ctrl.state.round_index)
+	_assert(ctrl.phase == RunControllerScript.Phase.PREP, "phase = PREP после resume (got %d)" % ctrl.phase)
+	SaveService.delete_run(789)
+	_cleanup_ctrl(ctrl)
+
+
+func _test_run_controller_resume_run_no_save() -> void:
+	print("[test] S3.3: resume_run без сохранения → false")
+	var ctrl: Node = RunControllerScript.new()
+	get_root().add_child.call_deferred(ctrl)
+	await process_frame
+	ctrl.start_run(42)
+	ctrl.profile = MetaProfileScript.new()
+	var ok: bool = ctrl.resume_run(99999)  # не существует
+	_assert(ok == false, "resume_run(99999) = false (no save)")
+	_assert(ctrl.state.seed == 42, "state.seed не изменился (got %d)" % ctrl.state.seed)
+	_cleanup_ctrl(ctrl)
+
+
+func _test_run_controller_resume_run_signal() -> void:
+	print("[test] S3.3: resume_run() emit run_resumed signal")
+	var save_ctrl: Node = RunControllerScript.new()
+	get_root().add_child.call_deferred(save_ctrl)
+	await process_frame
+	save_ctrl.start_run(321)
+	save_ctrl.profile = MetaProfileScript.new()
+	save_ctrl.save_now()
+	_cleanup_ctrl(save_ctrl)
+
+	var ctrl: Node = RunControllerScript.new()
+	get_root().add_child.call_deferred(ctrl)
+	await process_frame
+	var resumed_box: Array = [null]
+	var bus: Node = get_root().get_node_or_null("EventBus")
+	if bus != null:
+		bus.run_resumed.connect(func(s: int) -> void: resumed_box[0] = s)
+	ctrl.resume_run(321)
+	if bus != null:
+		_assert(resumed_box[0] == 321, "run_resumed(321) emitted (got %s)" % str(resumed_box[0]))
+	_assert(ctrl.state.seed == 321, "state.seed = 321 (got %d)" % ctrl.state.seed)
+	_assert(ctrl.state.round_index == 1, "state.round_index = 1 (start state) (got %d)" % ctrl.state.round_index)
+	SaveService.delete_run(321)
 	_cleanup_ctrl(ctrl)
 
 

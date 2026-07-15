@@ -207,6 +207,32 @@ func _clear_active_run() -> void:
 		# meta save уже вызывается в _end_run — здесь не дублируем.
 
 
+## S3.3: загружает RunState из диска по seed и продолжает ран с PREP фазы.
+## Возвращает true если state загружен успешно.
+## НЕ пересоздаёт state — заменяет self.state на загруженный.
+## Если файла нет — возвращает false, state остаётся прежним.
+func resume_run(seed_value: int) -> bool:
+	if seed_value == 0:
+		GameLog.warn("run", "resume_run: seed == 0")
+		return false
+	var loaded: RunState = SaveService.load_run(seed_value)
+	if loaded == null:
+		GameLog.warn("run", "resume_run: no save for seed", {"seed": seed_value})
+		return false
+	state = loaded
+	# Rng восстанавливаем из seed для детерминизма (на случай если seed_run не звался).
+	Rng.seed_run(state.seed)
+	# Shop перегенерируем (transient — был утерян при restart).
+	_refresh_shop()
+	_set_phase(Phase.PREP)
+	if profile != null:
+		profile.current_run_seed = state.seed
+		SaveService.save_meta(profile)
+	GameBus.emit_run_resumed(state.seed)
+	GameLog.info("run", "Run resumed", {"seed": state.seed, "round": state.round_index})
+	return true
+
+
 ## S3.1.5: переход в фазу REWARD после победы (кроме round 1).
 func _enter_reward() -> void:
 	reward.generate_offer(state.round_index)
