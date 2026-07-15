@@ -155,6 +155,11 @@ func _initialize() -> void:
 	_test_run_controller_skip_reward()
 	_test_run_controller_no_reward_on_first_run_start()
 	_test_run_controller_max_round_no_reward()
+	# S3.2: meta progression
+	_test_meta_unlock_grant_random()
+	_test_meta_unlock_grant_random_determinism()
+	_test_meta_unlock_grant_random_all_unlocked()
+	_test_meta_unlock_tier_weighted_round()
 
 	print("\n=== Result: %d passed, %d failed ===\n" % [_passed, _failed])
 
@@ -1574,6 +1579,63 @@ func _test_run_controller_max_round_no_reward() -> void:
 	_assert(ctrl.phase == RunControllerScript.Phase.GAMEOVER, "phase = GAMEOVER (got %d)" % ctrl.phase)
 	_assert(ctrl.state.round_index == BalanceScript.MAX_ROUND + 1, "round_index = MAX+1 (got %d)" % ctrl.state.round_index)
 	_cleanup_ctrl(ctrl)
+
+
+# === S3.2 Meta progression unlocks ===
+
+func _test_meta_unlock_grant_random() -> void:
+	print("[test] S3.2: UnlockManager.grant_random_unit()")
+	Rng.seed_run(1234)
+	var profile: MetaProfile = MetaProfileScript.new()
+	var size_before: int = profile.unlocked_units.size()
+	var unlocked: StringName = UnlockManager.grant_random_unit(profile, 5)
+	_assert(unlocked != &"", "выдал непустой id (got empty)")
+	_assert(profile.unlocked_units.size() == size_before + 1, "+1 юнит в profile (was %d, now %d)" % [size_before, profile.unlocked_units.size()])
+	_assert(UnlockManager.is_unit_unlocked(profile, unlocked), "выданный юнит %s теперь в profile" % unlocked)
+	# Новый юнит — НЕ из стартового набора (warrior/archer/goblin) И НЕ goblin (он стартовый).
+	var fresh: MetaProfile = MetaProfileScript.new()
+	_assert(not UnlockManager.is_unit_unlocked(fresh, unlocked), "выданный юнит НЕ в стартовом наборе")
+
+
+func _test_meta_unlock_grant_random_determinism() -> void:
+	print("[test] S3.2: grant_random_unit детерминизм (тот же seed = тот же unlock)")
+	Rng.seed_run(555)
+	var p1: MetaProfile = MetaProfileScript.new()
+	var id1: StringName = UnlockManager.grant_random_unit(p1, 4)
+	Rng.seed_run(555)
+	var p2: MetaProfile = MetaProfileScript.new()
+	var id2: StringName = UnlockManager.grant_random_unit(p2, 4)
+	_assert(id1 == id2, "тот же seed → тот же unlock (got %s vs %s)" % [str(id1), str(id2)])
+
+
+func _test_meta_unlock_grant_random_all_unlocked() -> void:
+	print("[test] S3.2: grant_random_unit когда все unlocked → empty")
+	Rng.seed_run(7777)
+	var profile: MetaProfile = MetaProfileScript.new()
+	# Разблокируем ВСЕ юниты из UnitsMeta.
+	for id in UnitsMetaScript.all_ids():
+		UnlockManager.grant_unit(profile, id)
+	var unlocked: StringName = UnlockManager.grant_random_unit(profile, 5)
+	_assert(unlocked == &"", "все unlocked → return empty (got %s)" % str(unlocked))
+
+
+func _test_meta_unlock_tier_weighted_round() -> void:
+	print("[test] S3.2: tier-weighted по round_index (round 9 → tier 2+)")
+	# round 9 → target_tier = clamp(9/3, 1, 3) = 3.
+	# 60% tier 3, 30% tier 2, 10% tier 4→clamped to 3.
+	# Делаем 50 попыток с разными seed — все должны быть tier 2 или 3.
+	var tier_counts: Dictionary = {1: 0, 2: 0, 3: 0}
+	for s in 50:
+		Rng.seed_run(1000 + s)
+		var p: MetaProfile = MetaProfileScript.new()
+		var id: StringName = UnlockManager.grant_random_unit(p, 9)
+		var def: Resource = ContentDB_static.get_by_id(id)
+		if def != null and def.tier in tier_counts:
+			tier_counts[def.tier] += 1
+	_assert(tier_counts[1] == 0, "round 9 → НЕ tier 1 (got %d)" % tier_counts[1])
+	_assert(tier_counts[2] + tier_counts[3] == 50, "round 9 → все tier 2 или 3 (got %d)" % (tier_counts[2] + tier_counts[3]))
+	# Должны быть оба (tier-weighted, не только target).
+	_assert(tier_counts[3] >= tier_counts[2], "tier 3 ≥ tier 2 (got %d vs %d)" % [tier_counts[3], tier_counts[2]])
 
 
 
