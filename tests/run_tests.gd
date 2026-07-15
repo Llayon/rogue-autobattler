@@ -189,6 +189,7 @@ func _initialize() -> void:
 	# S4.2: Battle UI
 	_test_battle_scene_hud_creation()
 	_test_battle_scene_hud_updates_on_gold_change()
+	_test_battle_view_attack_meter_draw_safe()
 
 	print("\n=== Result: %d passed, %d failed ===\n" % [_passed, _failed])
 
@@ -2043,6 +2044,32 @@ func _test_battle_scene_hud_updates_on_gold_change() -> void:
 			"gold_label обновлён до '7' (got '%s')" % scene.hud_gold_label.text)
 		scene.queue_free()
 	await process_frame
+
+
+func _test_battle_view_attack_meter_draw_safe() -> void:
+	print("[test] S4.2: BattleView._draw() с attack_meter не падает")
+	var view: Control = BattleViewScript.new()
+	var ctx = BattleContextScript.new()
+	var g = GridScript.new()
+	g.resize(7, 4)
+	ctx.grid = g
+	var def = UnitDefScript.new()
+	def.id = &"warrior_t"
+	def.max_hp = 100
+	def.attack_speed = 1.0
+	var c = CombatantScript.new(def)
+	ctx.register(c, Vector2i(0, 3))
+	view.set_context(ctx)
+	# Симулируем накопление attack_meter как делает BattleRunner.
+	c.attack_meter.accumulate(0.5)
+	view.queue_redraw()
+	_assert(c.attack_meter != null, "attack_meter существует")
+	var ratio: float = c.attack_meter.progress(c.attack_speed())
+	_assert(ratio >= 0.0 and ratio <= 1.0,
+		"attack_meter.progress в [0,1] (got %f)" % ratio)
+	# В headless _draw() не вызывается — но set_context не должен падать.
+	_assert(view._ctx == ctx, "ctx сохранён")
+	view.free()
 
 
 

@@ -58,6 +58,10 @@ func _draw() -> void:
 		var bar_rect: Rect2 = Rect2(pos.x, pos.y + sz.y + 2, bar_w, BAR_HEIGHT)
 		draw_rect(bar_rect, Color(0.2, 0.9, 0.3))
 		draw_rect(Rect2(pos.x, pos.y + sz.y + 2, sz.x, BAR_HEIGHT), Color(0.3, 0.0, 0.0), false, 1.0)
+		# S4.2: attack meter indicator (жёлтая полоска прогресса).
+		var meter_ratio: float = clampf(c.attack_meter.progress(c.attack_speed()), 0.0, 1.0)
+		var meter_w: float = sz.x * meter_ratio
+		draw_rect(Rect2(pos.x, pos.y + sz.y + 10, meter_w, 2), Color(1.0, 0.9, 0.3))
 		# Статусы.
 		var statuses: Array = c.active_statuses()
 		for i in statuses.size():
