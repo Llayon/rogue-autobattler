@@ -25,6 +25,21 @@ const REWARD_TIER_BASE_WEIGHT: float = 0.6  # 60% — основной tier дл
 const REWARD_TIER_MINUS_WEIGHT: float = 0.3  # 30% — tier-1 (если >0)
 const REWARD_TIER_PLUS_WEIGHT: float = 0.1   # 10% — tier+1 (если <4)
 
+# === Encounter map (S5.1) ===
+# Веса для типов энкаунтеров при генерации графа.
+# Сумма всех весов = 1.0 (для вероятностей).
+const MAP_COMBAT_WEIGHT: float = 0.50
+const MAP_ELITE_WEIGHT: float = 0.10
+const MAP_HEAL_WEIGHT: float = 0.08
+const MAP_TREASURE_WEIGHT: float = 0.10
+const MAP_MERCHANT_WEIGHT: float = 0.08
+const MAP_REST_WEIGHT: float = 0.08
+const MAP_SHRINE_WEIGHT: float = 0.06
+# Параметры графа.
+const MAP_MIN_NODES_PER_LAYER: int = 2
+const MAP_MAX_NODES_PER_LAYER: int = 4
+const MAP_MAX_DEPTH: int = 10
+
 # === Meta progression (S3.2) ===
 # За каждую победу в ране разблокировать META_UNLOCKS_PER_WIN юнитов.
 # 1 = консервативный темп: 10 побед → 10 новых юнитов в коллекции.
