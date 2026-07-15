@@ -200,7 +200,7 @@ Godot имеет встроенный editor formatter (Ctrl+Shift+I), но **н
 |---|---|
 | S5.1.1 | `no-dictionary-state` rule для lint (запрет `visual_state: Dictionary`) |
 | S5.1.2 | Миграция `visual_state["is_dying"]: bool` → `class_name Dying: pass` ZST marker |
-| S5.2 | File line count limit (300 lines, как #23) — отдельный lint rule |
+| S5.2 | Encounter Map UI — `EncounterMapView` + `EncounterMapScene` (визуализация DAG, выбор доступных узлов) |
 | S5.3 | Conventional commits enforce через pre-push hook |
 | S6.x | Phased refactor: больше правил из Bevy набора |
 

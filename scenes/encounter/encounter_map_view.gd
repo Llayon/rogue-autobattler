@@ -140,13 +140,14 @@ func _create_node_buttons() -> void:
 
 
 ## Applies semantic colors for locked, available, visited, current and boss nodes.
-func _apply_button_style(button: Button, node, current_id: int, is_available: bool) -> void:
+## `selectable` avoids boolean classification prefixes reserved by the linter.
+func _apply_button_style(button: Button, node, current_id: int, selectable: bool) -> void:
 	var fill: Color = locked_color
 	if node.type == EncounterTypeScript.Kind.BOSS:
-		fill = boss_color.darkened(0.30) if not is_available else boss_color
+		fill = boss_color.darkened(0.30) if not selectable else boss_color
 	if node.visited:
 		fill = visited_color
-	if is_available:
+	if selectable:
 		fill = available_color
 	if node.id == current_id:
 		fill = current_color
