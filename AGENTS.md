@@ -69,6 +69,82 @@
 | Event-driven через GameBus | `GameBus.emit_unit_died(self)` в core, `EventBus.unit_died.connect(...)` в scene |
 | Round-trip строки | `int(some_string)` в `.to_dict()` сериализации (строки восстанавливаются как строки) |
 
+## Conventional Commits (формат)
+
+**ОБЯЗАТЕЛЬНО для всех коммитов.** Hook `.githooks/commit-msg` валидирует — commit без правильного формата отклоняется.
+
+### Формат
+
+```
+<type>(<scope>): <subject>
+```
+
+### Типы
+
+| Type | Когда |
+|---|---|
+| `feat` | Новая функциональность (sprint scope) |
+| `fix` | Баг-фикс |
+| `chore` | Инфраструктура, баланс-константы, tooling, без изменения логики |
+| `test` | Только тесты (без production кода) |
+| `docs` | Только документация |
+| `refactor` | Реструктуризация без изменения поведения |
+| `perf` | Оптимизация производительности |
+
+### Scope
+
+- **Sprint version** (lowercase + dots): `s3.1`, `s3.1.5`, `s4.3`, `s5.1`, `sprint2`
+- **Area** (lowercase): `core`, `rng`, `ui`, `content`, `repo`, `sprint1`
+
+### Subject
+
+- ≤72 символов
+- Lowercase после `scope:`
+- **Imperative mood**: "add" не "added", "fix" не "fixed"
+- **No period** в конце
+- Capitalize только аббревиатуры (UI, HUD, DoS)
+
+### Примеры
+
+```
+feat(s5.1): EncounterMap generates DAG with tier weights
+fix(rng): критический bug детерминизма в Rng.pick_unique
+test(s4.1): scene smoke tests для main, battle_scene, battle_view
+chore(s3.2): add meta progression balance constants
+chore(repo): commit-msg hook enforcing conventional commits
+```
+
+### Body (опционально, рекомендуется для non-trivial)
+
+Используй несколько `-m` флагов или heredoc. Секции (если есть body):
+
+```
+Why:
+- motivation
+
+What:
+- concrete files/areas changed
+
+Verification:
+- tests run
+
+Risks:
+- follow-up concerns
+```
+
+### Шаблон
+
+`.gitmessage.txt` содержит шаблон — Git автоматически подставляет его при `git commit` без `-m`.
+
+### Hook setup (после clone)
+
+```bash
+git config core.hooksPath .githooks
+chmod +x .githooks/commit-msg  # только Linux/Mac; на Windows — git config достаточно
+```
+
+Hook **пропускает**: `Merge ...`, `Revert ...`, `fixup! ...`, `squash! ...`, `amend! ...`
+
 ## Структура проекта
 
 ```
