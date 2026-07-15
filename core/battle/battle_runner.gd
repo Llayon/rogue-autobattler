@@ -35,6 +35,11 @@ func step(dt: float) -> void:
 	if state.phase != 1:  # BATTLE
 		return
 	state.battle_time += dt
+	# S4.3: тикаем visual_state (flash/fade/pos_lerp) ПЕРЕД основной логикой.
+	for c in ctx.all_combatants():
+		c._tick_visual(dt)
+	# S4.3: чистим faded combatants (когда fade_alpha=0 после смерти).
+	_cleanup_faded()
 	# 1. Статусы + ресурсы (mana, regen).
 	for c in ctx.all_combatants():
 		c.tick_statuses(dt)
@@ -96,6 +101,18 @@ func _cleanup_dead() -> void:
 		if c == null:
 			continue
 		if not c.is_alive():
+			to_remove.append(c)
+	for c in to_remove:
+		ctx.unregister(c)
+
+
+## S4.3: удаляет combatant после полного fade-out (fade_alpha <= 0).
+func _cleanup_faded() -> void:
+	var to_remove: Array = []
+	for c in ctx.combatant_registry:
+		if c == null:
+			continue
+		if c.visual_state["is_dying"] and c.visual_state["fade_alpha"] <= 0.0:
 			to_remove.append(c)
 	for c in to_remove:
 		ctx.unregister(c)

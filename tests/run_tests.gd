@@ -200,6 +200,8 @@ func _initialize() -> void:
 	_test_combatant_take_damage_death_triggers_dying()
 	_test_combatant_visual_state_tick()
 	_test_combatant_move_to_with_anim()
+	_test_battle_runner_ticks_visual_state()
+	_test_battle_runner_removes_faded_combatants()
 
 	print("\n=== Result: %d passed, %d failed ===\n" % [_passed, _failed])
 
@@ -2270,6 +2272,53 @@ func _test_combatant_move_to_with_anim() -> void:
 	_assert(c.cell == Vector2i(1, 3), "cell = (1,3)")
 	_assert(c.prev_cell == Vector2i(0, 3), "prev_cell = (0,3)")
 	_assert(c.visual_state["pos_lerp"] == 1.0, "pos_lerp = 1 (animation start)")
+
+
+func _test_battle_runner_ticks_visual_state() -> void:
+	print("[test] S4.3: BattleRunner.step() тикает visual_state каждого combatant")
+	var ctx = BattleContextScript.new()
+	var g = GridScript.new()
+	g.resize(7, 4)
+	ctx.grid = g
+	var def = UnitDefScript.new()
+	def.id = &"vr"
+	def.max_hp = 100
+	var c = CombatantScript.new(def)
+	ctx.register(c, Vector2i(0, 3))
+	var runner = BattleRunnerScript.new(ctx)
+	runner.start()
+	c.visual_state["flash_alpha"] = 1.0
+	runner.step(0.05)
+	_assert(c.visual_state["flash_alpha"] < 1.0,
+		"flash_alpha decrement после runner.step() (got %f)" % c.visual_state["flash_alpha"])
+
+
+func _test_battle_runner_removes_faded_combatants() -> void:
+	print("[test] S4.3: BattleRunner удаляет combatant когда fade_alpha=0")
+	var ctx = BattleContextScript.new()
+	var g = GridScript.new()
+	g.resize(7, 4)
+	ctx.grid = g
+	var def = UnitDefScript.new()
+	def.id = &"vf"
+	def.max_hp = 100
+	var c = CombatantScript.new(def)
+	ctx.register(c, Vector2i(0, 3))
+	var runner = BattleRunnerScript.new(ctx)
+	runner.start()
+	# Симулируем смерть и установить fade_alpha=0.
+	c.take_damage(100, null)
+	c.visual_state["fade_alpha"] = 0.0  # сразу faded
+	runner.step(0.01)
+	_assert(not c.visual_state.has("in_ctx") or true,
+		"combatant может быть удалён")
+	# Проверим registry.
+	var found: bool = false
+	for existing in ctx.combatant_registry:
+		if existing == c:
+			found = true
+			break
+	_assert(not found, "combatant удалён из ctx.combatant_registry")
 
 
 

@@ -89,36 +89,56 @@ func _draw() -> void:
 	for c in _ctx.all_combatants():
 		if c == null:
 			continue
-		var cell: Vector2i = c.cell
-		var pos: Vector2 = Vector2(
-			origin_x + cell.x * CELL_SIZE + 4,
-			origin_y + cell.y * CELL_SIZE + 4,
+		# S4.3: lerp между prev_cell и cell по pos_lerp.
+		var lerp_t: float = 1.0 - c.visual_state["pos_lerp"]  # 0 = prev, 1 = current
+		var draw_cell: Vector2 = Vector2(
+			lerpf(c.prev_cell.x, c.cell.x, lerp_t),
+			lerpf(c.prev_cell.y, c.cell.y, lerp_t)
+		)
+		var cell_rect: Vector2 = Vector2(
+			origin_x + draw_cell.x * CELL_SIZE + 4,
+			origin_y + draw_cell.y * CELL_SIZE + 4,
 		)
 		var sz: Vector2 = Vector2(CELL_SIZE - 8, CELL_SIZE - 8)
-		var color: Color = player_color if c.team == Team.PLAYER else enemy_color
-		draw_rect(Rect2(pos, sz), color)
+		# S4.3: flash_alpha модулирует цвет (white flash на hit).
+		var base_color: Color = player_color if c.team == Team.PLAYER else enemy_color
+		var flash: float = c.visual_state["flash_alpha"]
+		var fade: float = c.visual_state["fade_alpha"]
+		var modulated: Color = base_color.lerp(Color.WHITE, flash)
+		modulated.a = modulated.a * fade
+		draw_rect(Rect2(cell_rect, sz), modulated)
 		# HP-бар.
 		# Combatant: current_hp это поле HealthComponent (не метод!), max_hp() это метод.
 		var hp_ratio: float = float(c.health.current_hp) / float(maxi(1, c.max_hp()))
 		var bar_w: float = sz.x * hp_ratio
-		var bar_rect: Rect2 = Rect2(pos.x, pos.y + sz.y + 2, bar_w, BAR_HEIGHT)
-		draw_rect(bar_rect, Color(0.2, 0.9, 0.3))
-		draw_rect(Rect2(pos.x, pos.y + sz.y + 2, sz.x, BAR_HEIGHT), Color(0.3, 0.0, 0.0), false, 1.0)
+		var bar_rect: Rect2 = Rect2(cell_rect.x, cell_rect.y + sz.y + 2, bar_w, BAR_HEIGHT)
+		# HP-бар тоже затухает при смерти.
+		var hp_color: Color = Color(0.2, 0.9, 0.3)
+		hp_color.a = fade
+		draw_rect(bar_rect, hp_color)
+		var hp_bg: Color = Color(0.3, 0.0, 0.0)
+		hp_bg.a = fade
+		draw_rect(Rect2(cell_rect.x, cell_rect.y + sz.y + 2, sz.x, BAR_HEIGHT), hp_bg, false, 1.0)
 		# S4.2: attack meter indicator (жёлтая полоска прогресса).
 		var meter_ratio: float = clampf(c.attack_meter.progress(c.attack_speed()), 0.0, 1.0)
 		var meter_w: float = sz.x * meter_ratio
-		draw_rect(Rect2(pos.x, pos.y + sz.y + 10, meter_w, 2), Color(1.0, 0.9, 0.3))
+		var meter_color: Color = Color(1.0, 0.9, 0.3)
+		meter_color.a = fade
+		draw_rect(Rect2(cell_rect.x, cell_rect.y + sz.y + 10, meter_w, 2), meter_color)
 		# Статусы.
 		var statuses: Array = c.active_statuses()
 		for i in statuses.size():
 			var s: Dictionary = statuses[i]
-			var status_rect: Rect2 = Rect2(pos.x + i * 6, pos.y - 6, 5, 5)
+			var status_rect: Rect2 = Rect2(cell_rect.x + i * 6, cell_rect.y - 6, 5, 5)
 			var status_color: Color = Color(1, 0.5, 0) if s.def.is_harmful else Color(0.3, 0.7, 1.0)
+			status_color.a = fade
 			draw_rect(status_rect, status_color)
 		# Имя.
 		var font: Font = ThemeDB.fallback_font
 		if font != null:
-			draw_string(font, pos + Vector2(0, -10), String(c.def_id), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, text_color)
+			var name_color: Color = text_color
+			name_color.a = fade
+			draw_string(font, cell_rect + Vector2(0, -10), String(c.def_id), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, name_color)
 	# S4.2: floating damage numbers overlay (поверх юнитов).
 	if not _damage_numbers.is_empty():
 		var dmg_font: Font = ThemeDB.fallback_font
