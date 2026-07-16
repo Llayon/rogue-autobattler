@@ -162,16 +162,11 @@ func _on_battle_ended() -> void:
 		if state.round_index > BalanceScript.MAX_ROUND:
 			_end_run(true)
 			return
-		# S5.3: round 1 → PREP (стартовый набор, без MAP и без REWARD).
-		if state.round_index == 2:
-			# Победа в первом бою — без reward, сразу в PREP для следующего раунда.
-			# Это сохраняет существующее поведение round 1 → PREP.
-			_set_phase(Phase.PREP)
-			_refresh_shop()
-			GameBus.emit_round_started(state.round_index)
-		else:
-			# Round 2..MAX_ROUND-1 → reward screen.
-			_enter_reward()
+		# S6.1: после каждой победы (включая round 1) показываем REWARD.
+		# Затем _enter_prep_or_map_after_reward() маршрутизирует:
+		# round 1 → PREP (стартовый набор уже на доске).
+		# round 2..MAX_ROUND-1 → MAP (игрок выбирает следующий нод).
+		_enter_reward()
 	elif winner == 1:
 		state.losses += 1
 		state.lives -= 1

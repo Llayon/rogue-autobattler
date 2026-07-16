@@ -1653,15 +1653,15 @@ func _test_run_controller_skip_reward() -> void:
 	get_root().add_child.call_deferred(ctrl)
 	await process_frame
 	ctrl.start_run(42)
-	# Round 1 win → сразу PREP (без reward, без MAP).
+	# S6.1: round 1 win → REWARD (раньше был PREP no MAP).
 	ctrl.state.round_index = 1
 	ctrl.state.wins = 0
 	ctrl.start_battle()
 	ctrl.runner.state.phase = BattleStateScriptForCtrl.Phase.ENDED
 	ctrl.runner.state.winner_team = 0
 	ctrl.tick_battle(0.1)
-	_assert(ctrl.phase == RunControllerScript.Phase.PREP,
-		"round 1 win -> PREP (got %d)" % ctrl.phase)
+	_assert(ctrl.phase == RunControllerScript.Phase.REWARD,
+			"round 1 win -> REWARD (got %d)" % ctrl.phase)
 	# Round 2 win → REWARD.
 	ctrl.state.round_index = 2
 	ctrl.state.wins = 1
@@ -1935,10 +1935,10 @@ func _test_run_controller_save_after_battle() -> void:
 	_assert(SaveService.has_run(888), "file run_888.tres exists after battle")
 	var loaded: RunState = SaveService.load_run(888)
 	_assert(loaded != null, "load не null")
-	# S5.3: save_now() в _on_battle_ended фиксирует состояние ДО increment —
-	# "snapshot последнего завершённого боя" (round_index = то, что мы играли).
-	_assert(loaded.round_index == 1, "round_index = 1 в save snapshot (got %d)" % loaded.round_index)
-	# После load — ctrl.state уже incremented (in-memory).
+	# S6.1: save обновляется на каждой phase transition (REWARD → MAP).
+	# round_index = 2 после _enter_map (бывший snapshot pre-increment
+	# уже перезаписан на post-REWARD-state).
+	_assert(loaded.round_index == 2, "round_index = 2 после _enter_map (got %d)" % loaded.round_index)
 	_assert(ctrl.state.round_index == 2, "ctrl.state.round_index = 2 после _on_battle_ended (got %d)" % ctrl.state.round_index)
 	SaveService.delete_run(888)
 	_cleanup_ctrl(ctrl)
@@ -2858,8 +2858,9 @@ func _test_run_controller_phase_flow_to_map() -> void:
 	ctrl.runner.state.phase = BattleStateScriptForCtrl.Phase.ENDED
 	ctrl.runner.state.winner_team = 0
 	ctrl.tick_battle(0.1)
-	_assert(ctrl.phase == RunControllerScript.Phase.PREP,
-		"round 1 win -> PREP no MAP (got %d)" % ctrl.phase)
+	# S6.1: round 1 win → REWARD (раньше был PREP no MAP).
+	_assert(ctrl.phase == RunControllerScript.Phase.REWARD,
+			"round 1 win -> REWARD (got %d)" % ctrl.phase)
 	ctrl.state.round_index = 2
 	ctrl.start_battle()
 	ctrl.runner.state.phase = BattleStateScriptForCtrl.Phase.ENDED
