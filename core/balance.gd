@@ -76,6 +76,11 @@ const WIN_BONUS_PER_ROUND: int = 1           # +1 за каждый раунд (
 # === Боевая сетка ===
 const GRID_WIDTH: int = 7
 const GRID_HEIGHT: int = 4
+# S6.1.1: capacity для авто-расстановки reward юнитов.
+# Если player_unit_ids.size() < MAX_BOARD_UNITS, reward unit идёт прямо на доску.
+# Иначе — в bench (где он будет ждать drag-and-drop UI).
+const MAX_BOARD_UNITS: int = 4
+const MAX_BENCH_UNITS: int = 4
 
 # === Время ===
 const DEFAULT_TICK_DT: float = 1.0 / 20.0    # 20 тиков/сек — баланс между плавностью и CPU

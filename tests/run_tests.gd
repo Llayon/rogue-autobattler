@@ -1631,10 +1631,19 @@ func _test_run_controller_reward_phase() -> void:
 	if bus != null:
 		_assert(bus != null, "EventBus available")
 	# Игрок берёт слот 0 — после REWARD на round 3 переходит в MAP (S5.3).
+	# S6.1.1: reward юнит auto-placed на доску если есть room (board_size < 4).
+	# Start: 2 units (warrior+archer). Pick slot 0 → 3 units on board.
+	var board_before: int = ctrl.state.player_unit_ids.size()
+	var bench_before: int = ctrl.state.bench_unit_ids.size()
+	_assert(board_before < BalanceScript.MAX_BOARD_UNITS,
+		"before choose_reward board not full (size=%d, max=%d)" % [board_before, BalanceScript.MAX_BOARD_UNITS])
 	var taken: Resource = ctrl.choose_reward(0)
 	_assert(taken != null, "choose_reward(0) вернул UnitDef (got %s)" % str(taken))
 	_assert(ctrl.phase == RunControllerScript.Phase.MAP, "phase = MAP после choose_reward (got %d)" % ctrl.phase)
-	_assert(ctrl.state.bench_unit_ids.has(taken.id), "юнит %s добавлен в bench" % taken.id)
+	_assert(ctrl.state.player_unit_ids.has(taken.id),
+		"юнит %s auto-placed на доску (board %d -> %d)" % [taken.id, board_before, ctrl.state.player_unit_ids.size()])
+	_assert(ctrl.state.bench_unit_ids.size() == bench_before,
+		"bench не изменился (was %d, now %d)" % [bench_before, ctrl.state.bench_unit_ids.size()])
 	_cleanup_ctrl(ctrl)
 
 
@@ -2664,6 +2673,7 @@ func _test_encounter_map_scene_preview_progression() -> void:
 	_assert(scene.status_label != null, "preview has status label")
 	var available: Array[int] = scene.encounter_map.get_available_next_ids()
 	var chosen_id: int = available[0]
+	scene._delegate_selection = false  # S6.1: legacy preview mode.
 	scene._on_node_selected(chosen_id)
 	_assert(scene.encounter_map.get_current_node_id() == chosen_id,
 		"preview applies choose_next")

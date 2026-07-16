@@ -294,6 +294,8 @@ func _enter_prep_or_map_after_reward() -> void:
 
 
 ## Игрок выбирает юнита из reward. Возвращает UnitDef или null.
+## Авто-размещение: если на доске меньше MAX_BOARD_UNITS, юнит сразу идёт
+## в player_unit_ids (рядом с другими). Иначе — в bench для будущего UI drag-drop.
 ## Переводит в MAP или PREP после выбора (S5.3).
 func choose_reward(slot: int) -> Resource:
 	if phase != Phase.REWARD:
@@ -301,9 +303,24 @@ func choose_reward(slot: int) -> Resource:
 	var def: Resource = reward.offer_at(slot)
 	if def == null:
 		return null
-	state.bench_unit_ids.append(def.id)
+	# S6.1.1: auto-place reward unit onto board if there's room.
+	if state.player_unit_ids.size() < BalanceScript.MAX_BOARD_UNITS:
+		state.player_unit_ids.append(def.id)
+		# S5.4: register per-unit state so HP persists between battles.
+		var max_hp: int = def.max_hp if def != null else 100
+		state.unit_states.append(RunUnitState.new(def.id, max_hp, -1))
+		GameLog.info("run", "Reward chosen (auto-placed on board)",
+			{"id": def.id, "round": state.round_index, "board_size": state.player_unit_ids.size()})
+	else:
+		# Board full — bench. Будет виден в future bench UI.
+		if state.bench_unit_ids.size() >= BalanceScript.MAX_BENCH_UNITS:
+			GameLog.warn("run", "Reward chosen but bench full",
+				{"id": def.id, "bench": state.bench_unit_ids.size()})
+			return null
+		state.bench_unit_ids.append(def.id)
+		GameLog.info("run", "Reward chosen (sent to bench)",
+			{"id": def.id, "round": state.round_index, "bench_size": state.bench_unit_ids.size()})
 	GameBus.emit_reward_chosen(def.id, slot)
-	GameLog.info("run", "Reward chosen", {"id": def.id, "round": state.round_index})
 	_enter_prep_or_map_after_reward()
 	return def
 
