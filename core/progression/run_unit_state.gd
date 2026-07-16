@@ -22,11 +22,6 @@ func _init(p_unit_id: StringName = &"", p_max_hp: int = -1, p_current_hp: int = 
 	current_hp = p_current_hp
 
 
-## Возвращает effective HP (current_hp если установлен, иначе max_hp).
-func effective_hp() -> int:
-	if current_hp > 0:
-		return current_hp
-	return max_hp
 
 
 ## Применяет урон. Возвращает фактически нанесённый урон.
@@ -55,13 +50,25 @@ func kill() -> void:
 
 
 ## True если юнит жив (current_hp > 0).
+## Sentinel -1 = "use max_hp" → считается живым с полным HP.
 func is_alive() -> bool:
+	if current_hp < 0:
+		return true  # sentinel = полный HP
 	return current_hp > 0
 
 
-## True если юнит мёртв.
+## True если юнит мёртв (current_hp == 0 explicitly, не sentinel).
 func is_dead() -> bool:
-	return current_hp <= 0
+	if current_hp < 0:
+		return false  # sentinel = не мёртв
+	return current_hp == 0
+
+
+## Возвращает effective current HP (current_hp если установлен, иначе max_hp).
+func effective_hp() -> int:
+	if current_hp < 0:
+		return max_hp
+	return current_hp
 
 
 ## Сериализация для SaveService (через Dictionary).

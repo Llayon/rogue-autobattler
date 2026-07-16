@@ -203,6 +203,18 @@ func start_run() -> int:
 	return _current_node_id
 
 
+## S5.4: установить current_node_id напрямую (для restore из save).
+## НЕ вызывает choose_next, не проверяет visited. Private-логика для recovery.
+## Только для восстановления состояния после resume_run.
+func goto_node(node_id: int) -> bool:
+	var n = _get_node(node_id)
+	if n == null:
+		return false
+	_current_node_id = node_id
+	n.visited = true
+	return true
+
+
 ## Игрок выбрал next_node_id. Возвращает true если переход успешен.
 ## next_node_id должен быть в available_next_ids.
 func choose_next(next_node_id: int) -> bool:

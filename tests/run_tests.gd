@@ -187,6 +187,14 @@ func _initialize() -> void:
 	_test_run_controller_heal_effect_heals_unit_states()
 	# S5.4 Task 2: REST heals current_hp AND keeps bonus_attack for next battle
 	_test_run_controller_rest_effect_heals_unit_states()
+	# S5.4 Task 3: REST attack bonus applied via atk_mul
+	_test_run_controller_rest_attack_bonus_applies_in_start_battle()
+	# S5.4 Task 3: SHRINE attack bonus applied via atk_mul
+	_test_run_controller_shrine_attack_bonus_applies_in_start_battle()
+	# S5.4 Task 4: save after service effect contains post-effect state
+	_test_save_contains_post_effect_state_after_rest()
+	# S5.4 Task 5: resume_run restores EncounterMap
+	_test_run_controller_resume_run_restores_encounter_position()
 	_test_run_controller_resume_run()
 	_test_run_controller_resume_run_no_save()
 	_test_run_controller_resume_run_signal()
@@ -2973,3 +2981,131 @@ func _test_run_controller_rest_effect_heals_unit_states() -> void:
 	_cleanup_ctrl(ctrl)
 
 
+
+
+
+func _test_run_controller_rest_attack_bonus_applies_in_start_battle() -> void:
+	print("[test] S5.4: REST attack bonus применяется в Combatant.attack_base")
+	var ctrl: Node = RunControllerScript.new()
+	get_root().add_child.call_deferred(ctrl)
+	await process_frame
+	ctrl.start_run(42)
+	# Capture base attack of warrior from UnitDef.
+	var def: Resource = ContentDB_static.get_by_id(&"warrior")
+	var base_attack: int = def.attack
+	# First battle — no bonus.
+	ctrl.state.round_index = 1
+	ctrl.start_battle()
+	var first_warrior: Object = null
+	for c in ctrl.ctx.all_combatants():
+		if c.team == TeamScript.PLAYER:
+			first_warrior = c
+			break
+	_assert(first_warrior != null, "warrior spawned")
+	_assert(first_warrior.attack_base == base_attack,
+		"no bonus: attack_base = %d (got %d)" % [base_attack, first_warrior.attack_base])
+	# Simulate win to clear battle.
+	ctrl.runner.state.phase = BattleStateScriptForCtrl.Phase.ENDED
+	ctrl.runner.state.winner_team = 0
+	ctrl.state.round_index = 2
+	ctrl.tick_battle(0.1)
+	# After round 1 win we are in REWARD. Skip reward → MAP.
+	ctrl.skip_reward()
+	_assert(ctrl.phase == RunControllerScript.Phase.MAP, "phase = MAP")
+	# Apply REST effect on MAP.
+	var rest_node = EncounterNodeScript.new(120, EncounterTypeScript.Kind.REST, 1)
+	ctrl._apply_service_effect(rest_node)
+	# Now next battle — bonus applied.
+	ctrl.state.round_index = 2
+	ctrl.start_battle()
+	var second_warrior: Object = null
+	for c in ctrl.ctx.all_combatants():
+		if c.team == TeamScript.PLAYER:
+			second_warrior = c
+			break
+	_assert(second_warrior != null, "warrior spawned in battle 2")
+	var expected_attack: int = int(round(float(base_attack) * (1.0 + float(BalanceScript.MAP_REST_ATTACK_BONUS) / 100.0)))
+	_assert(second_warrior.attack_base == expected_attack,
+		"attack_base = base * (1 + bonus/100) = %d (got %d, base=%d, bonus=%d)"
+		% [expected_attack, second_warrior.attack_base, base_attack, BalanceScript.MAP_REST_ATTACK_BONUS])
+	_cleanup_ctrl(ctrl)
+
+
+func _test_run_controller_shrine_attack_bonus_applies_in_start_battle() -> void:
+	print("[test] S5.4: SHRINE attack bonus применяется в Combatant.attack_base")
+	var ctrl: Node = RunControllerScript.new()
+	get_root().add_child.call_deferred(ctrl)
+	await process_frame
+	ctrl.start_run(42)
+	var def: Resource = ContentDB_static.get_by_id(&"warrior")
+	var base_attack: int = def.attack
+	# Set shrine_attack_bonus to known value (no need to RNG SHRINE).
+	ctrl.state.meta_modifiers["shrine_attack_bonus"] = BalanceScript.MAP_SHRINE_ATTACK_BONUS
+	ctrl.state.round_index = 1
+	ctrl.start_battle()
+	var w: Object = null
+	for c in ctrl.ctx.all_combatants():
+		if c.team == TeamScript.PLAYER:
+			w = c
+			break
+	_assert(w != null, "warrior spawned")
+	var expected: int = int(round(float(base_attack) * (1.0 + float(BalanceScript.MAP_SHRINE_ATTACK_BONUS) / 100.0)))
+	_assert(w.attack_base == expected,
+		"shrine_attack_bonus applied: attack_base = %d (got %d)" % [expected, w.attack_base])
+	_cleanup_ctrl(ctrl)
+
+
+func _test_save_contains_post_effect_state_after_rest() -> void:
+	print("[test] S5.4: save после REST содержит post-effect state")
+	var save_ctrl: Node = RunControllerScript.new()
+	get_root().add_child.call_deferred(save_ctrl)
+	await process_frame
+	save_ctrl.start_run(42)
+	save_ctrl._enter_map()
+	var rest_node = EncounterNodeScript.new(130, EncounterTypeScript.Kind.REST, 1)
+	save_ctrl._apply_service_effect(rest_node)
+	var expected_bonus: int = save_ctrl.state.meta_modifiers.get("rest_attack_bonus", 0)
+	_assert(expected_bonus > 0, "rest_attack_bonus > 0 after REST (got %d)" % expected_bonus)
+	# Load and verify.
+	var loaded: RunState = SaveService.load_run(42)
+	_assert(loaded != null, "save loaded")
+	_assert(loaded.meta_modifiers.get("rest_attack_bonus", 0) == expected_bonus,
+		"loaded rest_attack_bonus = %d (got %d)"
+		% [expected_bonus, loaded.meta_modifiers.get("rest_attack_bonus", 0)])
+	SaveService.delete_run(42)
+	_cleanup_ctrl(save_ctrl)
+
+
+func _test_run_controller_resume_run_restores_encounter_position() -> void:
+	print("[test] S5.4: resume_run восстанавливает EncounterMap.current_node_id")
+	var save_ctrl: Node = RunControllerScript.new()
+	get_root().add_child.call_deferred(save_ctrl)
+	await process_frame
+	save_ctrl.start_run(42)
+	save_ctrl._enter_map()
+	# Pick first available encounter.
+	var available: Array[int] = save_ctrl.encounter_map.get_available_next_ids()
+	var chosen_id: int = available[0]
+	# Move to that node.
+	assert(save_ctrl.encounter_map.choose_next(chosen_id), "choose_next ok")
+	assert(save_ctrl.encounter_map.get_current_node_id() == chosen_id, "current = chosen_id")
+	# Set state.current_encounter_id (this is what _on_node_selected does).
+	save_ctrl.state.current_encounter_id = chosen_id
+	# Save (auto-save already ran from _enter_map and choose_next, but explicit).
+	save_ctrl.save_now()
+	var saved_seed: int = save_ctrl.state.seed
+	var saved_encounter_id: int = save_ctrl.state.current_encounter_id
+	_cleanup_ctrl(save_ctrl)
+	# Now create new RunController and resume.
+	var resume_ctrl: Node = RunControllerScript.new()
+	get_root().add_child.call_deferred(resume_ctrl)
+	await process_frame
+	var ok: bool = resume_ctrl.resume_run(saved_seed)
+	_assert(ok, "resume_run(" + str(saved_seed) + ") = true")
+	_assert(resume_ctrl.encounter_map != null,
+		"encounter_map regenerated after resume (got null)")
+	if resume_ctrl.encounter_map != null:
+		_assert(resume_ctrl.encounter_map.get_current_node_id() == saved_encounter_id,
+			"current_node_id restored = %d (got %d)"
+			% [saved_encounter_id, resume_ctrl.encounter_map.get_current_node_id()])
+	_cleanup_ctrl(resume_ctrl)

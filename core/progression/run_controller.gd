@@ -105,13 +105,21 @@ func start_battle() -> bool:
 	if state.player_unit_ids.is_empty():
 		GameLog.warn("run", "No units on board")
 		return false
+	# S5.4: суммарный attack bonus от REST/SHRINE (для всех юнитов игрока).
+	var total_attack_bonus: int = int(state.meta_modifiers.get("rest_attack_bonus", 0)) + \
+		int(state.meta_modifiers.get("shrine_attack_bonus", 0))
+	var atk_mul: float = 1.0 + float(total_attack_bonus) / 100.0
 	ctx = BattleContext.new()
 	# Расставляем игроков.
 	for i in state.player_unit_ids.size():
 		var def: Resource = ContentDB_static.get_by_id(state.player_unit_ids[i])
 		if def == null:
 			continue
-		var c = CombatantScript.new(def)
+		# S5.4: мёртвые юниты не появляются на доске.
+		var us = _find_unit_state(state.player_unit_ids[i])
+		if us != null and us.is_dead():
+			continue
+		var c = CombatantScript.new(def, 1.0, atk_mul)
 		var cell: Vector2i = Vector2i(i, 3)  # Grid.SIZE.y - 1 == 3
 		if not ctx.register(c, cell):
 			GameLog.warn("run", "Cannot place player unit", {"i": i})
@@ -239,12 +247,26 @@ func resume_run(seed_value: int) -> bool:
 	Rng.seed_run(state.seed)
 	# Shop перегенерируем (transient — был утерян при restart).
 	_refresh_shop()
-	_set_phase(Phase.PREP)
+	# S5.4: восстанавливаем encounter_map по seed. Карта детерминирована seed'ом,
+	# поэтому можно регенерировать её при resume. goto_node(id) устанавливает
+	# current_node_id на сохранённый (без проверки visited).
+	if state.current_encounter_id != -1:
+		encounter_map = EncounterMapScript.new()
+		encounter_map.generate(state.seed)
+		if not encounter_map.goto_node(state.current_encounter_id):
+			GameLog.warn("run", "resume_run: saved encounter_id not in map",
+				{"encounter_id": state.current_encounter_id})
+			# Fallback: start fresh.
+			encounter_map.start_run()
+		else:
+			_set_phase(Phase.MAP)
+	else:
+		_set_phase(Phase.PREP)
 	if profile != null:
 		profile.current_run_seed = state.seed
 		SaveService.save_meta(profile)
 	GameBus.emit_run_resumed(state.seed)
-	GameLog.info("run", "Run resumed", {"seed": state.seed, "round": state.round_index})
+	GameLog.info("run", "Run resumed", {"seed": state.seed, "round": state.round_index, "encounter": state.current_encounter_id})
 	return true
 
 
@@ -328,12 +350,16 @@ func _on_node_selected(node_id: int) -> void:
 	# Сохраняем в state.
 	state.current_encounter_id = node_id
 	state.encounter_visited_ids.append(node_id)
-	save_now()
 	# Dispatch.
 	if node.is_combat():
 		start_battle()
+		# S5.4: combat -> battle, save happens в _on_battle_ended (before phase transition).
+		save_now()
 	else:
 		_apply_service_effect(node)
+		# S5.4: atomic save AFTER service effect, чтобы save файл содержал
+		# post-effect state (например, rest_attack_bonus после REST).
+		save_now()
 
 
 ## S5.3: применяет service-эффект выбранного нода (HEAL/TREASURE/MERCHANT/REST/SHRINE).
@@ -359,6 +385,9 @@ func _apply_service_effect(node) -> void:
 			_apply_shrine_effect()
 		_:
 			GameLog.warn("run", "Unknown service kind", {"kind": kind})
+	# S5.4: atomic save — guarantees save file содержит post-effect state
+	# (включая rest_attack_bonus после REST, gold_after_treasure, и т.д.).
+	save_now()
 	# После service-эффекта — обратно в MAP (если эффект не оставил нас в другой фазе).
 	if stay_in_current_phase:
 		return
