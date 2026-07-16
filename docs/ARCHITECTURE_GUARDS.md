@@ -202,6 +202,9 @@ Godot имеет встроенный editor formatter (Ctrl+Shift+I), но **н
 | S5.1.2 | Миграция `visual_state["is_dying"]: bool` → `class_name Dying: pass` ZST marker |
 | S5.2 | Encounter Map UI — `EncounterMapView` + `EncounterMapScene` (визуализация DAG, выбор доступных узлов) |
 | S5.3 | RunController ↔ EncounterMap — phase flow, combat/service dispatch, BattleScene overlay |
+| S5.4 | `RunUnitState` (per-unit HP persistency), REST/SHRINE attack bonus, atomic save, encounter map resume в `resume_run()` |
+| S6.1 | UI polish: HUD bar (HBox + style), centered reward modal (`CenterContainer`), Unicode SystemFont, EventBus autoload (project.godot), encounter node_selected signal chain, board+bench capacity (`MAX_BOARD_UNITS` / `MAX_BENCH_UNITS`), auto-place reward на доску, REWARD modal после каждой победы (включая round 1), Choice buttons disabled когда board+bench full |
+| S6.2 | PREP phase placement screen — `scenes/prep/prep_scene.gd` с select-then-act swap/move, Ready button, RunController swap/move API (`swap_board_units`, `board_to_bench`, `bench_to_board`), combat dispatch → PREP → BATTLE flow |
 | S6.x | Phased refactor: больше правил из Bevy набора |
 
 ---
@@ -211,6 +214,10 @@ Godot имеет встроенный editor formatter (Ctrl+Shift+I), но **н
 - **2026-07-15**: Первая версия — 11 перенесённых гвардейцев из 29, интегрированы в `tools/lint_anti_patterns.py` и AGENTS.md.
 - **S3.x**: Foundation: Conventional commits hook (commit `2b26133`).
 - **S4.x**: GameBus + Rng determinism fix (commit `d19aab4`).
+- **S5.1-S5.3**: EncounterMap core/UI, RunController phase machine, BattleScene wiring. См. `.hermes/plans/2026-07-15_*.md`.
+- **S5.4**: RunUnitState для персистентности HP между боями, REST/SHRINE buff → Combatant.atk_mul, atomic save (после service effect), encounter map resume. Commits `0fe151a`, `aa914a8`, `465d0b0`, `b135197`.
+- **S6.1**: UI polish — EventBus autoload register, HUD bar, centered reward modal, Unicode SystemFont, encounter node_selected signal chain, board+bench capacity, auto-place reward unit, REWARD после round 1. Commits `4ce24ed`, `2738b0a`, `c6ea1cf`, `200d2b7`, `e53ecf1`, `93dd777`.
+- **S6.2**: PREP phase placement screen — `scenes/prep/prep_scene.gd` с select-then-act workflow, swap/move API, combat → PREP dispatch. Commits `98adfe9`, `ca03e70`, `afbf084`.
 
 ## Источник
 

@@ -11,7 +11,7 @@
 - Лицензия цели: ранний доступ в Steam (коммерческая)
 - Разработчик: solo, 6-12 месяцев
 
-**Текущее состояние**: 53 .gd файла, 98/98 тестов проходят, играбельный прототип (warrior + archer vs goblin, есть магазин, способности, статусы, экономика, прогрессия, **13 характеристик на юните: crit/dodge/lifesteal/thorns/mana/cdr/tenacity/regen/armor/healing_received/shield_strength/magic_pen**).
+**Текущее состояние**: ~63 .gd файла, 465/465 тестов проходят, играбельный прототип с encounter map (10 слоёв DAG, 8 encounter типов), placement screen (board swap + bench), reward modal с auto-place, persistence (RunState v3 + RunUnitState), 5 утилит-autoload (EventBus, GameLog, Rng, ContentDB, SaveSvc), `tools/lint_anti_patterns.py` (16 правил), **13 характеристик на юните: crit/dodge/lifesteal/thorns/mana/cdr/tenacity/regen/armor/healing_received/shield_strength/magic_pen**. См. `docs/ARCHITECTURE_GUARDS.md` для roadmap и истории.
 
 ## Критические правила (НЕ нарушать)
 
