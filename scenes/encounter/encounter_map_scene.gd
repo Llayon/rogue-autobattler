@@ -1,8 +1,10 @@
 extends Control
 ## Standalone preview/controller for the S5.2 Encounter Map UI.
 ##
-## Generates a deterministic map when opened directly. S5.3 will replace this
+## Generates a deterministic map when opened directly. S5.3+ replaces this
 ## local ownership with RunController integration while keeping the view API.
+
+signal node_selected(node_id: int)
 
 const EncounterMapScript = preload("res://core/encounter/encounter_map.gd")
 const EncounterMapViewScript = preload("res://scenes/encounter/encounter_map_view.gd")
@@ -12,6 +14,9 @@ const EncounterMapViewScript = preload("res://scenes/encounter/encounter_map_vie
 var encounter_map = null
 var map_view: Control = null
 var status_label: Label = null
+# S6.1: When true, scene delegates node selection to outer handler
+# (RunController) instead of advancing the model itself.
+var _delegate_selection: bool = true
 
 
 func _ready() -> void:
@@ -26,8 +31,16 @@ func _ready() -> void:
 	_update_status("Choose your first encounter")
 
 
-## Receives a validated view selection and advances the preview model.
+## Receives a validated view selection.
+## When delegate mode is on (default for S6.1+), re-emits node_selected
+## signal for outer RunController to handle. When off (legacy preview
+## mode), advances the local model and updates status.
 func _on_node_selected(node_id: int) -> void:
+	if _delegate_selection:
+		# Re-emit signal so BattleScene / RunController can dispatch.
+		node_selected.emit(node_id)
+		return
+	# Legacy preview mode.
 	if encounter_map == null or not encounter_map.choose_next(node_id):
 		return
 	var node = encounter_map.get_current_node()
@@ -37,7 +50,7 @@ func _on_node_selected(node_id: int) -> void:
 	map_view.set_map(encounter_map)
 
 
-## Allows S5.3 to provide a real run-owned EncounterMap before _ready.
+## Allows S5.3+ to provide a real run-owned EncounterMap before _ready.
 func set_encounter_map(map) -> void:
 	encounter_map = map
 	if is_instance_valid(map_view):

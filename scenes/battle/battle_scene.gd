@@ -277,7 +277,19 @@ func _build_encounter_map_overlay() -> void:
 	encounter_map_scene.set_anchors_preset(Control.PRESET_FULL_RECT)
 	encounter_map_scene.visible = false
 	encounter_map_scene.mouse_filter = Control.MOUSE_FILTER_STOP
+	# S6.1: scene re-emits node_selected → RunController dispatch
+	# (внутри scene включён _delegate_selection = true, чтобы она не
+	# сама делала choose_next на preview-owned карте).
+	if encounter_map_scene.has_signal("node_selected"):
+		encounter_map_scene.node_selected.connect(_on_encounter_node_selected)
 	add_child(encounter_map_scene)
+
+
+## S6.1: handle encounter node click from MAP phase.
+func _on_encounter_node_selected(node_id: int) -> void:
+	if run_controller == null:
+		return
+	run_controller._on_node_selected(node_id)
 
 
 # === S6.1: reward modal ===
