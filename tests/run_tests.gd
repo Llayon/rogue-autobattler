@@ -195,6 +195,11 @@ func _initialize() -> void:
 	_test_save_contains_post_effect_state_after_rest()
 	# S5.4 Task 5: resume_run restores EncounterMap
 	_test_run_controller_resume_run_restores_encounter_position()
+	# S6.2: PREP phase swap/move API
+	_test_run_controller_swap_board_units_basic()
+	_test_run_controller_board_to_bench_and_back()
+	_test_run_controller_swap_invalid_returns_false()
+	_test_run_controller_swap_keeps_unit_states_in_sync()
 	_test_run_controller_resume_run()
 	_test_run_controller_resume_run_no_save()
 	_test_run_controller_resume_run_signal()
@@ -3120,3 +3125,87 @@ func _test_run_controller_resume_run_restores_encounter_position() -> void:
 			"current_node_id restored = %d (got %d)"
 			% [saved_encounter_id, resume_ctrl.encounter_map.get_current_node_id()])
 	_cleanup_ctrl(resume_ctrl)
+func _test_run_controller_swap_board_units_basic() -> void:
+	print("[test] S6.2: swap_board_units меняет двух юнитов на доске")
+	var ctrl: Node = RunControllerScript.new()
+	get_root().add_child.call_deferred(ctrl)
+	await process_frame
+	ctrl.start_run(42)
+	var ids: Array = ctrl.state.player_unit_ids.duplicate()
+	_assert(ids.size() == 2, "start with 2 board units (got %d)" % ids.size())
+	var ok: bool = ctrl.swap_board_units(0, 1)
+	_assert(ok, "swap_board_units returned true")
+	var new_ids: Array = ctrl.state.player_unit_ids.duplicate()
+	_assert(new_ids[0] == ids[1] and new_ids[1] == ids[0],
+		"board[0]<->board[1] swapped (got %s vs %s)"
+		% [new_ids[0], new_ids[1]])
+	_cleanup_ctrl(ctrl)
+
+
+func _test_run_controller_board_to_bench_and_back() -> void:
+	print("[test] S6.2: board->bench->board move")
+	var ctrl: Node = RunControllerScript.new()
+	get_root().add_child.call_deferred(ctrl)
+	await process_frame
+	ctrl.start_run(42)
+	var id: StringName = ctrl.state.player_unit_ids[0]
+	var ok: bool = ctrl.board_to_bench(0)
+	_assert(ok, "board_to_bench(0) returned true")
+	_assert(ctrl.state.player_unit_ids.size() == 1, "board size 2->1")
+	_assert(ctrl.state.bench_unit_ids.size() == 1, "bench size 0->1")
+	_assert(ctrl.state.bench_unit_ids[0] == id, "moved id at bench[0]")
+	var ok2: bool = ctrl.bench_to_board(0, 0)
+	_assert(ok2, "bench_to_board returned true")
+	_assert(ctrl.state.player_unit_ids[0] == id, "back to board[0]")
+	_assert(ctrl.state.bench_unit_ids.size() == 0, "bench emptied")
+	_cleanup_ctrl(ctrl)
+
+
+func _test_run_controller_swap_invalid_returns_false() -> void:
+	print("[test] S6.2: invalid swap indices возвращают false")
+	var ctrl: Node = RunControllerScript.new()
+	get_root().add_child.call_deferred(ctrl)
+	await process_frame
+	ctrl.start_run(42)
+	_assert(not ctrl.swap_board_units(-1, 0), "negative a rejected")
+	_assert(not ctrl.swap_board_units(0, 99), "out of range b rejected")
+	_assert(not ctrl.swap_board_units(5, 5), "same slot rejected")
+	_assert(not ctrl.board_to_bench(-1), "negative board index rejected")
+	_assert(not ctrl.bench_to_board(0, 0), "bench_to_board from empty bench rejected")
+	_cleanup_ctrl(ctrl)
+
+func _test_run_controller_swap_keeps_unit_states_in_sync() -> void:
+	print("[test] S6.2: swap не теряет unit_states (HP persistency)")
+	var ctrl: Node = RunControllerScript.new()
+	get_root().add_child.call_deferred(ctrl)
+	await process_frame
+	ctrl.start_run(42)
+	var id0: StringName = ctrl.state.player_unit_ids[0]
+	var id1: StringName = ctrl.state.player_unit_ids[1]
+	var us0_idx: int = -1
+	var us1_idx: int = -1
+	for i in ctrl.state.unit_states.size():
+		var us = ctrl.state.unit_states[i]
+		if us.unit_id == id0:
+			us0_idx = i
+		elif us.unit_id == id1:
+			us1_idx = i
+	_assert(us0_idx >= 0 and us1_idx >= 0, "both ids in unit_states")
+	var us0 = ctrl.state.unit_states[us0_idx]
+	var us1 = ctrl.state.unit_states[us1_idx]
+	us0.current_hp = 50
+	us1.current_hp = 30
+	ctrl.swap_board_units(0, 1)
+	# После swap player_unit_ids[0] == id1, player_unit_ids[1] == id0.
+	_assert(ctrl.state.player_unit_ids[0] == id1, "board[0] is now id1")
+	_assert(ctrl.state.player_unit_ids[1] == id0, "board[1] is now id0")
+	# unit_states должны быть в том же индексе — мы НЕ перетасовываем массив,
+	# только переставляем ID в player_unit_ids. unit_states[id_idx] все ещё принадлежит id.
+	var us0_after = ctrl.state.unit_states[us0_idx]
+	var us1_after = ctrl.state.unit_states[us1_idx]
+	_assert(us0_after.unit_id == id0 and us0_after.current_hp == 50,
+		"us0 still tracks id0 with HP=50")
+	_assert(us1_after.unit_id == id1 and us1_after.current_hp == 30,
+		"us1 still tracks id1 with HP=30")
+	_cleanup_ctrl(ctrl)
+

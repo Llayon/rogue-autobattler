@@ -87,15 +87,64 @@ func buy_unit(slot: int) -> Resource:
 	return def
 
 
+## S6.2: перемещает юнита в bench по позиции (board_index). Возвращает true если успешно.
+func board_to_bench(board_index: int) -> bool:
+	if board_index < 0 or board_index >= state.player_unit_ids.size():
+		return false
+	if state.bench_unit_ids.size() >= BalanceScript.MAX_BENCH_UNITS:
+		GameLog.warn("run", "board_to_bench: bench full", {"size": state.bench_unit_ids.size()})
+		return false
+	var id: StringName = state.player_unit_ids[board_index]
+	state.player_unit_ids.remove_at(board_index)
+	state.bench_unit_ids.append(id)
+	GameLog.info("run", "board->bench", {"id": id, "from": board_index})
+	return true
+
+
+## S6.2: перемещает юнита из bench на доску в указанную позицию. Возвращает true если успешно.
+## Если board_index == -1, ищет первую свободную позицию.
+func bench_to_board(bench_index: int, board_index: int = -1) -> bool:
+	if bench_index < 0 or bench_index >= state.bench_unit_ids.size():
+		return false
+	if state.player_unit_ids.size() >= BalanceScript.MAX_BOARD_UNITS:
+		GameLog.warn("run", "bench_to_board: board full", {"size": state.player_unit_ids.size()})
+		return false
+	if board_index < 0:
+		board_index = state.player_unit_ids.size()  # append
+	elif board_index > state.player_unit_ids.size():
+		board_index = state.player_unit_ids.size()  # clamp
+	var id: StringName = state.bench_unit_ids[bench_index]
+	state.bench_unit_ids.remove_at(bench_index)
+	state.player_unit_ids.insert(board_index, id)
+	GameLog.info("run", "bench->board", {"id": id, "to": board_index})
+	return true
+
+
+## S6.2: меняет местами двух юнитов на доске по позициям (0..MAX_BOARD_UNITS-1).
+## Если b == -1, перемещает board[a] в bench.
+func swap_board_units(a: int, b: int) -> bool:
+	var board_size: int = state.player_unit_ids.size()
+	if a < 0 or a >= board_size:
+		return false
+	if b < 0 or b >= board_size:
+		return false
+	if a == b:
+		return false
+	var id_a: StringName = state.player_unit_ids[a]
+	var id_b: StringName = state.player_unit_ids[b]
+	state.player_unit_ids[a] = id_b
+	state.player_unit_ids[b] = id_a
+	# unit_states не перетасовываем — каждый unit_state принадлежит своему id,
+	# который живёт в player_unit_ids под тем же индексом (после move_to_board).
+	GameLog.info("run", "board swap",
+		{"slot_a": a, "id_a": id_a, "slot_b": b, "id_b": id_b})
+	return true
+
+
 ## Перемещает юнита со скамейки на доску (cell).
 ## v1 — упрощённо, без валидации cell.
 func move_to_board(bench_index: int, _cell: Vector2i) -> bool:
-	if bench_index < 0 or bench_index >= state.bench_unit_ids.size():
-		return false
-	var id: StringName = state.bench_unit_ids[bench_index]
-	state.bench_unit_ids.remove_at(bench_index)
-	state.player_unit_ids.append(id)
-	return true
+	return bench_to_board(bench_index, -1)
 
 
 ## Запускает бой текущего раунда.
