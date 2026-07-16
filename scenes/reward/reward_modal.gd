@@ -153,6 +153,16 @@ func _apply_font(control: Control) -> void:
 ## Обновляет контент модалки по списку предложенных юнитов (id'ы UnitDef).
 func show_offer(unit_ids: Array, run_controller: Node) -> void:
 	_run_controller = run_controller
+	# S6.1.2: если board полный И bench полный, выбирать некуда.
+	# Все Choice-кнопки делаем disabled + меняем Skip label.
+	var no_room: bool = false
+	if _run_controller != null:
+		var board_size: int = _run_controller.state.player_unit_ids.size()
+		var bench_size: int = _run_controller.state.bench_unit_ids.size()
+		no_room = (board_size >= BalanceScript.MAX_BOARD_UNITS and
+			bench_size >= BalanceScript.MAX_BENCH_UNITS)
+	if no_room and _skip_button != null:
+		_skip_button.text = "Skip — bench & board full"
 	for i in _buttons.size():
 		var btn: Button = _buttons[i]
 		if i < unit_ids.size():
@@ -165,7 +175,8 @@ func show_offer(unit_ids: Array, run_controller: Node) -> void:
 					def.max_hp,
 					def.tier,
 				]
-				btn.disabled = (_run_controller == null or _run_controller.state.gold < BalanceScript.REWARD_OFFER_PRICE)
+				var gold_ok: bool = (_run_controller == null or _run_controller.state.gold >= BalanceScript.REWARD_OFFER_PRICE)
+				btn.disabled = (not gold_ok) or no_room
 				btn.visible = true
 			else:
 				btn.text = "(unknown)"
