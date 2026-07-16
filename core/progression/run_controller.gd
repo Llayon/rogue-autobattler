@@ -411,15 +411,15 @@ func _on_node_selected(node_id: int) -> void:
 	# Сохраняем в state.
 	state.current_encounter_id = node_id
 	state.encounter_visited_ids.append(node_id)
-	# Dispatch.
+	# S6.2: combat → PREP (placement screen перед боем), не BATTLE напрямую.
+	# Игрок расставляет юнитов, нажимает Ready → start_battle().
+	# S5.4: combat -> battle, save happens в _on_battle_ended (before phase transition).
+	save_now()
 	if node.is_combat():
-		start_battle()
-		# S5.4: combat -> battle, save happens в _on_battle_ended (before phase transition).
-		save_now()
+		_set_phase(Phase.PREP)
 	else:
 		_apply_service_effect(node)
-		# S5.4: atomic save AFTER service effect, чтобы save файл содержал
-		# post-effect state (например, rest_attack_bonus после REST).
+		# S5.4: atomic save AFTER service effect.
 		save_now()
 
 

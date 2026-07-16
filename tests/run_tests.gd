@@ -70,6 +70,8 @@ const BattleViewScript = preload("res://scenes/battle/battle_view.gd")
 const EncounterTypeScript = preload("res://core/encounter/encounter_type.gd")
 const EncounterNodeScript = preload("res://core/encounter/encounter_node.gd")
 const EncounterMapScript = preload("res://core/encounter/encounter_map.gd")
+# S6.2: PrepScene
+const PrepSceneScript = preload("res://scenes/prep/prep_scene.gd")
 
 
 
@@ -200,6 +202,11 @@ func _initialize() -> void:
 	_test_run_controller_board_to_bench_and_back()
 	_test_run_controller_swap_invalid_returns_false()
 	_test_run_controller_swap_keeps_unit_states_in_sync()
+	# S6.2: PrepScene UI
+	_test_prep_scene_creates_board_and_bench_buttons()
+	_test_prep_scene_swap_two_board_slots()
+	_test_prep_scene_board_to_bench_workflow()
+	_test_prep_scene_ready_button_triggers_battle()
 	_test_run_controller_resume_run()
 	_test_run_controller_resume_run_no_save()
 	_test_run_controller_resume_run_signal()
@@ -2748,8 +2755,14 @@ func _test_run_controller_combat_node_starts_battle() -> void:
 			break
 	_assert(combat_id >= 0, "has combat node in available_next (got %d)" % combat_id)
 	ctrl._on_node_selected(combat_id)
-	_assert(ctrl.phase == RunControllerScript.Phase.BATTLE, "phase = BATTLE after combat (got %d)" % ctrl.phase)
-	_assert(ctrl.runner != null, "runner created after combat dispatch")
+	# S6.2: combat dispatch → PREP (placement screen), не BATTLE напрямую.
+	# Игрок нажимает Ready → start_battle().
+	_assert(ctrl.phase == RunControllerScript.Phase.PREP, "phase = PREP after combat dispatch (got %d)" % ctrl.phase)
+	_assert(ctrl.runner == null, "runner NOT created yet (player must Ready first)")
+	# Start battle via prep_scene equivalent.
+	ctrl.start_battle()
+	_assert(ctrl.phase == RunControllerScript.Phase.BATTLE, "phase = BATTLE after Ready (got %d)" % ctrl.phase)
+	_assert(ctrl.runner != null, "runner created after Ready → start_battle")
 	_cleanup_ctrl(ctrl)
 
 
@@ -3209,3 +3222,110 @@ func _test_run_controller_swap_keeps_unit_states_in_sync() -> void:
 		"us1 still tracks id1 with HP=30")
 	_cleanup_ctrl(ctrl)
 
+
+
+func _recursive_find_buttons(node: Node, out: Array) -> void:
+	for c in node.get_children():
+		if c is Button:
+			out.append(c)
+		_recursive_find_buttons(c, out)
+
+
+func _test_prep_scene_creates_board_and_bench_buttons() -> void:
+	print("[test] S6.2: PrepScene creates board + bench buttons + Ready")
+	var ctrl: Node = RunControllerScript.new()
+	get_root().add_child.call_deferred(ctrl)
+	await process_frame
+	ctrl.start_run(42)
+	var scene: Control = PrepSceneScript.new()
+	scene.set_run_controller(ctrl)
+	root.add_child.call_deferred(scene)
+	for i in 3: await process_frame
+	var btns: Array = []
+	_recursive_find_buttons(scene, btns)
+	var expected: int = ctrl.state.player_unit_ids.size() + ctrl.state.bench_unit_ids.size() + 1
+	_assert(btns.size() == expected,
+		"PrepScene buttons count = %d (got %d, expected board %d + bench %d + 1 Ready)"
+		% [expected, btns.size(), ctrl.state.player_unit_ids.size(), ctrl.state.bench_unit_ids.size()])
+	_cleanup_ctrl(ctrl)
+	scene.queue_free()
+	await process_frame
+
+
+func _test_prep_scene_swap_two_board_slots() -> void:
+	print("[test] S6.2: click 2 board slots -> swap")
+	var ctrl: Node = RunControllerScript.new()
+	get_root().add_child.call_deferred(ctrl)
+	await process_frame
+	ctrl.start_run(42)
+	var ids: Array = ctrl.state.player_unit_ids.duplicate()
+	var scene: Control = PrepSceneScript.new()
+	scene.set_run_controller(ctrl)
+	root.add_child.call_deferred(scene)
+	for i in 3: await process_frame
+	var board_btns: Array = scene._board_buttons
+	_assert(board_btns.size() == 2, "scene has 2 board buttons (got %d)" % board_btns.size())
+	board_btns[0].emit_signal("pressed")
+	board_btns[1].emit_signal("pressed")
+	await process_frame
+	var new_ids: Array = ctrl.state.player_unit_ids.duplicate()
+	_assert(new_ids[0] == ids[1] and new_ids[1] == ids[0],
+		"board swapped (got %s vs %s)" % [new_ids[0], new_ids[1]])
+	_cleanup_ctrl(ctrl)
+	scene.queue_free()
+	await process_frame
+
+
+func _test_prep_scene_board_to_bench_workflow() -> void:
+	print("[test] S6.2: click board -> click bench slot -> move")
+	var ctrl: Node = RunControllerScript.new()
+	get_root().add_child.call_deferred(ctrl)
+	await process_frame
+	ctrl.start_run(42)
+	ctrl.state.bench_unit_ids.append(&"warrior")
+	var id0: StringName = ctrl.state.player_unit_ids[0]
+	var scene: Control = PrepSceneScript.new()
+	scene.set_run_controller(ctrl)
+	root.add_child.call_deferred(scene)
+	for i in 3: await process_frame
+	var board_btns: Array = scene._board_buttons
+	var bench_btns: Array = scene._bench_buttons
+	_assert(board_btns.size() == 2 and bench_btns.size() == 1,
+		"board=2 bench=1 (got %d, %d)" % [board_btns.size(), bench_btns.size()])
+	board_btns[0].emit_signal("pressed")
+	bench_btns[0].emit_signal("pressed")
+	await process_frame
+	var board_size: int = ctrl.state.player_unit_ids.size()
+	var bench_size: int = ctrl.state.bench_unit_ids.size()
+	_assert(board_size == 1, "board 2->1 (got %d)" % board_size)
+	_assert(bench_size == 2, "bench 1->2 (got %d)" % bench_size)
+	_assert(ctrl.state.bench_unit_ids[0] == id0,
+		"moved id at bench[0] (got %s)" % ctrl.state.bench_unit_ids[0])
+	_cleanup_ctrl(ctrl)
+	scene.queue_free()
+	await process_frame
+
+
+func _test_prep_scene_ready_button_triggers_battle() -> void:
+	print("[test] S6.2: Ready button -> start_battle()")
+	var ctrl: Node = RunControllerScript.new()
+	get_root().add_child.call_deferred(ctrl)
+	await process_frame
+	ctrl.start_run(42)
+	var scene: Control = PrepSceneScript.new()
+	scene.set_run_controller(ctrl)
+	root.add_child.call_deferred(scene)
+	for i in 3: await process_frame
+	var ready_btn: Button = null
+	for c in scene.get_children():
+		if c is Button and c.text.find("Ready") >= 0:
+			ready_btn = c
+			break
+	_assert(ready_btn != null, "Ready button found")
+	ready_btn.emit_signal("pressed")
+	await process_frame
+	_assert(ctrl.phase == ctrl.Phase.BATTLE,
+		"phase = BATTLE after Ready (got %d)" % ctrl.phase)
+	_cleanup_ctrl(ctrl)
+	scene.queue_free()
+	await process_frame

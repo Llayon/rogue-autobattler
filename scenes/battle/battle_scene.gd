@@ -6,6 +6,7 @@ const RUN_CONTROLLER_SCRIPT: GDScript = preload("res://core/progression/run_cont
 const BATTLE_VIEW_SCRIPT: GDScript = preload("res://scenes/battle/battle_view.gd")
 const ENCOUNTER_MAP_SCENE_SCRIPT: GDScript = preload("res://scenes/encounter/encounter_map_scene.gd")
 const REWARD_MODAL_SCRIPT: GDScript = preload("res://scenes/reward/reward_modal.gd")
+const PREP_SCENE_SCRIPT: GDScript = preload("res://scenes/prep/prep_scene.gd")
 const BalanceScript: GDScript = preload("res://core/balance.gd")
 
 # S6.1: явный Unicode SystemFont для всех UI-лейблов (Cyrillic работает).
@@ -77,6 +78,8 @@ func _ready() -> void:
 	_build_reward_modal()
 	# S5.3: encounter map overlay (скрыт initial).
 	_build_encounter_map_overlay()
+	# S6.2: PREP scene (скрыт initial).
+	_build_prep_scene()
 	# EventBus — подписки ДО start_run, чтобы первый phase_changed поймался.
 	_bus = _find_event_bus()
 	if _bus != null:
@@ -313,6 +316,21 @@ func _on_reward_offered(unit_ids: Array) -> void:
 	reward_modal.visible = true
 
 
+# === S6.2: PREP scene ===
+
+var prep_scene: Control = null
+
+
+## Создаёт prep_scene, скрыт initial. Показывается на phase=PREP.
+func _build_prep_scene() -> void:
+	prep_scene = PREP_SCENE_SCRIPT.new()
+	prep_scene.name = "PrepScene"
+	prep_scene.set_anchors_preset(Control.PRESET_FULL_RECT)
+	prep_scene.visible = false
+	prep_scene.mouse_filter = Control.MOUSE_FILTER_STOP
+	add_child(prep_scene)
+
+
 # === Phase switching ===
 
 ## S5.3: реакция на phase_changed — show/hide encounter map и reward modal.
@@ -331,6 +349,11 @@ func _on_run_phase_changed(new_phase: int) -> void:
 	# Reward modal — видна на REWARD phase, скрыта иначе.
 	if reward_modal != null:
 		reward_modal.visible = (new_phase == RUN_CONTROLLER_SCRIPT.Phase.REWARD)
+	# S6.2: PREP scene — видна на PREP phase, скрыта иначе.
+	if prep_scene != null:
+		prep_scene.visible = (new_phase == RUN_CONTROLLER_SCRIPT.Phase.PREP)
+		if new_phase == RUN_CONTROLLER_SCRIPT.Phase.PREP and run_controller != null:
+			prep_scene.set_run_controller(run_controller)
 	# Обновляем status.
 	_refresh_status()
 	_refresh_hud()
