@@ -76,7 +76,10 @@ const POS_LERP_DECAY_PER_SEC: float = 1.0 / 0.2
 
 
 ## Конструктор: принимает UnitDef и опционально overrides.
-func _init(def: Resource, hp_mul: float = 1.0, atk_mul: float = 1.0, def_mul: float = 1.0) -> void:
+## hp_override: S6.3 — если > 0, устанавливает начальное HP = hp_override
+## (используется при apply_run_unit_state для персистентности HP
+## между боями через state.unit_states[]).
+func _init(def: Resource, hp_mul: float = 1.0, atk_mul: float = 1.0, def_mul: float = 1.0, hp_override: int = -1) -> void:
 	if def == null:
 		GameLog.error("combatant", "Combatant created with null def")
 		return
@@ -107,7 +110,13 @@ func _init(def: Resource, hp_mul: float = 1.0, atk_mul: float = 1.0, def_mul: fl
 	max_mana_base = def.max_mana
 	mana_regen = def.mana_regen
 	abilities = def.abilities.duplicate()
-	health.configure(int(round(float(def.max_hp) * hp_mul)))
+	# S6.3: max_hp всегда = def.max_hp (или * hp_mul). hp_override
+	# влияет только на current_hp (start at).
+	var max_hp_val: int = int(round(float(def.max_hp) * hp_mul))
+	health.configure(max_hp_val)
+	if hp_override > 0:
+		# S6.3: persisted HP — set current без изменения max.
+		health.current_hp = mini(hp_override, max_hp_val)
 	mana.configure(max_mana_base, mana_regen)
 	regen.configure(health_regen)
 

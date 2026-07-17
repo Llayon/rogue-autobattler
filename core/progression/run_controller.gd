@@ -165,10 +165,14 @@ func start_battle() -> bool:
 		if def == null:
 			continue
 		# S5.4: мёртвые юниты не появляются на доске.
+		# S6.3: также передаём persisted current_hp из unit_states как hp_override.
 		var us = _find_unit_state(state.player_unit_ids[i])
 		if us != null and us.is_dead():
-			continue
-		var c = CombatantScript.new(def, 1.0, atk_mul)
+				continue
+		var hp_override: int = -1
+		if us != null and us.current_hp > 0:
+				hp_override = us.current_hp
+		var c = CombatantScript.new(def, 1.0, atk_mul, 1.0, hp_override)
 		var cell: Vector2i = Vector2i(i, 3)  # Grid.SIZE.y - 1 == 3
 		if not ctx.register(c, cell):
 			GameLog.warn("run", "Cannot place player unit", {"i": i})

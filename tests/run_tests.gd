@@ -207,6 +207,10 @@ func _initialize() -> void:
 	_test_prep_scene_swap_two_board_slots()
 	_test_prep_scene_board_to_bench_workflow()
 	_test_prep_scene_ready_button_triggers_battle()
+	# S6.3: HP persistence in Combatant
+	_test_combatant_hp_override_parameter()
+	_test_combatant_hp_override_minus_one_uses_max()
+	_test_run_controller_start_battle_persists_unit_hp()
 	_test_run_controller_resume_run()
 	_test_run_controller_resume_run_no_save()
 	_test_run_controller_resume_run_signal()
@@ -3329,3 +3333,55 @@ func _test_prep_scene_ready_button_triggers_battle() -> void:
 	_cleanup_ctrl(ctrl)
 	scene.queue_free()
 	await process_frame
+func _test_combatant_hp_override_parameter() -> void:
+	print("[test] S6.3: Combatant._init принимает hp_override и применяет его")
+	var def: Resource = UnitDefScript.new()
+	def.id = &"hp_test"
+	def.max_hp = 100
+	var c = CombatantScript.new(def, 1.0, 1.0, 1.0, 50)
+	_assert(c.health.current_hp == 50, "hp_override=50 -> start at 50 (got %d)" % c.health.current_hp)
+	_assert(c.health.max_hp() == 100, "max_hp stays 100 (got %d)" % c.health.max_hp())
+
+
+func _test_combatant_hp_override_minus_one_uses_max() -> void:
+	print("[test] S6.3: Combatant hp_override=-1 использует max_hp (default)")
+	var def: Resource = UnitDefScript.new()
+	def.id = &"hp_default"
+	def.max_hp = 80
+	var c = CombatantScript.new(def, 1.0, 1.0, 1.0, -1)
+	_assert(c.health.current_hp == 80, "hp_override=-1 -> start at max_hp 80 (got %d)" % c.health.current_hp)
+
+
+func _test_run_controller_start_battle_persists_unit_hp() -> void:
+	print("[test] S6.3: start_battle передаёт unit_states[].current_hp в Combatant")
+	var ctrl: Node = RunControllerScript.new()
+	get_root().add_child.call_deferred(ctrl)
+	await process_frame
+	ctrl.start_run(42)
+	# Damage first unit to 30 HP.
+	ctrl.state.unit_states[0].current_hp = 30
+	# Trigger battle via _on_node_selected for combat.
+	ctrl._enter_map()
+	for i in 2: await process_frame
+	var combat_id: int = -1
+	for id in ctrl.encounter_map.get_available_next_ids():
+		var n = ctrl.encounter_map.get_node(id)
+		if n != null and n.is_combat():
+			combat_id = id
+			break
+	ctrl._on_node_selected(combat_id)
+	# Now in PREP, set phase=PREP then start_battle.
+	ctrl.start_battle()
+	# Find player Combatant in ctx.
+	var found: Combatant = null
+	for c in ctrl.ctx.all_combatants():
+		if c.team == 0 and c.def_id == ctrl.state.unit_states[0].unit_id:
+			found = c
+			break
+	_assert(found != null, "player unit found in ctx")
+	if found != null:
+		_assert(found.health.current_hp == 30,
+			"Combatant start_hp = 30 (persisted from unit_states, got %d)" % found.health.current_hp)
+	_cleanup_ctrl(ctrl)
+
+
