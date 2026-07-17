@@ -75,6 +75,12 @@ static func get_by_id(id: StringName) -> Resource:
 	return _by_id.get(id, null)
 
 
+## S7.1: возвращает массив StringName всех id для данного типа (units/enemies/items/...).
+static func get_all_ids_for_type(type_name: String) -> Array:
+	ensure_loaded()
+	return _by_type.get(type_name, [])
+
+
 static func list_by_type(type_name: String) -> Array:
 	ensure_loaded()
 	return _by_type.get(type_name, [])

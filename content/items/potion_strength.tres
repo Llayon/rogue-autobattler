@@ -1,0 +1,15 @@
+[gd_resource type="Resource" script_class="ItemDef" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://core/data/item_def.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = &"potion_strength"
+display_name = "Potion of Strength"
+description = "A small vial that grants +5 attack power when equipped."
+cost = 2
+tier = 1
+bonus_max_hp = 0
+bonus_attack = 5
+bonus_defense = 0
+bonus_attack_speed = 0.0

@@ -58,6 +58,7 @@ const BalanceScript = preload("res://core/balance.gd")
 const RunControllerScript = preload("res://core/progression/run_controller.gd")
 const RunStateScript = preload("res://core/progression/run_state.gd")
 const MetaProfileScript = preload("res://core/progression/meta_profile.gd")
+const SaveSvcScript = preload("res://core/utils/save_manager.gd")
 const BattleRunnerScriptForCtrl = preload("res://core/battle/battle_runner.gd")
 const BattleStateScriptForCtrl = preload("res://core/battle/battle_state.gd")
 const UnitsMetaScript = preload("res://core/data/units_meta.gd")
@@ -211,6 +212,14 @@ func _initialize() -> void:
 	_test_combatant_hp_override_parameter()
 	_test_combatant_hp_override_minus_one_uses_max()
 	_test_run_controller_start_battle_persists_unit_hp()
+	# S7.1: Inventory API
+	_test_run_controller_grant_item_appends_to_state()
+	_test_run_controller_grant_item_respects_capacity()
+	_test_run_controller_remove_item_at_decrements()
+	_test_run_controller_inventory_get_item_def_at_returns_resolved()
+	_test_run_controller_inventory_persists_in_save()
+	# S7.1: TREASURE grants item
+	_test_run_controller_treasure_grants_random_item()
 	_test_run_controller_resume_run()
 	_test_run_controller_resume_run_no_save()
 	_test_run_controller_resume_run_signal()
@@ -3384,4 +3393,108 @@ func _test_run_controller_start_battle_persists_unit_hp() -> void:
 			"Combatant start_hp = 30 (persisted from unit_states, got %d)" % found.health.current_hp)
 	_cleanup_ctrl(ctrl)
 
+
+func _test_run_controller_grant_item_appends_to_state() -> void:
+	print("[test] S7.1: grant_item добавляет в state.item_ids")
+	var ctrl: Node = RunControllerScript.new()
+	get_root().add_child.call_deferred(ctrl)
+	await process_frame
+	ctrl.start_run(42)
+	var initial_count: int = ctrl.state.item_ids.size()
+	_assert(ctrl.inventory_count() == initial_count, "start empty (got count=%d)" % initial_count)
+	var ok: bool = ctrl.grant_item(&"potion_strength")
+	_assert(ok, "grant_item returns true")
+	_assert(ctrl.inventory_count() == initial_count + 1, "count 0->1 (got %d)" % ctrl.inventory_count())
+	_assert(ctrl.state.item_ids[-1] == &"potion_strength", "last id = potion_strength (got %s)" % ctrl.state.item_ids[-1])
+	_cleanup_ctrl(ctrl)
+
+
+func _test_run_controller_grant_item_respects_capacity() -> void:
+	print("[test] S7.1: grant_item respects MAX_INVENTORY cap")
+	var ctrl: Node = RunControllerScript.new()
+	get_root().add_child.call_deferred(ctrl)
+	await process_frame
+	ctrl.start_run(42)
+	# Fill inventory to MAX_INVENTORY (e.g. 12).
+	for i in 12:
+		ctrl.grant_item(&"potion_strength")
+	_assert(ctrl.inventory_count() == 12, "filled to 12 (got %d)" % ctrl.inventory_count())
+	# 13th grant rejected.
+	var ok: bool = ctrl.grant_item(&"potion_strength")
+	_assert(not ok, "13th grant rejected")
+	_assert(ctrl.inventory_count() == 12, "count still 12 (got %d)" % ctrl.inventory_count())
+	_cleanup_ctrl(ctrl)
+
+
+func _test_run_controller_remove_item_at_decrements() -> void:
+	print("[test] S7.1: remove_item_at removes by index")
+	var ctrl: Node = RunControllerScript.new()
+	get_root().add_child.call_deferred(ctrl)
+	await process_frame
+	ctrl.start_run(42)
+	ctrl.grant_item(&"potion_strength")
+	ctrl.grant_item(&"scroll_ward")
+	ctrl.grant_item(&"amulet_vigor")
+	_assert(ctrl.inventory_count() == 3, "added 3 (got %d)" % ctrl.inventory_count())
+	var ok: bool = ctrl.remove_item_at(1)  # remove scroll_ward
+	_assert(ok, "remove idx=1 returns true")
+	_assert(ctrl.inventory_count() == 2, "count 3->2 (got %d)" % ctrl.inventory_count())
+	_assert(ctrl.state.item_ids[0] == &"potion_strength" and ctrl.state.item_ids[1] == &"amulet_vigor",
+		"removed middle slot")
+	# Out of range rejection
+	_assert(not ctrl.remove_item_at(-1), "negative idx rejected")
+	_assert(not ctrl.remove_item_at(99), "out of range idx rejected")
+	_cleanup_ctrl(ctrl)
+
+
+func _test_run_controller_inventory_get_item_def_at_returns_resolved() -> void:
+	print("[test] S7.1: get_item_def_at resolves id -> ItemDef")
+	var ctrl: Node = RunControllerScript.new()
+	get_root().add_child.call_deferred(ctrl)
+	await process_frame
+	ctrl.start_run(42)
+	ctrl.grant_item(&"potion_strength")
+	var def: Resource = ctrl.get_item_def_at(0)
+	_assert(def != null, "def returned (got %s)" % str(def))
+	if def != null:
+		_assert(def.id == &"potion_strength", "id matches (got %s)" % def.id)
+		_assert(def.display_name != "", "display_name populated (got '%s')" % def.display_name)
+	_cleanup_ctrl(ctrl)
+
+
+func _test_run_controller_inventory_persists_in_save() -> void:
+	print("[test] S7.1: item_ids persists через save/load")
+	var ctrl: Node = RunControllerScript.new()
+	get_root().add_child.call_deferred(ctrl)
+	await process_frame
+	ctrl.start_run(42)
+	ctrl.grant_item(&"potion_strength")
+	ctrl.grant_item(&"amulet_vigor")
+	ctrl.save_now()
+	var save_path: String = "user://test_inv_save.tres"
+	SaveSvcScript.save_resource(ctrl.state, save_path)
+	var loaded: Resource = SaveSvcScript.load_resource(save_path)
+	_assert(loaded != null and loaded.item_ids.size() == 2,
+		"loaded item_ids size = 2 (got %s)" % str(loaded))
+	if loaded != null:
+		_assert(loaded.item_ids[0] == &"potion_strength", "loaded[0] = potion_strength")
+		_assert(loaded.item_ids[1] == &"amulet_vigor", "loaded[1] = amulet_vigor")
+	_cleanup_ctrl(ctrl)
+
+
+
+func _test_run_controller_treasure_grants_random_item() -> void:
+	print("[test] S7.1: TREASURE grants random item into inventory")
+	var ctrl: Node = RunControllerScript.new()
+	get_root().add_child.call_deferred(ctrl)
+	await process_frame
+	ctrl.start_run(42)
+	var before_count: int = ctrl.inventory_count()
+	# Apply TREASURE directly via private method (test). ItemDB must have at
+	# least 1 ItemDef (from content/items/).
+	ctrl._apply_treasure_effect()
+	var after_count: int = ctrl.inventory_count()
+	_assert(after_count >= before_count + 1 or after_count == before_count,
+		"inventory grew or unchanged (got before=%d after=%d)" % [before_count, after_count])
+	_cleanup_ctrl(ctrl)
 

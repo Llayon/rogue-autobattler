@@ -147,6 +147,47 @@ func move_to_board(bench_index: int, _cell: Vector2i) -> bool:
 	return bench_to_board(bench_index, -1)
 
 
+# === S7.1: Inventory ===
+
+## Добавляет предмет в инвентарь (state.item_ids). Возвращает true если успешно.
+## Если уже MAX_INVENTORY предметов, returns false и логирует warning.
+func grant_item(item_id: StringName) -> bool:
+	if item_id == &"":
+		GameLog.warn("inventory", "grant_item: empty id")
+		return false
+	if state.item_ids.size() >= BalanceScript.MAX_INVENTORY:
+		GameLog.warn("inventory", "grant_item: inventory full",
+			{"size": state.item_ids.size(), "max": BalanceScript.MAX_INVENTORY})
+		return false
+	state.item_ids.append(item_id)
+	GameLog.info("inventory", "item granted",
+		{"id": item_id, "size": state.item_ids.size()})
+	return true
+
+
+## Удаляет предмет из инвентаря по индексу. Возвращает true если успешно.
+func remove_item_at(idx: int) -> bool:
+	if idx < 0 or idx >= state.item_ids.size():
+		return false
+	var removed: StringName = state.item_ids[idx]
+	state.item_ids.remove_at(idx)
+	GameLog.info("inventory", "item removed",
+		{"id": removed, "idx": idx, "size": state.item_ids.size()})
+	return true
+
+
+## Кол-во предметов в инвентаре.
+func inventory_count() -> int:
+	return state.item_ids.size()
+
+
+## Возвращает ItemDef для предмета по индексу или null.
+func get_item_def_at(idx: int) -> Resource:
+	if idx < 0 or idx >= state.item_ids.size():
+		return null
+	return ContentDB_static.get_by_id(state.item_ids[idx])
+
+
 ## Запускает бой текущего раунда.
 func start_battle() -> bool:
 	if phase != Phase.PREP and phase != Phase.MAP:
@@ -487,14 +528,35 @@ func _apply_heal_effect() -> void:
 		{"hp_ratio": BalanceScript.MAP_HEAL_HP_RATIO, "lives": state.lives})
 
 
-## TREASURE: +gold + 1 meta unlock юнита.
+## TREASURE: +gold + 1 meta unlock юнита + random inventory item.
 func _apply_treasure_effect() -> void:
 	var gold_before: int = state.gold
 	state.gold += BalanceScript.MAP_TREASURE_GOLD
 	GameBus.emit_gold_changed(state.gold)
 	var unlocked: StringName = UnlockManager.grant_random_unit(profile, state.round_index)
+	# S7.1: каждый TREASURE ещё grants 1 random ItemDef в инвентарь.
+	var item_id: StringName = _pick_random_item_id()
+	var item_granted: bool = false
+	if item_id != &"":
+		item_granted = grant_item(item_id)
 	GameLog.info("run", "TREASURE",
-		{"gold": state.gold - gold_before, "unlocked": unlocked})
+		{
+			"gold": state.gold - gold_before,
+			"unlocked": unlocked,
+			"item": item_id,
+			"item_granted": item_granted,
+		})
+
+
+## S7.1: выбирает random ItemDef id из ContentDB. Возвращает &"" если ничего нет.
+func _pick_random_item_id() -> StringName:
+	var ids: Array = ContentDB_static.get_all_ids_for_type("items")
+	if ids.is_empty():
+		return &""
+	var idx: int = int(Rng.randf_range(0.0, float(ids.size())))
+	if idx >= ids.size():
+		idx = ids.size() - 1
+	return ids[idx] if idx >= 0 else &""
 
 
 ## MERCHANT: переходит в PREP (shop уже обновлён в _refresh_shop).

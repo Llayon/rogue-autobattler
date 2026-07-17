@@ -1,0 +1,15 @@
+[gd_resource type="Resource" script_class="ItemDef" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://core/data/item_def.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = &"amulet_vigor"
+display_name = "Amulet of Vigor"
+description = "A glowing amulet pulsing with life energy. +10 max HP."
+cost = 3
+tier = 2
+bonus_max_hp = 10
+bonus_attack = 0
+bonus_defense = 0
+bonus_attack_speed = 0.0
