@@ -229,6 +229,16 @@ func _initialize() -> void:
 	_test_inventory_scene_empty_state_shows_message()
 	# S7.1: BattleScene inventory integration
 	_test_battle_scene_has_inventory_scene_overlay()
+	# S7.2: Equip API
+	_test_run_controller_equip_item_at_basic()
+	_test_run_controller_unequip_item_at()
+	_test_run_controller_equip_invalid()
+	_test_run_controller_get_items_equipped_to_board()
+	_test_run_controller_get_unit_bonus_stats()
+	_test_run_controller_equip_state_initialized_in_start_run()
+	# S7.2: Bonus stats propagation
+	_test_combatant_bonus_stats_applied()
+	_test_run_controller_start_battle_applies_item_bonuses()
 	_test_run_controller_resume_run()
 	_test_run_controller_resume_run_no_save()
 	_test_run_controller_resume_run_signal()
@@ -3623,4 +3633,159 @@ func _test_battle_scene_has_inventory_scene_overlay() -> void:
 			"after grant -> 1 item button (got %d)" % scene.inventory_scene._item_buttons.size())
 	scene.queue_free()
 	await process_frame
+
+func _test_run_controller_equip_item_at_basic() -> void:
+	print("[test] S7.2: equip_item_at(item, board) marks equipped")
+	var ctrl: Node = RunControllerScript.new()
+	get_root().add_child.call_deferred(ctrl)
+	await process_frame
+	ctrl.start_run(42)
+	ctrl.grant_item(&"potion_strength")
+	_assert(ctrl.get_equipped_board_idx(0) == -1, "init -1 (got %d)" % ctrl.get_equipped_board_idx(0))
+	var ok: bool = ctrl.equip_item_at(0, 0)
+	_assert(ok, "equip returned true")
+	_assert(ctrl.get_equipped_board_idx(0) == 0, "now board 0 (got %d)" % ctrl.get_equipped_board_idx(0))
+	_cleanup_ctrl(ctrl)
+
+
+func _test_run_controller_unequip_item_at() -> void:
+	print("[test] S7.2: unequip_item_at sets -1 again")
+	var ctrl: Node = RunControllerScript.new()
+	get_root().add_child.call_deferred(ctrl)
+	await process_frame
+	ctrl.start_run(42)
+	ctrl.grant_item(&"scroll_ward")
+	ctrl.equip_item_at(0, 1)
+	var ok: bool = ctrl.unequip_item_at(0)
+	_assert(ok, "unequip ok")
+	_assert(ctrl.get_equipped_board_idx(0) == -1, "back to -1 (got %d)" % ctrl.get_equipped_board_idx(0))
+	_cleanup_ctrl(ctrl)
+
+
+func _test_run_controller_equip_invalid() -> void:
+	print("[test] S7.2: equip invalid input rejected")
+	var ctrl: Node = RunControllerScript.new()
+	get_root().add_child.call_deferred(ctrl)
+	await process_frame
+	ctrl.start_run(42)
+	ctrl.grant_item(&"potion_strength")
+	_assert(not ctrl.equip_item_at(-1, 0), "negative item rejected")
+	_assert(not ctrl.equip_item_at(0, -1), "negative board rejected")
+	_assert(not ctrl.equip_item_at(0, 99), "out of range board rejected")
+	_assert(not ctrl.equip_item_at(99, 0), "out of range item rejected")
+	_cleanup_ctrl(ctrl)
+
+
+func _test_run_controller_get_items_equipped_to_board() -> void:
+	print("[test] S7.2: get_items_equipped_to_board returns item indices")
+	var ctrl: Node = RunControllerScript.new()
+	get_root().add_child.call_deferred(ctrl)
+	await process_frame
+	ctrl.start_run(42)
+	ctrl.grant_item(&"potion_strength")
+	ctrl.grant_item(&"scroll_ward")
+	ctrl.grant_item(&"amulet_vigor")
+	ctrl.equip_item_at(0, 1)  # potion -> board 1
+	ctrl.equip_item_at(2, 1)  # amulet -> board 1 (same unit)
+	var items: Array = ctrl.get_items_equipped_to_board(1)
+	_assert(items.size() == 2, "board 1 has 2 items (got %d)" % items.size())
+	_assert(items.has(0) and items.has(2), "indices 0 and 2 present")
+	_cleanup_ctrl(ctrl)
+
+
+func _test_run_controller_get_unit_bonus_stats() -> void:
+	print("[test] S7.2: get_unit_bonus_stats aggregates all equipped items")
+	var ctrl: Node = RunControllerScript.new()
+	get_root().add_child.call_deferred(ctrl)
+	await process_frame
+	ctrl.start_run(42)
+	ctrl.grant_item(&"potion_strength")  # +5 ATK
+	ctrl.grant_item(&"scroll_ward")      # +3 DEF
+	ctrl.grant_item(&"amulet_vigor")     # +10 max_hp
+	ctrl.equip_item_at(0, 0)  # potion -> board 0
+	ctrl.equip_item_at(1, 0)  # scroll -> board 0
+	ctrl.equip_item_at(2, 1)  # amulet -> board 1
+	var b0: Dictionary = ctrl.get_unit_bonus_stats(0)
+	_assert(b0.get("attack", 0) == 5, "board 0 attack=5 (got %d)" % b0.get("attack", 0))
+	_assert(b0.get("defense", 0) == 3, "board 0 defense=3 (got %d)" % b0.get("defense", 0))
+	_assert(b0.get("max_hp", 0) == 0, "board 0 max_hp=0 (got %d)" % b0.get("max_hp", 0))
+	var b1: Dictionary = ctrl.get_unit_bonus_stats(1)
+	_assert(b1.get("attack", 0) == 0, "board 1 attack=0")
+	_assert(b1.get("max_hp", 0) == 10, "board 1 max_hp=10")
+	# Aggregate (e.g. 2 items on board 0 both with attack gives sum).
+	ctrl.grant_item(&"potion_strength")  # another +5 ATK
+	ctrl.equip_item_at(3, 0)
+	var b0_agg: Dictionary = ctrl.get_unit_bonus_stats(0)
+	_assert(b0_agg.get("attack", 0) == 10, "2 potions = 10 attack (got %d)" % b0_agg.get("attack", 0))
+	_cleanup_ctrl(ctrl)
+
+
+func _test_run_controller_equip_state_initialized_in_start_run() -> void:
+	print("[test] S7.2: equip_board_idx parallel to item_ids on start_run")
+	var ctrl: Node = RunControllerScript.new()
+	get_root().add_child.call_deferred(ctrl)
+	await process_frame
+	ctrl.start_run(42)
+	_assert(ctrl.state.item_equip_board_idx.size() == 0, "starts empty")
+	ctrl.grant_item(&"potion_strength")
+	ctrl.grant_item(&"amulet_vigor")
+	_assert(ctrl.state.item_equip_board_idx.size() == 2,
+		"parallel array same size (got %d)" % ctrl.state.item_equip_board_idx.size())
+	_assert(ctrl.state.item_equip_board_idx[0] == -1 and ctrl.state.item_equip_board_idx[1] == -1,
+		"both default -1")
+	_cleanup_ctrl(ctrl)
+
+func _test_combatant_bonus_stats_applied() -> void:
+	print("[test] S7.2: Combatant получает bonus_attack/bonus_defense/bonus_max_hp")
+	var def: Resource = UnitDefScript.new()
+	def.id = &"warrior"
+	def.attack = 10
+	def.defense = 5
+	def.max_hp = 200
+	var c = CombatantScript.new(def, 1.0, 1.0, 1.0, -1, 5, 3, 10)
+	_assert(c.attack_base == 15, "attack 10+5=15 (got %d)" % c.attack_base)
+	_assert(c.defense_base == 8, "defense 5+3=8 (got %d)" % c.defense_base)
+	_assert(c.health.max_hp() == 210, "max_hp 200+10=210 (got %d)" % c.health.max_hp())
+
+
+func _test_run_controller_start_battle_applies_item_bonuses() -> void:
+	print("[test] S7.2: start_battle применяет bonus stats to Combatant")
+	var ctrl: Node = RunControllerScript.new()
+	get_root().add_child.call_deferred(ctrl)
+	await process_frame
+	ctrl.start_run(42)
+	ctrl.grant_item(&"potion_strength")  # +5 ATK
+	ctrl.grant_item(&"scroll_ward")      # +3 DEF
+	ctrl.equip_item_at(0, 0)  # potion -> warrior (board 0)
+	ctrl.equip_item_at(1, 1)  # scroll -> archer (board 1)
+	# Trigger combat via _on_node_selected.
+	ctrl._enter_map()
+	for i in 2: await process_frame
+	var combat_id: int = -1
+	for id in ctrl.encounter_map.get_available_next_ids():
+		var n = ctrl.encounter_map.get_node(id)
+		if n != null and n.is_combat():
+			combat_id = id
+			break
+	ctrl._on_node_selected(combat_id)
+	ctrl.start_battle()
+	_assert(ctrl.phase == ctrl.Phase.BATTLE, "phase = BATTLE")
+	var found_warrior = null
+	var found_archer = null
+	for c in ctrl.ctx.all_combatants():
+		if c.team != 0:
+			continue
+		if c.def_id == &"warrior":
+			found_warrior = c
+		elif c.def_id == &"archer":
+			found_archer = c
+	_assert(found_warrior != null, "warrior in ctx")
+	_assert(found_archer != null, "archer in ctx")
+	if found_warrior != null:
+		var atk_w: int = found_warrior.attack_base
+		_assert(atk_w >= 5, "warrior has potion bonus (got atk=%d)" % atk_w)
+	if found_archer != null:
+		var def_a: int = found_archer.defense_base
+		_assert(def_a >= 3, "archer has scroll bonus (got def=%d)" % def_a)
+	_cleanup_ctrl(ctrl)
 

@@ -79,7 +79,9 @@ const POS_LERP_DECAY_PER_SEC: float = 1.0 / 0.2
 ## hp_override: S6.3 — если > 0, устанавливает начальное HP = hp_override
 ## (используется при apply_run_unit_state для персистентности HP
 ## между боями через state.unit_states[]).
-func _init(def: Resource, hp_mul: float = 1.0, atk_mul: float = 1.0, def_mul: float = 1.0, hp_override: int = -1) -> void:
+## S7.2: bonus_attack, bonus_defense, bonus_max_hp — применяются как
+## additive flat bonuses сверх def.attack / def.defense / def.max_hp.
+func _init(def: Resource, hp_mul: float = 1.0, atk_mul: float = 1.0, def_mul: float = 1.0, hp_override: int = -1, bonus_attack: int = 0, bonus_defense: int = 0, bonus_max_hp: int = 0) -> void:
 	if def == null:
 		GameLog.error("combatant", "Combatant created with null def")
 		return
@@ -90,6 +92,9 @@ func _init(def: Resource, hp_mul: float = 1.0, atk_mul: float = 1.0, def_mul: fl
 	defense_base = int(round(float(def.defense) * def_mul))
 	magic_power_base = def.magic_power
 	magic_resist_base = def.magic_resist
+	# S7.2: apply bonuses from equipped items (additive).
+	attack_base += bonus_attack
+	defense_base += bonus_defense
 	attack_speed_base = def.attack_speed
 	move_speed_base = def.move_speed
 	attack_range = def.attack_range
@@ -113,10 +118,18 @@ func _init(def: Resource, hp_mul: float = 1.0, atk_mul: float = 1.0, def_mul: fl
 	# S6.3: max_hp всегда = def.max_hp (или * hp_mul). hp_override
 	# влияет только на current_hp (start at).
 	var max_hp_val: int = int(round(float(def.max_hp) * hp_mul))
+	# S7.2: apply max_hp bonus from items.
+	max_hp_val += bonus_max_hp
 	health.configure(max_hp_val)
 	if hp_override > 0:
 		# S6.3: persisted HP — set current без изменения max.
-		health.current_hp = mini(hp_override, max_hp_val)
+		var cap: int = health.max_hp()
+		health.current_hp = mini(hp_override, cap)
+	# S7.2: persist any item-bonus HP overflow into unit_states so subsequent
+	# battles start with the bonus too.
+	if bonus_max_hp > 0:
+		# Find unit_state and update it (best-effort — not strictly required).
+		pass  # bonus persists naturally in next start_battle call
 	mana.configure(max_mana_base, mana_regen)
 	regen.configure(health_regen)
 

@@ -160,6 +160,8 @@ func grant_item(item_id: StringName) -> bool:
 			{"size": state.item_ids.size(), "max": BalanceScript.MAX_INVENTORY})
 		return false
 	state.item_ids.append(item_id)
+	# S7.2: parallel equip slot (-1 = в инвентаре).
+	state.item_equip_board_idx.append(-1)
 	GameLog.info("inventory", "item granted",
 		{"id": item_id, "size": state.item_ids.size()})
 	return true
@@ -171,6 +173,9 @@ func remove_item_at(idx: int) -> bool:
 		return false
 	var removed: StringName = state.item_ids[idx]
 	state.item_ids.remove_at(idx)
+	# S7.2: keep item_equip_board_idx параллельно к item_ids.
+	if idx < state.item_equip_board_idx.size():
+		state.item_equip_board_idx.remove_at(idx)
 	GameLog.info("inventory", "item removed",
 		{"id": removed, "idx": idx, "size": state.item_ids.size()})
 	return true
@@ -186,6 +191,66 @@ func get_item_def_at(idx: int) -> Resource:
 	if idx < 0 or idx >= state.item_ids.size():
 		return null
 	return ContentDB_static.get_by_id(state.item_ids[idx])
+
+
+# === S7.2: Equip ===
+
+## Эипит предмет (item_idx) на board юнита (board_idx). Возвращает true.
+## Если board_idx невалиден (нет такого юнита), returns false.
+## Допускается эипить несколько предметов на одного юнита.
+func equip_item_at(item_idx: int, board_idx: int) -> bool:
+	if item_idx < 0 or item_idx >= state.item_ids.size():
+		return false
+	var board_size: int = state.player_unit_ids.size()
+	if board_idx < 0 or board_idx >= board_size:
+		return false
+	# Resize equip array if needed (defensive — should match item_ids).
+	if item_idx >= state.item_equip_board_idx.size():
+		while state.item_equip_board_idx.size() < state.item_ids.size():
+			state.item_equip_board_idx.append(-1)
+	state.item_equip_board_idx[item_idx] = board_idx
+	GameLog.info("inventory", "item equipped",
+		{"item_idx": item_idx, "id": state.item_ids[item_idx], "board_idx": board_idx})
+	return true
+
+
+## Снимает предмет с юнита (возвращает в инвентарь). item_equip = -1.
+func unequip_item_at(item_idx: int) -> bool:
+	if item_idx < 0 or item_idx >= state.item_ids.size():
+		return false
+	state.item_equip_board_idx[item_idx] = -1
+	GameLog.info("inventory", "item unequipped", {"item_idx": item_idx})
+	return true
+
+
+## Возвращает board_idx куда эипится item, или -1 если в инвентаре.
+func get_equipped_board_idx(item_idx: int) -> int:
+	if item_idx < 0 or item_idx >= state.item_equip_board_idx.size():
+		return -1
+	return state.item_equip_board_idx[item_idx]
+
+
+## Возвращает array of item indices эипленных на board_idx.
+func get_items_equipped_to_board(board_idx: int) -> Array:
+	var result: Array = []
+	for i in state.item_equip_board_idx.size():
+		if state.item_equip_board_idx[i] == board_idx:
+			result.append(i)
+	return result
+
+
+## Возвращает Dictionary {attack, defense, max_hp} — сумма bonus_* всех
+## предметов эипленных на board_idx. Используется Combatant creation.
+func get_unit_bonus_stats(board_idx: int) -> Dictionary:
+	var stats: Dictionary = {"attack": 0, "defense": 0, "max_hp": 0}
+	for i in state.item_equip_board_idx.size():
+		if state.item_equip_board_idx[i] == board_idx:
+			var def: Resource = ContentDB_static.get_by_id(state.item_ids[i])
+			if def != null:
+				stats["attack"] = int(stats.get("attack", 0)) + int(def.bonus_attack)
+				stats["defense"] = int(stats.get("defense", 0)) + int(def.bonus_defense)
+				stats["max_hp"] = int(stats.get("max_hp", 0)) + int(def.bonus_max_hp)
+	return stats
 
 
 ## Запускает бой текущего раунда.
@@ -206,14 +271,19 @@ func start_battle() -> bool:
 		if def == null:
 			continue
 		# S5.4: мёртвые юниты не появляются на доске.
-		# S6.3: также передаём persisted current_hp из unit_states как hp_override.
+		# S5.4: мёртвые юниты не появляются на доске.
 		var us = _find_unit_state(state.player_unit_ids[i])
 		if us != null and us.is_dead():
-				continue
+			continue
 		var hp_override: int = -1
 		if us != null and us.current_hp > 0:
-				hp_override = us.current_hp
-		var c = CombatantScript.new(def, 1.0, atk_mul, 1.0, hp_override)
+			hp_override = us.current_hp
+		# S7.2: apply bonuses from equipped items.
+		var bonuses: Dictionary = get_unit_bonus_stats(i)
+		var bonus_atk: int = int(bonuses.get("attack", 0))
+		var bonus_def: int = int(bonuses.get("defense", 0))
+		var bonus_hp: int = int(bonuses.get("max_hp", 0))
+		var c = CombatantScript.new(def, 1.0, atk_mul, 1.0, hp_override, bonus_atk, bonus_def, bonus_hp)
 		var cell: Vector2i = Vector2i(i, 3)  # Grid.SIZE.y - 1 == 3
 		if not ctx.register(c, cell):
 			GameLog.warn("run", "Cannot place player unit", {"i": i})

@@ -21,6 +21,9 @@ const SAVE_VERSION: int = 3
 @export var bench_unit_ids: Array[StringName] = []
 # Предметы.
 @export var item_ids: Array[StringName] = []
+# S7.2: equip slot для каждого предмета (-1 = в инвентаре, 0..N = board idx).
+# Parallel array к item_ids: тот же size, item_equip_board_idx[i] = где эипится item_ids[i].
+@export var item_equip_board_idx: Array[int] = []	
 
 # Статистика рана.
 @export var wins: int = 0
