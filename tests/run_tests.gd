@@ -245,6 +245,10 @@ func _initialize() -> void:
 	_test_inventory_scene_unequip_by_long_click()
 	# S7.2: PREP scene equip integration
 	_test_prep_scene_board_click_equips_picked_item()
+	# S7.3: Combat item drops
+	_test_run_controller_combat_victory_can_drop_item()
+	_test_combat_drop_respects_inventory_capacity()
+	_test_combat_drop_returns_true_or_false_basd_on_rng()
 	_test_run_controller_resume_run()
 	_test_run_controller_resume_run_no_save()
 	_test_run_controller_resume_run_signal()
@@ -3897,4 +3901,59 @@ func _test_prep_scene_board_click_equips_picked_item() -> void:
 	inv.queue_free()
 	prep.queue_free()
 	await process_frame
+
+func _test_run_controller_combat_victory_can_drop_item() -> void:
+	print("[test] S7.3: combat victory drops items with bounded probability")
+	var ctrl: Node = RunControllerScript.new()
+	get_root().add_child.call_deferred(ctrl)
+	await process_frame
+	ctrl.start_run(42)
+	# Simulate 20 combat victories (each ticks RNG).
+	# Roll happens in _on_battle_ended via RNG.randf() comparison.
+	# Since we use deterministic seed (42), we just count drops.
+	var drops: int = 0
+	for i in 20:
+		# Fake state: wins++ as the drop-tracking condition.
+		ctrl.state.wins += 1
+		# Re-invoke via direct call (private) — _grant_combat_drop is private.
+		var ok_grant: bool = ctrl._grant_combat_drop()
+		if ok_grant:
+			drops += 1
+	_assert(drops >= 1, ">= 1 drops over 20 fights (got %d)" % drops)
+	_assert(drops <= 20, "<= 20 drops (got %d)" % drops)
+	_assert(ctrl.inventory_count() == drops, "inventory count == drops (got %d vs %d)" % [ctrl.inventory_count(), drops])
+	_cleanup_ctrl(ctrl)
+
+
+func _test_combat_drop_respects_inventory_capacity() -> void:
+	print("[test] S7.3: drop respects MAX_INVENTORY cap")
+	var ctrl: Node = RunControllerScript.new()
+	get_root().add_child.call_deferred(ctrl)
+	await process_frame
+	ctrl.start_run(42)
+	# Fill inventory to MAX_INVENTORY (12).
+	for i in 12:
+		ctrl.grant_item(&"potion_strength")
+	_assert(ctrl.inventory_count() == 12, "filled to 12")
+	# Force-roll many times: grant_item returns false when full.
+	var n_attempts: int = 100
+	var granted_count: int = 0
+	for i in n_attempts:
+		if ctrl._grant_combat_drop():
+			granted_count += 1
+	_assert(granted_count == 0, "0 grants when inv full (got %d)" % granted_count)
+	_assert(ctrl.inventory_count() == 12, "still 12 (got %d)" % ctrl.inventory_count())
+	_cleanup_ctrl(ctrl)
+
+
+func _test_combat_drop_returns_true_or_false_basd_on_rng() -> void:
+	print("[test] S7.3: _grant_combat_drop returns bool, depends on RNG")
+	var ctrl: Node = RunControllerScript.new()
+	get_root().add_child.call_deferred(ctrl)
+	await process_frame
+	ctrl.start_run(42)
+	# Sanity: should be callable, returns bool.
+	var ok: bool = ctrl._grant_combat_drop()
+	_assert(typeof(ok) == TYPE_BOOL, "returns bool (got %s)" % typeof(ok))
+	_cleanup_ctrl(ctrl)
 

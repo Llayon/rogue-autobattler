@@ -321,6 +321,9 @@ func _on_battle_ended() -> void:
 		state.wins += 1
 		state.gold += BalanceScript.WIN_BONUS_GOLD + state.round_index
 		GameBus.emit_gold_changed(state.gold)
+		# S7.3: roll для drop random item (35% chance). Inventory full
+		# обрабатывается silently в _grant_combat_drop.
+		_grant_combat_drop()
 		state.round_index += 1
 		# S3.1: победа на MAX_ROUND завершает ран.
 		if state.round_index > BalanceScript.MAX_ROUND:
@@ -616,6 +619,20 @@ func _apply_treasure_effect() -> void:
 			"item": item_id,
 			"item_granted": item_granted,
 		})
+
+
+## S7.3: roll для drop random item после combat victory. Возвращает true если granted.
+## Вызывается из _on_battle_ended. Inventory full → returns false silently.
+func _grant_combat_drop() -> bool:
+	if Rng.randf() >= BalanceScript.MAP_COMBAT_DROP_CHANCE:
+		return false
+	var item_id: StringName = _pick_random_item_id()
+	if item_id == &"":
+		return false
+	var ok: bool = grant_item(item_id)
+	if ok:
+		GameLog.info("run", "Combat drop", {"id": item_id, "wins": state.wins})
+	return ok
 
 
 ## S7.1: выбирает random ItemDef id из ContentDB. Возвращает &"" если ничего нет.

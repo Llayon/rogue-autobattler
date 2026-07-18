@@ -85,6 +85,11 @@ const MAX_BENCH_UNITS: int = 4
 # S7.1: capacity для инвентаря (предметов во время рана).
 const MAX_INVENTORY: int = 12
 
+# S7.3: chance для random item drop при победе в combat encounter
+# (не для TREASURE/MERCHANT/REST/etc — только combat_victory).
+# 0.35 = ~3 дропа за 10 боев.
+const MAP_COMBAT_DROP_CHANCE: float = 0.35
+
 # === Время ===
 const DEFAULT_TICK_DT: float = 1.0 / 20.0    # 20 тиков/сек — баланс между плавностью и CPU
 const MIN_ATTACK_SPEED: float = 0.01         # защита от деления на 0
