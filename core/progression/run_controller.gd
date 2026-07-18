@@ -253,6 +253,37 @@ func get_unit_bonus_stats(board_idx: int) -> Dictionary:
 	return stats
 
 
+## S7.4: покупает item из текущего shop offer (с MAP_MERCHANT_DISCOUNT).
+## Возвращает true если успешно.
+func buy_item(slot: int) -> bool:
+	var offered: int = shop.get_offered_count()
+	if slot < 0 or slot >= offered:
+		return false
+	var id: StringName = shop.get_item_id(slot)
+	if id == &"":
+		return false
+	var price: int = shop.get_discounted_price(slot)
+	if state.gold < price:
+		GameLog.warn("run", "Shop buy: not enough gold",
+			{"gold": state.gold, "price": price})
+		return false
+	if not grant_item(id):
+		GameLog.warn("run", "Shop buy: grant_item failed (inv full?)", {"id": id})
+		return false
+	state.gold -= price
+	GameBus.emit_gold_changed(state.gold)
+	GameLog.info("run", "Shop buy",
+		{"id": id, "price": price, "gold_left": state.gold})
+	return true
+
+
+## S7.4: выходит из shop/MERCHANT в MAP phase (используется shop_scene Close).
+func exit_shop_to_map() -> void:
+	if phase != Phase.PREP:
+		return
+	_set_phase(Phase.MAP)
+
+
 ## Запускает бой текущего раунда.
 func start_battle() -> bool:
 	if phase != Phase.PREP and phase != Phase.MAP:
@@ -760,6 +791,7 @@ func _enter_map() -> void:
 
 
 func _refresh_shop() -> void:
+	shop.set_discount(BalanceScript.MAP_MERCHANT_DISCOUNT)
 	shop.refresh(profile.unlocked_units)
 
 

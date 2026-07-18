@@ -75,6 +75,8 @@ const EncounterMapScript = preload("res://core/encounter/encounter_map.gd")
 const PrepSceneScript = preload("res://scenes/prep/prep_scene.gd")
 # S7.1: InventoryScene
 const InventorySceneScript = preload("res://scenes/inventory/inventory_scene.gd")
+# S7.4: ShopScene
+const ShopSceneScript = preload("res://scenes/shop/shop_scene.gd")
 
 
 
@@ -249,6 +251,13 @@ func _initialize() -> void:
 	_test_run_controller_combat_victory_can_drop_item()
 	_test_combat_drop_respects_inventory_capacity()
 	_test_combat_drop_returns_true_or_false_basd_on_rng()
+	# S7.4: Shop API
+	_test_shop_screen_refresh_populates_offer()
+	_test_shop_screen_discount_50_percent()
+	_test_run_controller_buy_item_grants_and_deducts()
+	_test_run_controller_buy_item_rejects_without_gold()
+	_test_run_controller_buy_item_rejects_full_inventory()
+	_test_shop_scene_builds_three_buy_buttons()
 	_test_run_controller_resume_run()
 	_test_run_controller_resume_run_no_save()
 	_test_run_controller_resume_run_signal()
@@ -2866,7 +2875,7 @@ func _test_run_controller_merchant_node_effect() -> void:
 	var merchant_node = EncounterNodeScript.new(102, EncounterTypeScript.Kind.MERCHANT, 1)
 	ctrl._apply_service_effect(merchant_node)
 	_assert(ctrl.phase == RunControllerScript.Phase.PREP, "phase = PREP after MERCHANT (got %d)" % ctrl.phase)
-	_assert(ctrl.shop.offered_ids().size() > 0, "shop refreshed (offered_ids size %d)" % ctrl.shop.offered_ids().size())
+	_assert(ctrl.shop.get_offered_ids().size() > 0, "shop refreshed (offered_ids size %d)" % ctrl.shop.get_offered_ids().size())
 	_cleanup_ctrl(ctrl)
 
 
@@ -3956,4 +3965,115 @@ func _test_combat_drop_returns_true_or_false_basd_on_rng() -> void:
 	var ok: bool = ctrl._grant_combat_drop()
 	_assert(typeof(ok) == TYPE_BOOL, "returns bool (got %s)" % typeof(ok))
 	_cleanup_ctrl(ctrl)
+
+func _test_shop_screen_refresh_populates_offer() -> void:
+	print("[test] S7.4: ShopScreen.refresh() fills 3 items")
+	var ctrl: Node = RunControllerScript.new()
+	get_root().add_child.call_deferred(ctrl)
+	await process_frame
+	ctrl.start_run(42)
+	ctrl.shop.refresh()
+	_assert(ctrl.shop.get_offered_count() == 3, "offer has 3 items (got %d)" % ctrl.shop.get_offered_count())
+	_cleanup_ctrl(ctrl)
+
+
+func _test_shop_screen_discount_50_percent() -> void:
+	print("[test] S7.4: ShopScreen price = cost * 0.5")
+	var ctrl: Node = RunControllerScript.new()
+	get_root().add_child.call_deferred(ctrl)
+	await process_frame
+	ctrl.start_run(42)
+	ctrl.shop.refresh()
+	# Find item with known cost.
+	var expected_discount: float = ctrl.shop.get_discount()
+	_assert(abs(expected_discount - 0.5) < 0.001, "discount = 0.5 (got %f)" % expected_discount)
+	# Check at least one slot has correct discounted price.
+	var checked: bool = false
+	for i in ctrl.shop.get_offered_count():
+		var id: StringName = ctrl.shop.get_item_id(i)
+		var def: Resource = ctrl.shop.get_item_def(i)
+		var price: int = ctrl.shop.get_discounted_price(i)
+		if def != null:
+			_assert(price == int(round(float(def.cost) * 0.5)),
+				"slot %d price=%d (cost=%d)" % [i, price, def.cost])
+			checked = true
+	_assert(checked, "at least one slot price verified")
+	_cleanup_ctrl(ctrl)
+
+
+func _test_run_controller_buy_item_grants_and_deducts() -> void:
+	print("[test] S7.4: buy_item deducts gold + grants item")
+	var ctrl: Node = RunControllerScript.new()
+	get_root().add_child.call_deferred(ctrl)
+	await process_frame
+	ctrl.start_run(42)
+	ctrl.shop.refresh()
+	var before_gold: int = ctrl.state.gold
+	var before_inv: int = ctrl.inventory_count()
+	var slot: int = 0
+	var price: int = ctrl.shop.get_discounted_price(slot)
+	_assert(price > 0, "shop has positive price")
+	var ok: bool = ctrl.buy_item(slot)
+	_assert(ok, "buy_item returned true")
+	_assert(ctrl.state.gold == before_gold - price, "gold deducted (got %d expected %d)" % [ctrl.state.gold, before_gold - price])
+	_assert(ctrl.inventory_count() == before_inv + 1, "inventory grew 0->1")
+	_cleanup_ctrl(ctrl)
+
+
+func _test_run_controller_buy_item_rejects_without_gold() -> void:
+	print("[test] S7.4: buy_item rejected when not enough gold")
+	var ctrl: Node = RunControllerScript.new()
+	get_root().add_child.call_deferred(ctrl)
+	await process_frame
+	ctrl.start_run(42)
+	ctrl.shop.refresh()
+	ctrl.state.gold = 0  # broke
+	var before_inv: int = ctrl.inventory_count()
+	var ok: bool = ctrl.buy_item(0)
+	_assert(not ok, "buy rejected when broke")
+	_assert(ctrl.state.gold == 0, "gold still 0")
+	_assert(ctrl.inventory_count() == before_inv, "no item added (got %d)" % ctrl.inventory_count())
+	_cleanup_ctrl(ctrl)
+
+
+func _test_run_controller_buy_item_rejects_full_inventory() -> void:
+	print("[test] S7.4: buy_item rejected when inventory full")
+	var ctrl: Node = RunControllerScript.new()
+	get_root().add_child.call_deferred(ctrl)
+	await process_frame
+	ctrl.start_run(42)
+	ctrl.shop.refresh()
+	# Fill inv to MAX.
+	for i in 12:
+		ctrl.grant_item(&"potion_strength")
+	_assert(ctrl.inventory_count() == 12, "filled")
+	var ok: bool = ctrl.buy_item(0)
+	_assert(not ok, "buy rejected when full (got %s)" % str(ok))
+	_cleanup_ctrl(ctrl)
+
+
+func _test_shop_scene_builds_three_buy_buttons() -> void:
+	print("[test] S7.4: ShopScene builds 3 buy buttons + close")
+	var ctrl: Node = RunControllerScript.new()
+	get_root().add_child.call_deferred(ctrl)
+	await process_frame
+	ctrl.start_run(42)
+	ctrl.shop.refresh()
+	var scene: Control = ShopSceneScript.new()
+	scene.set_run_controller(ctrl)
+	root.add_child.call_deferred(scene)
+	for i in 3: await process_frame
+	var btns: Array = []
+	_recursive_find_buttons(scene, btns)
+	_assert(btns.size() == 4, "3 buy buttons + 1 close = 4 (got %d)" % btns.size())
+	# Buy button[0] emits pressed → buy_item(0) called.
+	var before_gold: int = ctrl.state.gold
+	btns[0].emit_signal("pressed")
+	await process_frame
+	_assert(ctrl.state.gold == before_gold - ctrl.shop.get_discounted_price(0),
+		"gold deducted after buy click")
+	_cleanup_ctrl(ctrl)
+	scene.queue_free()
+	await process_frame
+
 
