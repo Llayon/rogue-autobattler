@@ -7,6 +7,7 @@ const BATTLE_VIEW_SCRIPT: GDScript = preload("res://scenes/battle/battle_view.gd
 const ENCOUNTER_MAP_SCENE_SCRIPT: GDScript = preload("res://scenes/encounter/encounter_map_scene.gd")
 const REWARD_MODAL_SCRIPT: GDScript = preload("res://scenes/reward/reward_modal.gd")
 const PREP_SCENE_SCRIPT: GDScript = preload("res://scenes/prep/prep_scene.gd")
+const INVENTORY_SCENE_SCRIPT: GDScript = preload("res://scenes/inventory/inventory_scene.gd")
 const BalanceScript: GDScript = preload("res://core/balance.gd")
 
 # S6.1: явный Unicode SystemFont для всех UI-лейблов (Cyrillic работает).
@@ -80,6 +81,8 @@ func _ready() -> void:
 	_build_encounter_map_overlay()
 	# S6.2: PREP scene (скрыт initial).
 	_build_prep_scene()
+	# S7.1: inventory scene (overlay, скрыт initial, toggle по I).
+	_build_inventory_scene()
 	# EventBus — подписки ДО start_run, чтобы первый phase_changed поймался.
 	_bus = _find_event_bus()
 	if _bus != null:
@@ -226,6 +229,13 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_R:
 				if run_controller.phase == RunController.Phase.GAMEOVER:
 					run_controller.start_run(Rng.randi_range(1, 999999))
+			KEY_I:
+				# S7.1: toggle inventory overlay.
+				if inventory_scene != null:
+					inventory_scene.visible = not inventory_scene.visible
+					if inventory_scene.visible:
+						inventory_scene.set_run_controller(run_controller)
+					get_viewport().set_input_as_handled()
 
 
 func _on_battle_ended(winner_team: int) -> void:
@@ -329,6 +339,24 @@ func _build_prep_scene() -> void:
 	prep_scene.visible = false
 	prep_scene.mouse_filter = Control.MOUSE_FILTER_STOP
 	add_child(prep_scene)
+
+
+# === S7.1: Inventory scene ===
+
+var inventory_scene: Control = null
+
+
+## Создаёт inventory_scene (overlay, скрыт initial).
+## Тогглится по клавише I в _unhandled_input.
+func _build_inventory_scene() -> void:
+	inventory_scene = INVENTORY_SCENE_SCRIPT.new()
+	inventory_scene.name = "InventoryScene"
+	inventory_scene.set_anchors_preset(Control.PRESET_FULL_RECT)
+	inventory_scene.visible = false
+	inventory_scene.mouse_filter = Control.MOUSE_FILTER_STOP
+	add_child(inventory_scene)
+	if run_controller != null:
+		inventory_scene.set_run_controller(run_controller)
 
 
 # === Phase switching ===

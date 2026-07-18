@@ -227,6 +227,8 @@ func _initialize() -> void:
 	_test_inventory_scene_discard_button_removes_item()
 	_test_inventory_scene_close_button_hides()
 	_test_inventory_scene_empty_state_shows_message()
+	# S7.1: BattleScene inventory integration
+	_test_battle_scene_has_inventory_scene_overlay()
 	_test_run_controller_resume_run()
 	_test_run_controller_resume_run_no_save()
 	_test_run_controller_resume_run_signal()
@@ -3595,6 +3597,30 @@ func _test_inventory_scene_empty_state_shows_message() -> void:
 	_assert(btns.size() == 1,
 		"only Close button when empty (got %d)" % btns.size())
 	_cleanup_ctrl(ctrl)
+	scene.queue_free()
+	await process_frame
+
+func _test_battle_scene_has_inventory_scene_overlay() -> void:
+	print("[test] S7.1: BattleScene has inventory_scene overlay")
+	var packed: PackedScene = load("res://scenes/battle/battle_scene.tscn") as PackedScene
+	var scene: Control = packed.instantiate()
+	root.size = Vector2i(1280, 720)
+	root.add_child.call_deferred(scene)
+	for i in 5: await process_frame
+	_assert(scene.inventory_scene != null, "inventory_scene field exists")
+	if scene.inventory_scene != null:
+		_assert(scene.inventory_scene.visible == false, "initial visible=false")
+		# Simulate KEY_I via direct toggle (input events on SceneTree unreliable).
+		scene.inventory_scene.visible = true
+		scene.inventory_scene.set_run_controller(scene.run_controller)
+		_assert(scene.inventory_scene.visible, "show after toggle")
+		_assert(scene.inventory_scene._item_buttons.size() == 0,
+			"empty inventory -> 0 item buttons (got %d)" % scene.inventory_scene._item_buttons.size())
+		# Grant item and rebuild.
+		scene.run_controller.grant_item(&"potion_strength")
+		scene.inventory_scene.set_run_controller(scene.run_controller)
+		_assert(scene.inventory_scene._item_buttons.size() == 1,
+			"after grant -> 1 item button (got %d)" % scene.inventory_scene._item_buttons.size())
 	scene.queue_free()
 	await process_frame
 
