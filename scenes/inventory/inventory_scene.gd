@@ -14,6 +14,10 @@ var _close_button: Button = null
 # 12-слотов помещался на любом экране.
 const WINDOW_SIZE: int = 6
 var _scroll_offset: int = 0
+# S7.2: equip UX. _picked_item_idx = -1 = nothing picked.
+# _is_pick_for_equip = true когда first-click на item эипленный = un-equip request.
+var _picked_item_idx: int = -1
+var _is_pick_for_equip: bool = false
 
 
 func _ready() -> void:
@@ -195,7 +199,7 @@ func _make_item_button(idx: int, def: Resource) -> Button:
 	btn.name = "Item_%d" % idx
 	btn.custom_minimum_size = Vector2(720, 56)
 	if def != null:
-		# Show name + bonuses + tier/cost.
+		# Show name + bonuses + tier/cost + optional equip marker.
 		var bonuses: Array = []
 		if def.bonus_attack > 0:
 			bonuses.append("+%d ATK" % def.bonus_attack)
@@ -204,11 +208,19 @@ func _make_item_button(idx: int, def: Resource) -> Button:
 		if def.bonus_max_hp > 0:
 			bonuses.append("+%d HP" % def.bonus_max_hp)
 		var bonus_str: String = " ".join(bonuses) if not bonuses.is_empty() else "(passive)"
-		var line1: String = "%s  [tier %d, cost %d]" % [def.display_name, def.tier, def.cost]
-		btn.text = line1 + "\n" + bonus_str + " — click to discard"
+		var equipped_marker: String = ""
+		if run_controller != null:
+			var board_idx: int = run_controller.get_equipped_board_idx(idx)
+			if board_idx >= 0:
+				equipped_marker = "  [EQUIPPED: board %d]" % board_idx
+		var picked_marker: String = ""
+		if _picked_item_idx == idx:
+			picked_marker = "  [PICKED]"
+		var line1: String = "%s  [tier %d, cost %d]%s%s" % [def.display_name, def.tier, def.cost, equipped_marker, picked_marker]
+		btn.text = line1 + "\n" + bonus_str + " — click to discard/equip"
 	else:
 		var id_str: String = str(run_controller.state.item_ids[idx])
-		btn.text = "(" + id_str + " — click to discard)"
+		btn.text = "(" + id_str + ") — click to discard/equip"
 	btn.add_theme_font_size_override("font_size", 14)
 	btn.pressed.connect(_on_item_pressed.bind(idx))
 	_apply_item_style(btn)
@@ -252,10 +264,44 @@ func _on_item_pressed(idx: int) -> void:
 		return
 	if idx < 0 or idx >= run_controller.inventory_count():
 		return
-	# Adjust idx if current scroll doesn't include it (page change).
-	# Since idx is captured at build time, it points to actual item index.
-	if run_controller.remove_item_at(idx):
+	# S7.2: 3-стате click flow.
+	# 1) Nothing picked: pick item.
+	if _picked_item_idx == -1:
+		# Special case: item уже эипится → single click unequips (UX shortcut).
+		var current_board: int = run_controller.get_equipped_board_idx(idx)
+		if current_board >= 0:
+			run_controller.unequip_item_at(idx)
+			_rebuild()
+			return
+		_picked_item_idx = idx
+		_is_pick_for_equip = true
 		_rebuild()
+		return
+	# 2) Click same item = cancel pick.
+	if _picked_item_idx == idx:
+		_picked_item_idx = -1
+		_is_pick_for_equip = false
+		_rebuild()
+		return
+	# 3) Click different item = replace pick.
+	_picked_item_idx = idx
+	_rebuild()
+
+
+## S7.2: вызывается из PREP scene когда игрок нажал board unit
+## (только если в инвентаре есть _picked_item_idx).
+## Возвращает true если equip сработал.
+func try_equip_to_board(board_idx: int) -> bool:
+	if run_controller == null:
+		return false
+	if _picked_item_idx == -1 or not _is_pick_for_equip:
+		return false
+	var ok: bool = run_controller.equip_item_at(_picked_item_idx, board_idx)
+	if ok:
+		_picked_item_idx = -1
+		_is_pick_for_equip = false
+		_rebuild()
+	return ok
 
 
 func _on_close_pressed() -> void:

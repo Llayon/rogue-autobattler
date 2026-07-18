@@ -239,6 +239,10 @@ func _initialize() -> void:
 	# S7.2: Bonus stats propagation
 	_test_combatant_bonus_stats_applied()
 	_test_run_controller_start_battle_applies_item_bonuses()
+	# S7.2: InventoryScene pick UX
+	_test_inventory_scene_picks_item_for_equip()
+	_test_inventory_scene_try_equip_to_board_via_pick()
+	_test_inventory_scene_unequip_by_long_click()
 	_test_run_controller_resume_run()
 	_test_run_controller_resume_run_no_save()
 	_test_run_controller_resume_run_signal()
@@ -3788,4 +3792,78 @@ func _test_run_controller_start_battle_applies_item_bonuses() -> void:
 		var def_a: int = found_archer.defense_base
 		_assert(def_a >= 3, "archer has scroll bonus (got def=%d)" % def_a)
 	_cleanup_ctrl(ctrl)
+
+func _test_inventory_scene_picks_item_for_equip() -> void:
+	print("[test] S7.2: InventoryScene click item → sets _picked_item_idx")
+	var ctrl: Node = RunControllerScript.new()
+	get_root().add_child.call_deferred(ctrl)
+	await process_frame
+	ctrl.start_run(42)
+	ctrl.grant_item(&"potion_strength")
+	ctrl.grant_item(&"scroll_ward")
+	var scene: Control = InventorySceneScript.new()
+	scene.set_run_controller(ctrl)
+	root.add_child.call_deferred(scene)
+	for i in 3: await process_frame
+	_assert(scene._picked_item_idx == -1, "init -1 (got %d)" % scene._picked_item_idx)
+	scene._item_buttons[0].emit_signal("pressed")
+	for i in 2: await process_frame
+	_assert(scene._picked_item_idx == 0, "picked idx=0 (got %d)" % scene._picked_item_idx)
+	_assert(not scene._is_pick_for_equip, "first click = equip pick (got %s)" % str(scene._is_pick_for_equip))
+	# Second click on same button = un-pick (cancel).
+	scene._item_buttons[0].emit_signal("pressed")
+	for i in 2: await process_frame
+	_assert(scene._picked_item_idx == -1, "second click cancels pick")
+	_cleanup_ctrl(ctrl)
+	scene.queue_free()
+	await process_frame
+
+
+func _test_inventory_scene_try_equip_to_board_via_pick() -> void:
+	print("[test] S7.2: InventoryScene.try_equip_to_board когда picked")
+	var ctrl: Node = RunControllerScript.new()
+	get_root().add_child.call_deferred(ctrl)
+	await process_frame
+	ctrl.start_run(42)
+	ctrl.grant_item(&"potion_strength")
+	var scene: Control = InventorySceneScript.new()
+	scene.set_run_controller(ctrl)
+	root.add_child.call_deferred(scene)
+	for i in 3: await process_frame
+	# Pick item.
+	scene._item_buttons[0].emit_signal("pressed")
+	for i in 2: await process_frame
+	_assert(scene._picked_item_idx == 0, "picked")
+	# No picked → try_equip returns false.
+	var ok_default: bool = scene.try_equip_to_board(0)
+	_assert(not ok_default, "no pick → false")
+	# With pick → equip calls RunController and clears pick.
+	var ok_with_pick: bool = scene.try_equip_to_board(0)
+	_assert(ok_with_pick, "with pick → equip succeeded")
+	_assert(scene._picked_item_idx == -1, "pick cleared after equip")
+	_assert(ctrl.get_equipped_board_idx(0) == 0, "item 0 equipped to board 0")
+	_cleanup_ctrl(ctrl)
+	scene.queue_free()
+	await process_frame
+
+
+func _test_inventory_scene_unequip_by_long_click() -> void:
+	print("[test] S7.2: InventoryScene unequip через second click on equipped item")
+	var ctrl: Node = RunControllerScript.new()
+	get_root().add_child.call_deferred(ctrl)
+	await process_frame
+	ctrl.start_run(42)
+	ctrl.grant_item(&"potion_strength")
+	ctrl.equip_item_at(0, 0)
+	var scene: Control = InventorySceneScript.new()
+	scene.set_run_controller(ctrl)
+	root.add_child.call_deferred(scene)
+	for i in 3: await process_frame
+	# Item equipped — its label includes "[equipped: board 0]".
+	scene._item_buttons[0].emit_signal("pressed")
+	for i in 2: await process_frame
+	_assert(ctrl.get_equipped_board_idx(0) == -1, "second click on equipped item → unequip (got %d)" % ctrl.get_equipped_board_idx(0))
+	_cleanup_ctrl(ctrl)
+	scene.queue_free()
+	await process_frame
 
