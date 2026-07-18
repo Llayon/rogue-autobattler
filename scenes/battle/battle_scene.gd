@@ -8,6 +8,7 @@ const ENCOUNTER_MAP_SCENE_SCRIPT: GDScript = preload("res://scenes/encounter/enc
 const REWARD_MODAL_SCRIPT: GDScript = preload("res://scenes/reward/reward_modal.gd")
 const PREP_SCENE_SCRIPT: GDScript = preload("res://scenes/prep/prep_scene.gd")
 const INVENTORY_SCENE_SCRIPT: GDScript = preload("res://scenes/inventory/inventory_scene.gd")
+const SHOP_SCENE_SCRIPT: GDScript = preload("res://scenes/shop/shop_scene.gd")
 const BalanceScript: GDScript = preload("res://core/balance.gd")
 
 # S6.1: явный Unicode SystemFont для всех UI-лейблов (Cyrillic работает).
@@ -83,6 +84,8 @@ func _ready() -> void:
 	_build_prep_scene()
 	# S7.1: inventory scene (overlay, скрыт initial, toggle по I).
 	_build_inventory_scene()
+	# S7.4: shop scene (overlay, hidden initial, shown on PREP-from-MERCHANT).
+	_build_shop_scene()
 	# EventBus — подписки ДО start_run, чтобы первый phase_changed поймался.
 	_bus = _find_event_bus()
 	if _bus != null:
@@ -359,6 +362,24 @@ func _build_inventory_scene() -> void:
 		inventory_scene.set_run_controller(run_controller)
 
 
+# === S7.4: Shop scene ===
+
+var shop_scene: Control = null
+
+
+## Создаёт shop_scene (overlay, скрыт initial). Показывается на phase=PREP
+## когда пришли с MERCHANT (state flag-managed).
+func _build_shop_scene() -> void:
+	shop_scene = SHOP_SCENE_SCRIPT.new()
+	shop_scene.name = "ShopScene"
+	shop_scene.set_anchors_preset(Control.PRESET_FULL_RECT)
+	shop_scene.visible = false
+	shop_scene.mouse_filter = Control.MOUSE_FILTER_STOP
+	add_child(shop_scene)
+	if run_controller != null:
+		shop_scene.set_run_controller(run_controller)
+
+
 # === Phase switching ===
 
 ## S5.3: реакция на phase_changed — show/hide encounter map и reward modal.
@@ -387,6 +408,16 @@ func _on_run_phase_changed(new_phase: int) -> void:
 			prep_scene.set_run_controller(run_controller)
 			if inventory_scene != null:
 				prep_scene.set_inventory_scene(inventory_scene)
+	# S7.4: Shop scene — видна когда пришли из MERCHANT на phase=PREP.
+	# После Close (exit_shop_to_map) флаг сбрасывается, и на следующем
+	# phase_changed show пропускается (until another MERCHANT encounter).
+	if shop_scene != null:
+		var show_shop: bool = (new_phase == RUN_CONTROLLER_SCRIPT.Phase.PREP
+			and run_controller != null
+			and run_controller.state.just_visited_merchant)
+		shop_scene.visible = show_shop
+		if show_shop:
+			shop_scene.set_run_controller(run_controller)
 	# Обновляем status.
 	_refresh_status()
 	_refresh_hud()

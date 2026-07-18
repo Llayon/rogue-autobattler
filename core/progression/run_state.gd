@@ -22,8 +22,10 @@ const SAVE_VERSION: int = 3
 # Предметы.
 @export var item_ids: Array[StringName] = []
 # S7.2: equip slot для каждого предмета (-1 = в инвентаре, 0..N = board idx).
-# Parallel array к item_ids: тот же size, item_equip_board_idx[i] = где эипится item_ids[i].
-@export var item_equip_board_idx: Array[int] = []	
+@export var item_equip_board_idx: Array[int] = []
+# S7.4: флаг — MERCHANT encounter last visited, чтобы BattleScene
+# показывал ShopScene на следующем phase=PREP.
+@export var just_visited_merchant: bool = false
 
 # Статистика рана.
 @export var wins: int = 0

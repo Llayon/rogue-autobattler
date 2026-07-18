@@ -281,6 +281,7 @@ func buy_item(slot: int) -> bool:
 func exit_shop_to_map() -> void:
 	if phase != Phase.PREP:
 		return
+	state.just_visited_merchant = false
 	_set_phase(Phase.MAP)
 
 
@@ -680,6 +681,7 @@ func _pick_random_item_id() -> StringName:
 ## MERCHANT: переходит в PREP (shop уже обновлён в _refresh_shop).
 func _apply_merchant_effect() -> void:
 	GameLog.info("run", "MERCHANT: shop opened")
+	state.just_visited_merchant = true
 	_set_phase(Phase.PREP)
 	_refresh_shop()
 

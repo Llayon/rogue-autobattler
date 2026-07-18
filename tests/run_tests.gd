@@ -258,6 +258,8 @@ func _initialize() -> void:
 	_test_run_controller_buy_item_rejects_without_gold()
 	_test_run_controller_buy_item_rejects_full_inventory()
 	_test_shop_scene_builds_three_buy_buttons()
+	# S7.4: BattleScene integration
+	_test_battle_scene_has_shop_scene_overlay()
 	_test_run_controller_resume_run()
 	_test_run_controller_resume_run_no_save()
 	_test_run_controller_resume_run_signal()
@@ -4076,4 +4078,34 @@ func _test_shop_scene_builds_three_buy_buttons() -> void:
 	scene.queue_free()
 	await process_frame
 
+
+func _test_battle_scene_has_shop_scene_overlay() -> void:
+	print("[test] S7.4: BattleScene has shop_scene overlay")
+	var packed: PackedScene = load("res://scenes/battle/battle_scene.tscn") as PackedScene
+	var scene: Control = packed.instantiate()
+	root.size = Vector2i(1280, 720)
+	root.add_child.call_deferred(scene)
+	for i in 5: await process_frame
+	_assert(scene.shop_scene != null, "shop_scene field exists")
+	if scene.shop_scene != null:
+		_assert(scene.shop_scene.visible == false, "init hidden")
+		# Buy from shop.
+		var rc = scene.run_controller
+		rc.start_run(42)
+		rc.shop.set_discount(0.5)
+		rc.shop.refresh()
+		var before_gold: int = rc.state.gold
+		var before_inv: int = rc.inventory_count()
+		scene.shop_scene.set_run_controller(rc)
+		# Show shop.
+		scene.shop_scene.visible = true
+		# Buy via run_controller.
+		var ok: bool = rc.buy_item(0)
+		_assert(ok, "buy_item via run_controller returned true")
+		# Verify state updated.
+		_assert(rc.state.gold == before_gold - rc.shop.get_discounted_price(0),
+			"gold deducted (got %d expected %d)" % [rc.state.gold, before_gold - rc.shop.get_discounted_price(0)])
+		_assert(rc.inventory_count() == before_inv + 1, "inventory grew")
+	scene.queue_free()
+	await process_frame
 
