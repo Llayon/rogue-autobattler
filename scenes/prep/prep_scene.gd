@@ -37,6 +37,14 @@ func set_run_controller(ctrl: Node) -> void:
 		_rebuild()
 
 
+## S7.2: подключить InventoryScene чтобы PREP знал про picked item.
+var _inventory_scene: Control = null
+
+
+func set_inventory_scene(inv: Control) -> void:
+	_inventory_scene = inv
+
+
 func _build_background() -> void:
 	var bg: ColorRect = ColorRect.new()
 	bg.name = "Backdrop"
@@ -245,6 +253,12 @@ func _apply_selection_style() -> void:
 func _on_unit_pressed(kind: String, index: int) -> void:
 	if run_controller == null:
 		return
+	# S7.2: если в InventoryScene есть picked item → equip it to board.
+	if kind == "board" and _inventory_scene != null and _inventory_scene._picked_item_idx != -1:
+		var ok: bool = _inventory_scene.try_equip_to_board(index)
+		if ok:
+			_rebuild()
+			return
 	if _selected.is_empty():
 		# Первый клик: select.
 		_selected = {"kind": kind, "index": index}

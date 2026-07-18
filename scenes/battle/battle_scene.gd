@@ -377,11 +377,16 @@ func _on_run_phase_changed(new_phase: int) -> void:
 	# Reward modal — видна на REWARD phase, скрыта иначе.
 	if reward_modal != null:
 		reward_modal.visible = (new_phase == RUN_CONTROLLER_SCRIPT.Phase.REWARD)
+	# S7.2: PREP scene — also pass inventory_scene для equip wiring.
+	if prep_scene != null and inventory_scene != null:
+		prep_scene.set_inventory_scene(inventory_scene)
 	# S6.2: PREP scene — видна на PREP phase, скрыта иначе.
 	if prep_scene != null:
 		prep_scene.visible = (new_phase == RUN_CONTROLLER_SCRIPT.Phase.PREP)
 		if new_phase == RUN_CONTROLLER_SCRIPT.Phase.PREP and run_controller != null:
 			prep_scene.set_run_controller(run_controller)
+			if inventory_scene != null:
+				prep_scene.set_inventory_scene(inventory_scene)
 	# Обновляем status.
 	_refresh_status()
 	_refresh_hud()

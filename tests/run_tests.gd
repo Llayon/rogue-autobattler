@@ -243,6 +243,8 @@ func _initialize() -> void:
 	_test_inventory_scene_picks_item_for_equip()
 	_test_inventory_scene_try_equip_to_board_via_pick()
 	_test_inventory_scene_unequip_by_long_click()
+	# S7.2: PREP scene equip integration
+	_test_prep_scene_board_click_equips_picked_item()
 	_test_run_controller_resume_run()
 	_test_run_controller_resume_run_no_save()
 	_test_run_controller_resume_run_signal()
@@ -3865,5 +3867,34 @@ func _test_inventory_scene_unequip_by_long_click() -> void:
 	_assert(ctrl.get_equipped_board_idx(0) == -1, "second click on equipped item → unequip (got %d)" % ctrl.get_equipped_board_idx(0))
 	_cleanup_ctrl(ctrl)
 	scene.queue_free()
+	await process_frame
+
+func _test_prep_scene_board_click_equips_picked_item() -> void:
+	print("[test] S7.2: PREP scene board click эипит picked item")
+	var ctrl: Node = RunControllerScript.new()
+	get_root().add_child.call_deferred(ctrl)
+	await process_frame
+	ctrl.start_run(42)
+	ctrl.grant_item(&"potion_strength")
+	var inv: Control = InventorySceneScript.new()
+	inv.set_run_controller(ctrl)
+	root.add_child.call_deferred(inv)
+	var prep: Control = PrepSceneScript.new()
+	prep.set_run_controller(ctrl)
+	prep.set_inventory_scene(inv)
+	root.add_child.call_deferred(prep)
+	for i in 3: await process_frame
+	# Pick item.
+	inv._item_buttons[0].emit_signal("pressed")
+	for i in 2: await process_frame
+	_assert(inv._picked_item_idx == 0, "item 0 picked")
+	# Click PREP board[0].
+	prep._board_buttons[0].emit_signal("pressed")
+	for i in 2: await process_frame
+	_assert(ctrl.get_equipped_board_idx(0) == 0, "item equipped to board 0 (got %d)" % ctrl.get_equipped_board_idx(0))
+	_assert(inv._picked_item_idx == -1, "pick cleared after equip")
+	_cleanup_ctrl(ctrl)
+	inv.queue_free()
+	prep.queue_free()
 	await process_frame
 
