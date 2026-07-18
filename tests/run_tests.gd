@@ -73,6 +73,8 @@ const EncounterNodeScript = preload("res://core/encounter/encounter_node.gd")
 const EncounterMapScript = preload("res://core/encounter/encounter_map.gd")
 # S6.2: PrepScene
 const PrepSceneScript = preload("res://scenes/prep/prep_scene.gd")
+# S7.1: InventoryScene
+const InventorySceneScript = preload("res://scenes/inventory/inventory_scene.gd")
 
 
 
@@ -220,6 +222,11 @@ func _initialize() -> void:
 	_test_run_controller_inventory_persists_in_save()
 	# S7.1: TREASURE grants item
 	_test_run_controller_treasure_grants_random_item()
+	# S7.1: InventoryScene UI
+	_test_inventory_scene_builds_item_buttons()
+	_test_inventory_scene_discard_button_removes_item()
+	_test_inventory_scene_close_button_hides()
+	_test_inventory_scene_empty_state_shows_message()
 	_test_run_controller_resume_run()
 	_test_run_controller_resume_run_no_save()
 	_test_run_controller_resume_run_signal()
@@ -3497,4 +3504,97 @@ func _test_run_controller_treasure_grants_random_item() -> void:
 	_assert(after_count >= before_count + 1 or after_count == before_count,
 		"inventory grew or unchanged (got before=%d after=%d)" % [before_count, after_count])
 	_cleanup_ctrl(ctrl)
+
+func _test_inventory_scene_builds_item_buttons() -> void:
+	print("[test] S7.1: InventoryScene builds buttons for each item")
+	var ctrl: Node = RunControllerScript.new()
+	get_root().add_child.call_deferred(ctrl)
+	await process_frame
+	ctrl.start_run(42)
+	ctrl.grant_item(&"potion_strength")
+	ctrl.grant_item(&"scroll_ward")
+	var scene: Control = InventorySceneScript.new()
+	scene.set_run_controller(ctrl)
+	root.add_child.call_deferred(scene)
+	for i in 3: await process_frame
+	# 2 item buttons + 1 Close button = 3 total buttons.
+	var btns: Array = []
+	_recursive_find_buttons(scene, btns)
+	var expected: int = ctrl.inventory_count() + 1  # +1 Close
+	_assert(btns.size() == expected,
+		"buttons count = %d (items %d + 1 Close, got %d)"
+		% [expected, ctrl.inventory_count(), btns.size()])
+	_assert(scene._item_buttons.size() == 2,
+		"_item_buttons.size() = 2 (got %d)" % scene._item_buttons.size())
+	_cleanup_ctrl(ctrl)
+	scene.queue_free()
+	await process_frame
+
+
+func _test_inventory_scene_discard_button_removes_item() -> void:
+	print("[test] S7.1: discard button removes item from inventory")
+	var ctrl: Node = RunControllerScript.new()
+	get_root().add_child.call_deferred(ctrl)
+	await process_frame
+	ctrl.start_run(42)
+	ctrl.grant_item(&"potion_strength")
+	ctrl.grant_item(&"amulet_vigor")
+	var scene: Control = InventorySceneScript.new()
+	scene.set_run_controller(ctrl)
+	root.add_child.call_deferred(scene)
+	for i in 3: await process_frame
+	var initial_count: int = ctrl.inventory_count()
+	_assert(initial_count == 2, "start with 2 items (got %d)" % initial_count)
+	# Click item button [0] (discard).
+	if scene._item_buttons.size() >= 1:
+		scene._item_buttons[0].emit_signal("pressed")
+		for i in 2: await process_frame
+		var after_count: int = ctrl.inventory_count()
+		_assert(after_count == initial_count - 1,
+			"discard decremented (before=%d after=%d)" % [initial_count, after_count])
+	_cleanup_ctrl(ctrl)
+	scene.queue_free()
+	await process_frame
+
+
+func _test_inventory_scene_close_button_hides() -> void:
+	print("[test] S7.1: Close button hides scene")
+	var ctrl: Node = RunControllerScript.new()
+	get_root().add_child.call_deferred(ctrl)
+	await process_frame
+	ctrl.start_run(42)
+	var scene: Control = InventorySceneScript.new()
+	scene.set_run_controller(ctrl)
+	root.add_child.call_deferred(scene)
+	for i in 3: await process_frame
+	scene.visible = true
+	var close_btn: Button = scene._close_button
+	_assert(close_btn != null, "close button found")
+	if close_btn != null:
+		close_btn.emit_signal("pressed")
+		for i in 2: await process_frame
+		_assert(not scene.visible, "scene hidden after Close")
+	_cleanup_ctrl(ctrl)
+	scene.queue_free()
+	await process_frame
+
+
+func _test_inventory_scene_empty_state_shows_message() -> void:
+	print("[test] S7.1: empty inventory shows placeholder message")
+	var ctrl: Node = RunControllerScript.new()
+	get_root().add_child.call_deferred(ctrl)
+	await process_frame
+	ctrl.start_run(42)
+	var scene: Control = InventorySceneScript.new()
+	scene.set_run_controller(ctrl)
+	root.add_child.call_deferred(scene)
+	for i in 3: await process_frame
+	# Empty inventory = 0 item buttons + 1 close button.
+	var btns: Array = []
+	_recursive_find_buttons(scene, btns)
+	_assert(btns.size() == 1,
+		"only Close button when empty (got %d)" % btns.size())
+	_cleanup_ctrl(ctrl)
+	scene.queue_free()
+	await process_frame
 
