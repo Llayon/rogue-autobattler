@@ -81,6 +81,8 @@ func move_to(combatant, new_cell: Vector2i) -> bool:
 	grid.clear_cell(combatant.cell)
 	combatant.cell = new_cell
 	grid.set_cell(new_cell, combatant)
+	# AoO: emit move_start для reaction_system.
+	GameBus.emit_unit_move_start(combatant, null, new_cell)
 	return true
 
 

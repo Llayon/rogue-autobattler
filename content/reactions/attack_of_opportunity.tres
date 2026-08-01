@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="ReactionDef" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://core/data/reaction_def.gd" id="1_reactiondef"]
+
+[resource]
+script = ExtResource("1_reactiondef")
+id = &"attack_of_opportunity"
+display_name = "Атака по возможности"
+description = "Когда враг выходит из соседней клетки, контратакует."
+trigger = &"unit_move_start"
+trigger_chance = 1.0
+melee_only = true
+range_cells = 1

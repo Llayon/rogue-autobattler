@@ -34,6 +34,7 @@ signal run_saved(seed: int)
 signal run_resumed(seed: int)
 # S4.2: floating damage numbers (для BattleView overlay)
 signal damage_dealt(target, amount: int, source)
+signal unit_move_start(combatant, source: Object, target_cell: Vector2i)
 # Reactions: dispatcher для AoO, Shield Block, и т.п.
 signal reaction_registered(combatant, reaction: Resource)
 signal reaction_unregistered(combatant)
@@ -184,3 +185,10 @@ static func emit_reaction_triggered(combatant, reaction: Resource) -> void:
 	var inst: Node = _instance()
 	if inst != null:
 		inst.reaction_triggered.emit(combatant, reaction)
+
+
+## Юнит начал движение (перед apply). Fire для AoO reactions.
+static func emit_unit_move_start(combatant, source: Object, target_cell: Vector2i) -> void:
+	var inst: Node = _instance()
+	if inst != null:
+		inst.unit_move_start.emit(combatant, source, target_cell)

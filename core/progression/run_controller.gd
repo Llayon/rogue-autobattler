@@ -328,6 +328,11 @@ func start_battle() -> bool:
 		var c = CombatantScript.new(def)
 		var cell: Vector2i = Vector2i(i, 0)
 		ctx.register(c, cell)
+		# Зарегистрировать AoO для врагов с меле-реакцией.
+		if def.id in [&"orc_warrior", &"knight", &"paladin"]:
+			var aoo: Resource = ContentDB_static.get_by_id(&"attack_of_opportunity")
+			if aoo != null:
+				GameBus.emit_reaction_registered(c, aoo)
 	runner = BattleRunnerScript.new(ctx)
 	runner.start()
 	_set_phase(Phase.BATTLE)
