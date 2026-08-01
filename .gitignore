@@ -26,3 +26,12 @@ desktop.ini
 *.bak
 *.swp
 *~
+# Build artifacts (templates, intermediate files).
+# Note: docs/build/** IS committed (it's the GitHub Pages artifact).
+/tmp/godot*
+*.tpz
+android_build/  # if you ever build for Android
+ios_build/
+*.apk
+*.ipa
+*.zip

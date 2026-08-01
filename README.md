@@ -1,5 +1,13 @@
 # Rogue AutoBattler
 
+[![Tests](https://img.shields.io/badge/tests-471%20passed-brightgreen)](https://github.com/youruser/rogueautobattler)
+[![Godot](https://img.shields.io/badge/Godot-4.7%2B-blue)](https://godotengine.org)
+[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+
+**[▶ Play in Browser](https://youruser.github.io/rogueautobattler/build/index.html)** — WebAssembly build, no install.
+
+Roguelike RPG AutoBattler на Godot 4.7 (GDScript 2.0, single dev, 6-12 months to Steam).
+
 Roguelike RPG AutoBattler на Godot 4.7 (GDScript 2.0, single dev, 6-12 months to Steam).
 
 ## Запуск
