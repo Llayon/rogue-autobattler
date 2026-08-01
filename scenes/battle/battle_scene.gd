@@ -4,6 +4,7 @@ extends Control
 
 const RUN_CONTROLLER_SCRIPT: GDScript = preload("res://core/progression/run_controller.gd")
 const BATTLE_VIEW_SCRIPT: GDScript = preload("res://scenes/battle/battle_view.gd")
+const UI_OVERLAY_SCRIPT: GDScript = preload("res://scenes/battle/ui_overlay.gd")
 const ENCOUNTER_MAP_SCENE_SCRIPT: GDScript = preload("res://scenes/encounter/encounter_map_scene.gd")
 const REWARD_MODAL_SCRIPT: GDScript = preload("res://scenes/reward/reward_modal.gd")
 const PREP_SCENE_SCRIPT: GDScript = preload("res://scenes/prep/prep_scene.gd")
@@ -36,6 +37,7 @@ func _apply_font(control: Control) -> void:
 
 var run_controller: Node
 var battle_view: Control
+var ui_overlay: Control
 var status_label: Label
 # === S4.2: HUD bar ===
 var hud: HBoxContainer
@@ -63,6 +65,12 @@ func _ready() -> void:
 	battle_view.set_anchors_preset(Control.PRESET_FULL_RECT)
 	battle_view.custom_minimum_size = Vector2(900, 400)
 	add_child(battle_view)
+	# UIOverlay: HP-bars + cooldowns + status icons поверх battle_view.
+	ui_overlay = UI_OVERLAY_SCRIPT.new()
+	ui_overlay.name = "UIOverlay"
+	ui_overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
+	ui_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(ui_overlay)
 	# Status label (нижний-левый, отдельно от HUD).
 	status_label = Label.new()
 	status_label.name = "StatusLabel"
@@ -207,6 +215,8 @@ func _process(delta: float) -> void:
 	# Обновляем battle_view когда ctx меняется (новый бой).
 	if run_controller.ctx != null and battle_view._ctx != run_controller.ctx:
 		battle_view.set_context(run_controller.ctx)
+	if ui_overlay != null and ui_overlay._ctx != run_controller.ctx:
+		ui_overlay.set_context(run_controller.ctx)
 	# Перерисовываем каждый кадр во время боя (юниты двигаются/получают урон).
 	if run_controller.phase == RunController.Phase.BATTLE:
 		run_controller.tick_battle(delta * speed)
@@ -242,6 +252,9 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func _on_battle_ended(winner_team: int) -> void:
+	# Очищаем ui_overlay (он не должен показывать dead combatants).
+	if ui_overlay != null:
+		ui_overlay.set_context(null)
 	# S4.2: end-of-round summary — показываем 1.5s после боя.
 	if winner_team == 0:
 		var gold_earned: int = BalanceScript.WIN_BONUS_GOLD + run_controller.state.round_index - 1
