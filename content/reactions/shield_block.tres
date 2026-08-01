@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="ReactionDef" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://core/data/reaction_def.gd" id="1_reactiondef"]
+
+[resource]
+script = ExtResource("1_reactiondef")
+id = &"shield_block"
+display_name = "Блок щитом"
+description = "Шанс 30% заблокировать 50% входящего урона."
+trigger = &"unit_attacked"
+trigger_chance = 0.3
+melee_only = false
+range_cells = 1

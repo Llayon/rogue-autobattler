@@ -319,6 +319,12 @@ func start_battle() -> bool:
 		var cell: Vector2i = Vector2i(i, 3)  # Grid.SIZE.y - 1 == 3
 		if not ctx.register(c, cell):
 			GameLog.warn("run", "Cannot place player unit", {"i": i})
+			continue
+		# Shield Block для paladin и guardian.
+		if def.id in [&"paladin", &"guardian"]:
+			var sb: Resource = ContentDB_static.get_by_id(&"shield_block")
+			if sb != null:
+				GameBus.emit_reaction_registered(c, sb)
 	# Расставляем врагов (1 волна для v1: 1-3 врага).
 	var wave: Array = _spawn_enemy_wave(state.round_index)
 	for i in wave.size():

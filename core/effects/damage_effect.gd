@@ -45,6 +45,12 @@ func apply(ctx, source, targets: Array) -> Array:
 			GameBus.emit_unit_dodged(source, t)
 			results.append({"target": t, "applied": false, "dodged": true})
 			continue
+		# Shield Block reaction: 30% шанс сократить урон на 50%.
+		if _check_shield_block(t):
+			result.dealt = maxi(1, result.dealt / 2)
+			GameBus.emit_reaction_triggered(t, ContentDB_static.get_by_id(&"shield_block"))
+			results.append({"target": t, "applied": true, "shield_blocked": true})
+		# end Shield Block
 		var pre_hp: int = t.health.current_hp
 		t.take_damage(result.dealt, source)
 		var dealt: int = pre_hp - t.health.current_hp
@@ -60,3 +66,18 @@ func apply(ctx, source, targets: Array) -> Array:
 			"is_magic": is_magic,
 		})
 	return results
+
+## Проверяет есть ли у target реакция shield_block через ReactionSystem.
+## Если да и poll_reaction вернул реакцию — возвращает true.
+func _check_shield_block(target) -> bool:
+	if target == null:
+		return false
+	# ReactionSystem — autoload (Node). В тестах может отсутствовать.
+	var _tree = Engine.get_main_loop()
+	if _tree == null:
+		return false
+	var reaction_system = _tree.root.get_node_or_null("ReactionSystem")
+	if reaction_system == null:
+		return false
+	var reaction: Resource = reaction_system.poll_reaction(target, &"unit_attacked", {"attacker": null})
+	return reaction != null and reaction.id == &"shield_block"
