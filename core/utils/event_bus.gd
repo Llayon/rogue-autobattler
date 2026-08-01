@@ -34,6 +34,10 @@ signal run_saved(seed: int)
 signal run_resumed(seed: int)
 # S4.2: floating damage numbers (для BattleView overlay)
 signal damage_dealt(target, amount: int, source)
+# Reactions: dispatcher для AoO, Shield Block, и т.п.
+signal reaction_registered(combatant, reaction: Resource)
+signal reaction_unregistered(combatant)
+signal reaction_triggered(combatant, reaction: Resource)
 
 
 ## Возвращает инстанс шины событий (autoload или созданный вручную в тестах).
@@ -160,3 +164,23 @@ static func emit_damage_dealt(target, amount: int, source) -> void:
 	var inst: Node = _instance()
 	if inst != null:
 		inst.damage_dealt.emit(target, amount, source)
+
+
+## Регистрирует reaction_у Combatant-а в ReactionSystem.
+static func emit_reaction_registered(combatant, reaction: Resource) -> void:
+	var inst: Node = _instance()
+	if inst != null:
+		inst.reaction_registered.emit(combatant, reaction)
+
+
+static func emit_reaction_unregistered(combatant) -> void:
+	var inst: Node = _instance()
+	if inst != null:
+		inst.reaction_unregistered.emit(combatant)
+
+
+## Реакция успешно сработала (например, контратака произошла).
+static func emit_reaction_triggered(combatant, reaction: Resource) -> void:
+	var inst: Node = _instance()
+	if inst != null:
+		inst.reaction_triggered.emit(combatant, reaction)

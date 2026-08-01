@@ -22,6 +22,7 @@ config/icon="res://icon.svg"
 [autoload]
 
 EventBus="*res://core/utils/event_bus_autoload.gd"
+ReactionSystem="*res://core/reactions/reaction_system_autoload.gd"
 
 [display]
 
