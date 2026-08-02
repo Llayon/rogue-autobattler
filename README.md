@@ -2,6 +2,7 @@
 
 [![Tests](https://img.shields.io/badge/tests-471%20passed-brightgreen)](https://github.com/youruser/rogueautobattler)
 [![Godot](https://img.shields.io/badge/Godot-4.7%2B-blue)](https://godotengine.org)
+[![CI](https://github.com/Llayon/rogue-autobattler/actions/workflows/web-build.yml/badge.svg)](https://github.com/Llayon/rogue-autobattler/actions/workflows/web-build.yml)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 **[▶ Play in Browser](https://youruser.github.io/rogueautobattler/build/index.html)** — WebAssembly build, no install.
