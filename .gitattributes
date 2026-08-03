@@ -1,0 +1,11 @@
+# Force LF for workflows (GitHub Actions требует).
+.github/** text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+
+# Default to LF in this project (cross-platform consistency).
+*.gd text eol=lf
+*.tres text eol=lf
+*.tscn text eol=lf
+*.cfg text eol=lf
+*.md text eol=lf
