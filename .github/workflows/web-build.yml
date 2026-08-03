@@ -17,18 +17,20 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      GODOT_VERSION: '4.7-stable'
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Install Godot 4.7
+        env:
+          GODOT_VERSION: '4.7-stable'
         run: |
-          GODOT_VERSION="4.7-stable"
           mkdir -p /opt/godot
           wget -q "https://github.com/godotengine/godot-builds/releases/download/${GODOT_VERSION}/Godot_v${GODOT_VERSION}_linux.x86_64.zip" -O godot.zip
           unzip -q godot.zip -d /opt/godot
-          # Godot 4.x distributes as a single-file binary (not bundle like 3.x).
           chmod +x /opt/godot/Godot_v${GODOT_VERSION}_linux.x86_64
           /opt/godot/Godot_v${GODOT_VERSION}_linux.x86_64 --version
 
@@ -51,7 +53,7 @@ jobs:
       - name: Build Web project
         run: |
           mkdir -p build
-          /opt/godot/Godot_v${GODOT_VERSION}_linux.x86_64 \
+          /opt/godot/Godot_v4.7-stable_linux.x86_64 \
             --headless \
             --path "$GITHUB_WORKSPACE" \
             --export-release "Web" "build/index.html" 2>&1 | tail -20
