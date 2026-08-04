@@ -1,0 +1,13 @@
+[remap]
+
+importer="text_resource"
+type="Resource"
+uid="uid://rkn2fcimx9mjh"
+path.1="content/effects/burn.tres.remap"
+
+[deps]
+
+source_file="content/effects/burn.tres"
+dest_files=["content/effects/burn.tres.remap"]
+
+[params]

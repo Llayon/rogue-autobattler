@@ -1,4 +1,4 @@
-[gd_resource type="Resource" script_class="UnitDef" load_steps=4 format=3]
+[gd_resource type="Resource" script_class="UnitDef" format=3]
 
 [ext_resource type="Script" path="res://core/data/unit_def.gd" id="1_unitdef"]
 [ext_resource type="Resource" path="res://content/abilities/multi_shot.tres" id="2_multi"]
@@ -7,31 +7,13 @@
 script = ExtResource("1_unitdef")
 id = &"archer"
 display_name = "Лучник"
-team = 0
 max_hp = 70
 attack = 14
 defense = 3
-magic_power = 0
 magic_resist = 2
 attack_speed = 1.2
 move_speed = 1.2
 attack_range = 4
-sight_range = 8
-crit_chance = 0.05
-crit_damage = 1.5
-dodge = 0.0
-armor = 0
-healing_received = 1.0
-shield_strength = 1.0
-lifesteal = 0.0
-thorns = 0.0
-magic_pen = 0.0
-cdr = 0.0
-tenacity = 0.0
-health_regen = 0.0
 max_mana = 80
-mana_regen = 1.0
-tier = 1
-cost = 1
 abilities = Array[Resource]([ExtResource("2_multi")])
 description = "Дальнобойный стрелок. Multi-Shot по линии."

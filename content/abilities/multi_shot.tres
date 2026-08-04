@@ -1,4 +1,4 @@
-[gd_resource type="Resource" script_class="AbilityDef" load_steps=3 format=3]
+[gd_resource type="Resource" script_class="AbilityDef" format=3]
 
 [ext_resource type="Script" path="res://core/data/ability_def.gd" id="1_abilitydef"]
 [ext_resource type="Resource" path="res://content/effects/instances/multi_shot_damage.tres" id="2_damage"]
@@ -12,8 +12,6 @@ cooldown = 6.0
 mana_cost = 30
 targeting = 3
 range = 5
-aoe_radius = 0
 aoe_width = 3
 aoe_length = 5
 effects = Array[Resource]([ExtResource("2_damage")])
-trigger = 0

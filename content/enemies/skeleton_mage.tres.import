@@ -1,0 +1,13 @@
+[remap]
+
+importer="text_resource"
+type="Resource"
+uid="uid://kvkf7f2hstk1f"
+path.1="content/enemies/skeleton_mage.tres.remap"
+
+[deps]
+
+source_file="content/enemies/skeleton_mage.tres"
+dest_files=["content/enemies/skeleton_mage.tres.remap"]
+
+[params]

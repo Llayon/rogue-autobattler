@@ -1,11 +1,9 @@
-[gd_resource type="Resource" script_class="ApplyStatusEffect" load_steps=3 format=3]
+[gd_resource type="Resource" script_class="ApplyStatusEffect" format=3]
 
 [ext_resource type="Script" path="res://core/effects/apply_status_effect.gd" id="1_applystatus"]
 [ext_resource type="Resource" path="res://content/effects/stun.tres" id="2_stun"]
 
 [resource]
 script = ExtResource("1_applystatus")
-kind = 2
 status_def = ExtResource("2_stun")
-duration_override = -1.0
-max_stacks_override = -1
+kind = 2

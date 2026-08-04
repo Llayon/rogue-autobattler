@@ -1,10 +1,9 @@
-[gd_resource type="Resource" script_class="DamageEffect" load_steps=2 format=3]
+[gd_resource type="Resource" script_class="DamageEffect" format=3]
 
 [ext_resource type="Script" path="res://core/effects/damage_effect.gd" id="1_damage"]
 
 [resource]
 script = ExtResource("1_damage")
-kind = 0
 base_damage = 25
 is_magic = true
-variance = 0.1
+kind = 0

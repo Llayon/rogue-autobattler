@@ -1,4 +1,4 @@
-[gd_resource type="Resource" script_class="UnitDef" load_steps=2 format=3]
+[gd_resource type="Resource" script_class="UnitDef" format=3]
 
 [ext_resource type="Script" path="res://core/data/unit_def.gd" id="1_unitdef"]
 
@@ -6,7 +6,6 @@
 script = ExtResource("1_unitdef")
 id = &"guardian"
 display_name = "Страж"
-team = 0
 max_hp = 250
 attack = 8
 defense = 15
@@ -14,23 +13,11 @@ magic_power = 2
 magic_resist = 8
 attack_speed = 0.7
 move_speed = 0.8
-attack_range = 1
 sight_range = 6
-crit_chance = 0.05
-crit_damage = 1.5
-dodge = 0.0
 armor = 30
-healing_received = 1.0
-shield_strength = 1.0
-lifesteal = 0.0
 thorns = 0.3
-magic_pen = 0.0
-cdr = 0.0
-tenacity = 0.3
-health_regen = 0.0
 max_mana = 50
-mana_regen = 1.0
+tenacity = 0.3
 tier = 2
 cost = 5
-abilities = Array[Resource]([])
 description = "Тяжёлый танк. Огромный HP, защита и броня. Отражает 30% урона обратно атакующему."

@@ -1,4 +1,4 @@
-[gd_resource type="Resource" script_class="UnitDef" load_steps=5 format=3]
+[gd_resource type="Resource" script_class="UnitDef" format=3]
 
 [ext_resource type="Script" path="res://core/data/unit_def.gd" id="1_unitdef"]
 [ext_resource type="Resource" path="res://content/abilities/chain_lightning.tres" id="2_chain"]
@@ -8,28 +8,12 @@
 script = ExtResource("1_unitdef")
 id = &"elementalist"
 display_name = "Элементалист"
-team = 0
-max_hp = 100
 attack = 8
 defense = 6
 magic_power = 28
 magic_resist = 12
 attack_speed = 0.8
-move_speed = 1.0
-attack_range = 1
-sight_range = 8
-crit_chance = 0.05
-crit_damage = 1.5
-dodge = 0.0
-armor = 0
-healing_received = 1.0
-shield_strength = 1.0
-lifesteal = 0.0
-thorns = 0.0
 magic_pen = 0.5
-cdr = 0.0
-tenacity = 0.0
-health_regen = 0.0
 max_mana = 200
 mana_regen = 5.0
 tier = 3

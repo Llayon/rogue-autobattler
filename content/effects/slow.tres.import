@@ -1,0 +1,13 @@
+[remap]
+
+importer="text_resource"
+type="Resource"
+uid="uid://ex2efxe5m1eqs"
+path.1="content/effects/slow.tres.remap"
+
+[deps]
+
+source_file="content/effects/slow.tres"
+dest_files=["content/effects/slow.tres.remap"]
+
+[params]

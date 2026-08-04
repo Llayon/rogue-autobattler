@@ -1,0 +1,13 @@
+[remap]
+
+importer="text_resource"
+type="Resource"
+uid="uid://abm0szv89k9l0"
+path.1="content/units/beast.tres.remap"
+
+[deps]
+
+source_file="content/units/beast.tres"
+dest_files=["content/units/beast.tres.remap"]
+
+[params]

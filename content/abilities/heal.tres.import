@@ -1,0 +1,13 @@
+[remap]
+
+importer="text_resource"
+type="Resource"
+uid="uid://avifmqnm0bdxa"
+path.1="content/abilities/heal.tres.remap"
+
+[deps]
+
+source_file="content/abilities/heal.tres"
+dest_files=["content/abilities/heal.tres.remap"]
+
+[params]

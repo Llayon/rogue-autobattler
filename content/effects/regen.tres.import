@@ -1,0 +1,13 @@
+[remap]
+
+importer="text_resource"
+type="Resource"
+uid="uid://ch13pcwhr65rz"
+path.1="content/effects/regen.tres.remap"
+
+[deps]
+
+source_file="content/effects/regen.tres"
+dest_files=["content/effects/regen.tres.remap"]
+
+[params]

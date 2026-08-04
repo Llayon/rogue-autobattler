@@ -1,0 +1,13 @@
+[remap]
+
+importer="text_resource"
+type="Resource"
+uid="uid://bml4e9ikudnok"
+path.1="content/units/knight.tres.remap"
+
+[deps]
+
+source_file="content/units/knight.tres"
+dest_files=["content/units/knight.tres.remap"]
+
+[params]

@@ -1,12 +1,12 @@
-[gd_resource type="Resource" script_class="AoeStatusEffect" load_steps=3 format=3]
+[gd_resource type="Resource" script_class="AoeStatusEffect" format=3]
 
 [ext_resource type="Script" path="res://core/effects/aoe_status_effect.gd" id="1_aoe_status"]
 [ext_resource type="Resource" path="res://content/effects/stun.tres" id="2_stun"]
 
 [resource]
 script = ExtResource("1_aoe_status")
+aoe_radius = 2
 status_def = ExtResource("2_stun")
 duration_override = 1.5
 max_stacks_override = 1
-aoe_radius = 2
-enemy_team_only = true
+kind = 2

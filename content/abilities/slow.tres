@@ -1,4 +1,4 @@
-[gd_resource type="Resource" script_class="AbilityDef" load_steps=3 format=3]
+[gd_resource type="Resource" script_class="AbilityDef" format=3]
 
 [ext_resource type="Script" path="res://core/data/ability_def.gd" id="1_abilitydef"]
 [ext_resource type="Resource" path="res://content/effects/instances/slow_apply.tres" id="2_slow"]
@@ -10,10 +10,5 @@ display_name = "Замедление"
 description = "Снижает attack_speed цели на 50% на 3 секунды."
 cooldown = 6.0
 mana_cost = 25
-targeting = 0
 range = 4
-aoe_radius = 0
-aoe_width = 0
-aoe_length = 0
 effects = Array[Resource]([ExtResource("2_slow")])
-trigger = 0

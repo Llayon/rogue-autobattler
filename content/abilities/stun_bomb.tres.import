@@ -1,0 +1,13 @@
+[remap]
+
+importer="text_resource"
+type="Resource"
+uid="uid://uoa1ikbzw0uek"
+path.1="content/abilities/stun_bomb.tres.remap"
+
+[deps]
+
+source_file="content/abilities/stun_bomb.tres"
+dest_files=["content/abilities/stun_bomb.tres.remap"]
+
+[params]

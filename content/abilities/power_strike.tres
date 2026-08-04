@@ -1,4 +1,4 @@
-[gd_resource type="Resource" script_class="AbilityDef" load_steps=4 format=3]
+[gd_resource type="Resource" script_class="AbilityDef" format=3]
 
 [ext_resource type="Script" path="res://core/data/ability_def.gd" id="1_abilitydef"]
 [ext_resource type="Resource" path="res://content/effects/instances/power_strike_damage.tres" id="2_damage"]
@@ -10,11 +10,5 @@ id = &"power_strike"
 display_name = "Мощный удар"
 description = "Физический урон и оглушение цели на 1.5с."
 cooldown = 6.0
-mana_cost = 0
-targeting = 0
 range = 1
-aoe_radius = 0
-aoe_width = 0
-aoe_length = 0
 effects = Array[Resource]([ExtResource("2_damage"), ExtResource("3_stun")])
-trigger = 0

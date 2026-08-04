@@ -1,0 +1,13 @@
+[remap]
+
+importer="text_resource"
+type="Resource"
+uid="uid://p4nmmtyzufq9l"
+path.1="content/enemies/goblin.tres.remap"
+
+[deps]
+
+source_file="content/enemies/goblin.tres"
+dest_files=["content/enemies/goblin.tres.remap"]
+
+[params]

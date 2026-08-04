@@ -1,0 +1,13 @@
+[remap]
+
+importer="text_resource"
+type="Resource"
+uid="uid://b1io5yvmqcj97"
+path.1="content/units/druid.tres.remap"
+
+[deps]
+
+source_file="content/units/druid.tres"
+dest_files=["content/units/druid.tres.remap"]
+
+[params]

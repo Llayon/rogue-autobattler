@@ -1,4 +1,4 @@
-[gd_resource type="Resource" script_class="StatusDef" load_steps=2 format=3]
+[gd_resource type="Resource" script_class="StatusDef" format=3]
 
 [ext_resource type="Script" path="res://core/data/status_def.gd" id="1_statusdef"]
 
@@ -9,15 +9,4 @@ display_name = "Оглушение"
 description = "Юнит не может действовать."
 duration = 1.5
 tick_interval = 0.0
-attack_modifier = 0.0
-defense_modifier = 0.0
-move_speed_modifier = 0.0
-attack_speed_modifier = 0.0
-is_percent_modifier = true
 blocks_actions = true
-is_harmful = true
-stackable = false
-max_stacks = 1
-dot_damage = 0
-dot_heal = 0
-dot_damage_kind = 0

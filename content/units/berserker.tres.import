@@ -1,0 +1,13 @@
+[remap]
+
+importer="text_resource"
+type="Resource"
+uid="uid://dfaxnk609hdt3"
+path.1="content/units/berserker.tres.remap"
+
+[deps]
+
+source_file="content/units/berserker.tres"
+dest_files=["content/units/berserker.tres.remap"]
+
+[params]

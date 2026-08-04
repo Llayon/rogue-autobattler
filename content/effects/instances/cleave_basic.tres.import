@@ -1,0 +1,13 @@
+[remap]
+
+importer="text_resource"
+type="Resource"
+uid="uid://domvqxadqkjt3"
+path.1="content/effects/instances/cleave_basic.tres.remap"
+
+[deps]
+
+source_file="content/effects/instances/cleave_basic.tres"
+dest_files=["content/effects/instances/cleave_basic.tres.remap"]
+
+[params]

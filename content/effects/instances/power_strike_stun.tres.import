@@ -1,0 +1,13 @@
+[remap]
+
+importer="text_resource"
+type="Resource"
+uid="uid://4vbl01wkjdu9k"
+path.1="content/effects/instances/power_strike_stun.tres.remap"
+
+[deps]
+
+source_file="content/effects/instances/power_strike_stun.tres"
+dest_files=["content/effects/instances/power_strike_stun.tres.remap"]
+
+[params]

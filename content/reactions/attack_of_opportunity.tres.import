@@ -1,0 +1,13 @@
+[remap]
+
+importer="text_resource"
+type="Resource"
+uid="uid://arsr0at3s8cjb"
+path.1="content/reactions/attack_of_opportunity.tres.remap"
+
+[deps]
+
+source_file="content/reactions/attack_of_opportunity.tres"
+dest_files=["content/reactions/attack_of_opportunity.tres.remap"]
+
+[params]

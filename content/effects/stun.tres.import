@@ -1,0 +1,13 @@
+[remap]
+
+importer="text_resource"
+type="Resource"
+uid="uid://tg6xtoapgt3g8"
+path.1="content/effects/stun.tres.remap"
+
+[deps]
+
+source_file="content/effects/stun.tres"
+dest_files=["content/effects/stun.tres.remap"]
+
+[params]

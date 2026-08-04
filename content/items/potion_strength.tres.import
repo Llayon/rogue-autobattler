@@ -1,0 +1,13 @@
+[remap]
+
+importer="text_resource"
+type="Resource"
+uid="uid://ib1hb0xl52pdy"
+path.1="content/items/potion_strength.tres.remap"
+
+[deps]
+
+source_file="content/items/potion_strength.tres"
+dest_files=["content/items/potion_strength.tres.remap"]
+
+[params]

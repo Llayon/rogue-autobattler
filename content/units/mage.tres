@@ -1,4 +1,4 @@
-[gd_resource type="Resource" script_class="UnitDef" load_steps=4 format=3]
+[gd_resource type="Resource" script_class="UnitDef" format=3]
 
 [ext_resource type="Script" path="res://core/data/unit_def.gd" id="1_unitdef"]
 [ext_resource type="Resource" path="res://content/abilities/fireball.tres" id="2_fireball"]
@@ -8,16 +8,13 @@
 script = ExtResource("1_unitdef")
 id = &"mage"
 display_name = "Маг"
-team = 0
 max_hp = 90
 attack = 4
 defense = 2
 magic_power = 30
 magic_resist = 8
 attack_speed = 0.6
-move_speed = 1.0
 attack_range = 4
-sight_range = 8
 tier = 2
 cost = 2
 abilities = Array[Resource]([ExtResource("2_fireball"), ExtResource("3_chain")])

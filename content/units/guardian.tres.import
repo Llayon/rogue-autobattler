@@ -1,0 +1,13 @@
+[remap]
+
+importer="text_resource"
+type="Resource"
+uid="uid://h47bpn4ruiwod"
+path.1="content/units/guardian.tres.remap"
+
+[deps]
+
+source_file="content/units/guardian.tres"
+dest_files=["content/units/guardian.tres.remap"]
+
+[params]

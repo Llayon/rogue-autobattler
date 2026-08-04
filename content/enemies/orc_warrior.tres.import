@@ -1,0 +1,13 @@
+[remap]
+
+importer="text_resource"
+type="Resource"
+uid="uid://7mnhwjsopoafm"
+path.1="content/enemies/orc_warrior.tres.remap"
+
+[deps]
+
+source_file="content/enemies/orc_warrior.tres"
+dest_files=["content/enemies/orc_warrior.tres.remap"]
+
+[params]

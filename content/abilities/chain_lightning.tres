@@ -1,4 +1,4 @@
-[gd_resource type="Resource" script_class="AbilityDef" load_steps=3 format=3]
+[gd_resource type="Resource" script_class="AbilityDef" format=3]
 
 [ext_resource type="Script" path="res://core/data/ability_def.gd" id="1_abilitydef"]
 [ext_resource type="Resource" path="res://content/effects/instances/chain_lightning_basic.tres" id="2_chain"]
@@ -10,10 +10,4 @@ display_name = "Цепная молния"
 description = "Магический урон по цели + прыгает на 3 ближайших врагов с убывающим уроном."
 cooldown = 8.0
 mana_cost = 40
-targeting = 0
-range = 6
-aoe_radius = 0
-aoe_width = 0
-aoe_length = 0
 effects = Array[Resource]([ExtResource("2_chain")])
-trigger = 0

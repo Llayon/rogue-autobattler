@@ -1,0 +1,13 @@
+[remap]
+
+importer="text_resource"
+type="Resource"
+uid="uid://oo6pyncbkepk9"
+path.1="content/abilities/cleave.tres.remap"
+
+[deps]
+
+source_file="content/abilities/cleave.tres"
+dest_files=["content/abilities/cleave.tres.remap"]
+
+[params]

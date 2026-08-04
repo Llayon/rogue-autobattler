@@ -1,8 +1,8 @@
-[gd_resource type="Resource" script_class="ShieldEffect" load_steps=2 format=3]
+[gd_resource type="Resource" script_class="ShieldEffect" format=3]
 
 [ext_resource type="Script" path="res://core/effects/shield_effect.gd" id="1_shield"]
 
 [resource]
 script = ExtResource("1_shield")
-kind = 4
 amount = 30
+kind = 4

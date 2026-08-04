@@ -1,4 +1,4 @@
-[gd_resource type="Resource" script_class="UnitDef" load_steps=2 format=3]
+[gd_resource type="Resource" script_class="UnitDef" format=3]
 
 [ext_resource type="Script" path="res://core/data/unit_def.gd" id="1_unitdef"]
 
@@ -6,7 +6,6 @@
 script = ExtResource("1_unitdef")
 id = &"druid"
 display_name = "Друид"
-team = 0
 max_hp = 110
 attack = 8
 defense = 6
@@ -14,23 +13,12 @@ magic_power = 12
 magic_resist = 10
 attack_speed = 0.9
 move_speed = 1.1
-attack_range = 1
-sight_range = 8
-crit_chance = 0.05
-crit_damage = 1.5
 dodge = 0.05
-armor = 0
 healing_received = 1.3
-shield_strength = 1.0
-lifesteal = 0.0
-thorns = 0.0
-magic_pen = 0.0
-cdr = 0.25
-tenacity = 0.15
-health_regen = 3.0
-max_mana = 100
 mana_regen = 2.5
+cdr = 0.25
+health_regen = 3.0
+tenacity = 0.15
 tier = 2
 cost = 5
-abilities = Array[Resource]([])
 description = "Гибридный саппорт. Регенерация HP, CDR, бафф на хил, немного защиты."

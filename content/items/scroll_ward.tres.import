@@ -1,0 +1,13 @@
+[remap]
+
+importer="text_resource"
+type="Resource"
+uid="uid://evvrj96hi6zwe"
+path.1="content/items/scroll_ward.tres.remap"
+
+[deps]
+
+source_file="content/items/scroll_ward.tres"
+dest_files=["content/items/scroll_ward.tres.remap"]
+
+[params]

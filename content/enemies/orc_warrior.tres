@@ -1,4 +1,4 @@
-[gd_resource type="Resource" script_class="UnitDef" load_steps=2 format=3]
+[gd_resource type="Resource" script_class="UnitDef" format=3]
 
 [ext_resource type="Script" path="res://core/data/unit_def.gd" id="1_unitdef"]
 
@@ -10,27 +10,16 @@ team = 1
 max_hp = 120
 attack = 16
 defense = 6
-magic_power = 0
 magic_resist = 4
 attack_speed = 0.9
-move_speed = 1.0
-attack_range = 1
 sight_range = 6
 crit_chance = 0.2
 crit_damage = 2.0
-dodge = 0.0
 armor = 10
-healing_received = 1.0
-shield_strength = 1.0
 lifesteal = 0.15
 thorns = 0.1
-magic_pen = 0.0
-cdr = 0.0
-tenacity = 0.0
-health_regen = 0.0
 max_mana = 0
 mana_regen = 0.0
 tier = 2
 cost = 0
-abilities = Array[Resource]([])
 description = "Берсерк. Высокий HP и ATK, lifesteal 15%, thorns 10%."

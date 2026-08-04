@@ -1,0 +1,13 @@
+[remap]
+
+importer="text_resource"
+type="Resource"
+uid="uid://02lxptbihsoba"
+path.1="content/units/necromancer.tres.remap"
+
+[deps]
+
+source_file="content/units/necromancer.tres"
+dest_files=["content/units/necromancer.tres.remap"]
+
+[params]

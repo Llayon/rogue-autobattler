@@ -1,4 +1,4 @@
-[gd_resource type="Resource" script_class="UnitDef" load_steps=2 format=3]
+[gd_resource type="Resource" script_class="UnitDef" format=3]
 
 [ext_resource type="Script" path="res://core/data/unit_def.gd" id="1_unitdef"]
 
@@ -6,31 +6,19 @@
 script = ExtResource("1_unitdef")
 id = &"beast"
 display_name = "Зверь"
-team = 0
 max_hp = 140
 attack = 14
 defense = 6
-magic_power = 0
 magic_resist = 4
 attack_speed = 1.1
 move_speed = 1.3
-attack_range = 1
-sight_range = 8
 crit_chance = 0.15
 crit_damage = 1.8
 dodge = 0.1
-armor = 0
 healing_received = 0.8
-shield_strength = 1.0
 lifesteal = 0.3
 thorns = 0.5
-magic_pen = 0.0
-cdr = 0.0
-tenacity = 0.0
-health_regen = 0.0
 max_mana = 50
-mana_regen = 1.0
 tier = 2
 cost = 5
-abilities = Array[Resource]([])
 description = "Хищный зверь. 30% lifesteal + 50% thorns. Наказывает врагов за атаки."

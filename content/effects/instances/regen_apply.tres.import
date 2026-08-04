@@ -1,0 +1,13 @@
+[remap]
+
+importer="text_resource"
+type="Resource"
+uid="uid://55zyc77ror7iz"
+path.1="content/effects/instances/regen_apply.tres.remap"
+
+[deps]
+
+source_file="content/effects/instances/regen_apply.tres"
+dest_files=["content/effects/instances/regen_apply.tres.remap"]
+
+[params]

@@ -1,12 +1,7 @@
-[gd_resource type="Resource" script_class="CleaveEffect" load_steps=2 format=3]
+[gd_resource type="Resource" script_class="CleaveEffect" format=3]
 
 [ext_resource type="Script" path="res://core/effects/cleave_effect.gd" id="1_cleave"]
 
 [resource]
 script = ExtResource("1_cleave")
 kind = 0
-base_damage = 15
-is_magic = false
-splash_radius = 1
-variance = 0.1
-scales_with_magic_power = false
