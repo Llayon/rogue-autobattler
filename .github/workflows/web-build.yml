@@ -22,22 +22,6 @@ jobs:
           wget -q "https://github.com/godotengine/godot-builds/releases/download/4.7-stable/Godot_v4.7-stable_export_templates.tpz" -O templates.zip
           mkdir -p $HOME/.local/share/godot/export_templates/4.7.stable/
           unzip -qj templates.zip "templates/web_nothreads_release.zip" -d $HOME/.local/share/godot/export_templates/4.7.stable/
-      - name: Import Resources
-        # Force Godot to scan all .tres files and generate .import sidecars.
-        # Without this, .tres files are included in pck but cannot be loaded
-        # by ResourceLoader at runtime (empty/unparseable resource).
-        run: |
-          /opt/godot/Godot_v${GODOT_VERSION}_linux.x86_64 \
-            --headless \
-            --editor \
-            --path "$GITHUB_WORKSPACE" \
-            --quit
-          # Verify .import files were created.
-          echo "--- Generated .import files ---"
-          find content -name '*.import' | head -10
-          echo "--- Total count ---"
-          find content -name '*.import' | wc -l
-
       - name: Build
         run: |
           set -eo pipefail
