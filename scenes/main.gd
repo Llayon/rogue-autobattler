@@ -1,11 +1,10 @@
 extends Node
-## Корневой узел. Сейчас сразу загружает BattleScene.
-## В v2 здесь будет главное меню → выбор рана → переход на BattleScene.
+## Корневой узел. Загружает MainMenu — игрок выбирает New Run или Continue.
 
 func _ready() -> void:
-	var scene: PackedScene = load("res://scenes/battle/battle_scene.tscn") as PackedScene
-	if scene == null:
-		GameLog.error("main", "Failed to load battle scene")
-		return
-	var inst: Node = scene.instantiate()
-	add_child(inst)
+    var scene: PackedScene = load("res://scenes/main_menu/main_menu.tscn") as PackedScene
+    if scene == null:
+        push_error("Failed to load main_menu scene")
+        return
+    var inst: Node = scene.instantiate()
+    add_child(inst)
