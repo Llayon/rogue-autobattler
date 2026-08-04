@@ -157,6 +157,7 @@ func _initialize() -> void:
 	_test_magic_resist_method()
 	_test_magic_resist_modifier_status()
 	_test_apply_modifier_safe_for_missing_fields()
+	_test_units_meta_tier_pools()
 	_test_main_menu_creates_buttons()
 	_test_main_menu_continue_hidden_when_no_seed()
 	_test_main_menu_continue_visible_after_save()
@@ -4235,4 +4236,24 @@ func _test_main_menu_continue_visible_after_save() -> void:
 	_assert(menu._continue_button.visible, "Continue visible when seed=12345")
 	menu.queue_free()
 	await process_frame
+
+
+func _test_units_meta_tier_pools() -> void:
+	print("[test] Sprint 3: UnitsMeta.ids_by_tier returns expected pools")
+	ContentDB_static.load_all()
+	var tier1: Array = UnitsMeta.ids_by_tier(1)
+	var tier2: Array = UnitsMeta.ids_by_tier(2)
+	var tier3: Array = UnitsMeta.ids_by_tier(3)
+	_assert(tier1.size() >= 1, "tier 1 has units (got %d)" % tier1.size())
+	_assert(tier2.size() >= 1, "tier 2 has units (got %d)" % tier2.size())
+	_assert(tier3.size() >= 1, "tier 3 has units (got %d)" % tier3.size())
+	# Проверяем что starter unitы в tier=1.
+	_assert(&"warrior" in tier1, "warrior is tier 1")
+	_assert(&"archer" in tier1, "archer is tier 1")
+	_assert(&"cleric" in tier1, "cleric is tier 1")
+	# Paladin в tier=3.
+	_assert(&"paladin" in tier3, "paladin is tier 3")
+	# Tier totals must equal all units (15 = 3+8+4).
+	var total: int = tier1.size() + tier2.size() + tier3.size()
+	_assert(total == 15, "tier total = 15 (got %d: t1=%d t2=%d t3=%d)" % [total, tier1.size(), tier2.size(), tier3.size()])
 
