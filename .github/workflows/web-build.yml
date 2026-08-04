@@ -1,91 +1,47 @@
-name: Build & Deploy Web
-
+name: Web Build
 on:
   push:
     branches: [master]
-    paths:
-      - 'core/**'
-      - 'scenes/**'
-      - 'content/**'
-      - 'project.godot'
-      - 'export_presets.cfg'
-      - '.github/workflows/web-build.yml'
   workflow_dispatch:
-    # Позволяет запустить build вручную через GitHub UI.
-
 jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
       GODOT_VERSION: '4.7-stable'
-
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Install Godot 4.7
-        env:
-          GODOT_VERSION: '4.7-stable'
+      - uses: actions/checkout@v4
+      - name: Install Godot
         run: |
           mkdir -p /opt/godot
           wget -q "https://github.com/godotengine/godot-builds/releases/download/${GODOT_VERSION}/Godot_v${GODOT_VERSION}_linux.x86_64.zip" -O godot.zip
           unzip -q godot.zip -d /opt/godot
           chmod +x /opt/godot/Godot_v${GODOT_VERSION}_linux.x86_64
-          /opt/godot/Godot_v${GODOT_VERSION}_linux.x86_64 --version
-
-      - name: Install export templates
+      - name: Install Templates
         run: |
-          TEMPLATE_URL="https://github.com/godotengine/godot-builds/releases/download/4.7-stable/Godot_v4.7-stable_export_templates.tpz"
-          wget -q "$TEMPLATE_URL" -O templates.zip
+          wget -q "https://github.com/godotengine/godot-builds/releases/download/4.7-stable/Godot_v4.7-stable_export_templates.tpz" -O templates.zip
           mkdir -p $HOME/.local/share/godot/export_templates/4.7.stable/
-          unzip -qj templates.zip "templates/web_release.zip" -d $HOME/.local/share/godot/export_templates/4.7.stable/
-          ls $HOME/.local/share/godot/export_templates/4.7.stable/
-
-      - name: Cache Godot dependencies
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/godot
-          key: ${{ runner.os }}-godot-${{ hashFiles('export_presets.cfg') }}
-          restore-keys: |
-            ${{ runner.os }}-godot-
-
-      - name: Build Web project
+          unzip -qj templates.zip "templates/web_nothreads_release.zip" -d $HOME/.local/share/godot/export_templates/4.7.stable/
+      - name: Build
         run: |
-          mkdir -p build
-          /opt/godot/Godot_v4.7-stable_linux.x86_64 \
+          /opt/godot/Godot_v${GODOT_VERSION}_linux.x86_64 \
             --headless \
             --path "$GITHUB_WORKSPACE" \
             --export-release "Web (no threads)" "build/index.html" 2>&1 | tail -20
-
-      - name: Verify build artifacts
-        run: |
-          ls -la build/
-          echo "---"
-          file build/index.html build/index.wasm build/index.pck
-
-      - name: Setup Pages
-        uses: actions/configure-pages@v5
-
-      - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
         with:
           path: build/
-
   deploy:
     needs: build
     runs-on: ubuntu-latest
-    timeout-minutes: 10
     permissions:
       pages: write
       id-token: write
       contents: read
-
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
-
     steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
+      - id: deployment
         uses: actions/deploy-pages@v4
