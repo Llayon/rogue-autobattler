@@ -107,7 +107,12 @@ func _ready() -> void:
 	if run_controller.has_signal("phase_changed"):
 		run_controller.phase_changed.connect(_on_run_phase_changed)
 	# Начинаем ран.
-	run_controller.start_run(42)
+	var initial_seed: int = 0
+	if has_meta("initial_seed"):
+		initial_seed = int(get_meta("initial_seed"))
+	if initial_seed == 0:
+		initial_seed = Rng.randi_range(1, 999999)
+	run_controller.start_run(initial_seed)
 	_refresh_hud()
 	_refresh_status()
 
