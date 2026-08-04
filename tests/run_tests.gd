@@ -159,6 +159,7 @@ func _initialize() -> void:
 	_test_apply_modifier_safe_for_missing_fields()
 	_test_units_meta_tier_pools()
 	_test_main_menu_creates_buttons()
+	_test_settings_persists_battle_speed()
 	_test_main_menu_continue_hidden_when_no_seed()
 	_test_main_menu_continue_visible_after_save()
 	_test_dos_classify()
@@ -4256,4 +4257,14 @@ func _test_units_meta_tier_pools() -> void:
 	# Tier totals must equal all units (15 = 3+8+4).
 	var total: int = tier1.size() + tier2.size() + tier3.size()
 	_assert(total == 15, "tier total = 15 (got %d: t1=%d t2=%d t3=%d)" % [total, tier1.size(), tier2.size(), tier3.size()])
+
+
+func _test_settings_persists_battle_speed() -> void:
+	print("[test] Sprint 3: Settings persists battle_speed to MetaProfile")
+	var profile: MetaProfile = MetaProfileScript.new()
+	profile.battle_speed = 4.0
+	SaveService.save_meta(profile)
+	var loaded: MetaProfile = SaveService.load_meta()
+	_assert(loaded != null, "profile reloaded")
+	_assert(loaded.battle_speed == 4.0, "battle_speed persisted (got %s)" % str(loaded.battle_speed))
 
