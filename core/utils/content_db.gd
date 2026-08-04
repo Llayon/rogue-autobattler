@@ -30,15 +30,15 @@ static func load_all() -> void:
 
 
 static func _load_dir(type_name: String, dir_path: String) -> void:
-	var dir: DirAccess = DirAccess.open(dir_path)
-	if dir == null:
-		GameLog.warn("content", "Directory not found: %s" % dir_path)
-		return
 	var ids: Array = []
-	dir.list_dir_begin()
-	var file_name: String = dir.get_next()
-	while file_name != "":
-		if not dir.current_is_dir() and (file_name.ends_with(".tres") or file_name.ends_with(".res")):
+	# ResourceLoader.list_directory() works on both editor AND web builds
+	# (DirAccess.open() fails in Web because res:// paths aren't real FS).
+	var files: PackedStringArray = ResourceLoader.list_directory(dir_path)
+	if files.is_empty():
+		GameLog.warn("content", "Directory not found or empty: %s" % dir_path)
+		return
+	for file_name in files:
+		if file_name.ends_with(".tres") or file_name.ends_with(".res"):
 			var full_path: String = dir_path.path_join(file_name)
 			var res: Resource = load(full_path)
 			if res == null:
@@ -52,8 +52,6 @@ static func _load_dir(type_name: String, dir_path: String) -> void:
 				else:
 					_by_id[id] = res
 					ids.append(id)
-		file_name = dir.get_next()
-	dir.list_dir_end()
 	_by_type[type_name] = ids
 
 
