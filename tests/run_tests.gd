@@ -60,6 +60,7 @@ const BalanceScript = preload("res://core/balance.gd")
 const RunControllerScript = preload("res://core/progression/run_controller.gd")
 const RunStateScript = preload("res://core/progression/run_state.gd")
 const MetaProfileScript = preload("res://core/progression/meta_profile.gd")
+const MainMenuScript = preload("res://scenes/main_menu/main_menu.gd")
 const SaveSvcScript = preload("res://core/utils/save_manager.gd")
 const BattleRunnerScriptForCtrl = preload("res://core/battle/battle_runner.gd")
 const BattleStateScriptForCtrl = preload("res://core/battle/battle_state.gd")
@@ -156,6 +157,9 @@ func _initialize() -> void:
 	_test_magic_resist_method()
 	_test_magic_resist_modifier_status()
 	_test_apply_modifier_safe_for_missing_fields()
+	_test_main_menu_creates_buttons()
+	_test_main_menu_continue_hidden_when_no_seed()
+	_test_main_menu_continue_visible_after_save()
 	_test_dos_classify()
 	_test_dos_natural_crit()
 	_test_dos_damage_multiplier()
@@ -4187,5 +4191,48 @@ func _test_battle_scene_has_shop_scene_overlay() -> void:
 			"gold deducted (got %d expected %d)" % [rc.state.gold, before_gold - rc.shop.get_discounted_price(0)])
 		_assert(rc.inventory_count() == before_inv + 1, "inventory grew")
 	scene.queue_free()
+	await process_frame
+
+
+func _test_main_menu_creates_buttons() -> void:
+	print("[test] Sprint 3: MainMenu creates title and buttons")
+	var packed: PackedScene = load("res://scenes/main_menu/main_menu.tscn") as PackedScene
+	_assert(packed != null, "main_menu.tscn loads")
+	var menu: Control = packed.instantiate()
+	get_root().add_child.call_deferred(menu)
+	for i in 2: await process_frame
+	_assert(menu._new_run_button != null, "New Run button created")
+	_assert(menu._continue_button != null, "Continue button created")
+	_assert(menu._stats_label != null, "Stats label created")
+	_assert(menu._profile != null, "Profile loaded (or fresh) on _ready")
+	menu.queue_free()
+	await process_frame
+
+
+func _test_main_menu_continue_hidden_when_no_seed() -> void:
+	print("[test] Sprint 3: MainMenu hides Continue when current_run_seed=0")
+	var fresh: MetaProfile = MetaProfileScript.new()
+	fresh.current_run_seed = 0
+	SaveService.save_meta(fresh)
+	var packed: PackedScene = load("res://scenes/main_menu/main_menu.tscn") as PackedScene
+	var menu: Control = packed.instantiate()
+	get_root().add_child.call_deferred(menu)
+	for i in 2: await process_frame
+	_assert(not menu._continue_button.visible, "Continue hidden when seed=0")
+	menu.queue_free()
+	await process_frame
+
+
+func _test_main_menu_continue_visible_after_save() -> void:
+	print("[test] Sprint 3: MainMenu shows Continue when current_run_seed!=0")
+	var profile: MetaProfile = MetaProfileScript.new()
+	profile.current_run_seed = 12345
+	SaveService.save_meta(profile)
+	var packed: PackedScene = load("res://scenes/main_menu/main_menu.tscn") as PackedScene
+	var menu: Control = packed.instantiate()
+	get_root().add_child.call_deferred(menu)
+	for i in 2: await process_frame
+	_assert(menu._continue_button.visible, "Continue visible when seed=12345")
+	menu.queue_free()
 	await process_frame
 
