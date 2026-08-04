@@ -217,6 +217,15 @@ func _find_event_bus() -> Node:
 	return tree.root.get_node_or_null("EventBus")
 
 
+
+## Переинициализировать battle с новым seed (вызывается из RootScene).
+## Очищает state, run_controller, battle_runner.
+func restart_with_seed(seed: int) -> void:
+	if run_controller != null:
+		run_controller.start_run(seed)
+	speed = 1.0
+
+
 func _process(delta: float) -> void:
 	if run_controller == null:
 		return

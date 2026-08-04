@@ -1,12 +1,11 @@
 extends Node
-## Корневой узел. Сейчас сразу загружает BattleScene.
-## Sprint 3 MainMenu scene создан но временно отключён для стабильности Web build —
-## будет re-enabled после fix reward modal race condition.
+## Корневой узел. Загружает RootScene который содержит MainMenu + BattleScene
+## как sub-views с visibility switching (без queue_free).
 
 func _ready() -> void:
-    var scene: PackedScene = load("res://scenes/battle/battle_scene.tscn") as PackedScene
+    var scene: PackedScene = load("res://scenes/root/root_scene.tscn") as PackedScene
     if scene == null:
-        GameLog.error("main", "Failed to load battle scene")
+        push_error("Failed to load root_scene.tscn")
         return
     var inst: Node = scene.instantiate()
     add_child(inst)
