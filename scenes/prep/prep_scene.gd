@@ -24,7 +24,7 @@ func _ready() -> void:
 	_build_background()
 	_build_panel()
 	# S6.2: если set_run_controller был вызван ДО add_child (например, из test),
-	# пересобираем панель сейчас когда is_inside_tree = true.
+	# пересобираем панель сейчас когда UI tree построен.
 	if run_controller != null:
 		_rebuild()
 
@@ -32,9 +32,10 @@ func _ready() -> void:
 ## S6.2: подключить RunController и перестроить UI под его state.
 func set_run_controller(ctrl: Node) -> void:
 	run_controller = ctrl
-	# Если _ready уже отработал — пересобрать панель.
-	if is_inside_tree():
-		_rebuild()
+	# Всегда пересобираем через deferred — это решает timing issue когда
+	# set_run_controller вызывается до того как _ready() полностью построил UI tree.
+	# Без deferred: get_node_or_null('Center/Panel/VBox/BoardRow') возвращает null.
+	call_deferred("_rebuild")
 
 
 ## S7.2: подключить InventoryScene чтобы PREP знал про picked item.

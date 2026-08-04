@@ -804,7 +804,6 @@ func _enter_map() -> void:
 
 
 func _refresh_shop() -> void:
-	shop.set_discount(BalanceScript.MAP_MERCHANT_DISCOUNT)
 	shop.refresh(profile.unlocked_units)
 
 
