@@ -113,6 +113,9 @@ func _ready() -> void:
 	if initial_seed == 0:
 		initial_seed = Rng.randi_range(1, 999999)
 	run_controller.start_run(initial_seed)
+	# Apply saved battle_speed from profile.
+	if run_controller.profile != null:
+		speed = run_controller.profile.battle_speed
 	_refresh_hud()
 	_refresh_status()
 
