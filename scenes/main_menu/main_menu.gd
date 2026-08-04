@@ -6,19 +6,23 @@ extends Control
 ## При нажатии "Continue" вызывает run_controller.resume_run с сохранённым seed.
 
 const MetaProfileScript = preload("res://core/progression/meta_profile.gd")
-const SaveSvc = preload("res://core/utils/save_manager.gd")
+const SaveService = preload("res://core/save/save_service.gd")
 const RngScript = preload("res://core/utils/rng_service.gd")
-const BattleSceneScript = preload("res://scenes/battle/battle_scene.gd")
 
 var _profile: MetaProfileScript = null
 var _new_run_button: Button = null
 var _continue_button: Button = null
 var _stats_label: Label = null
 var _title_label: Label = null
+var _settings_button: Button = null
+var _settings_panel: PanelContainer = null
+var _speed_1_button: Button = null
+var _speed_2_button: Button = null
+var _speed_4_button: Button = null
 
 
 func _ready() -> void:
-    _profile = SaveSvc.load_meta()
+    _profile = SaveService.load_meta()
     if _profile == null:
         _profile = MetaProfileScript.new()
     _build_layout()
@@ -102,6 +106,97 @@ func _on_continue_pressed() -> void:
     if _profile == null or _profile.current_run_seed == 0:
         return
     _start_battle_scene(_profile.current_run_seed)
+
+
+func _on_settings_pressed() -> void:
+    _toggle_settings_panel()
+
+
+func _toggle_settings_panel() -> void:
+    if _settings_panel == null:
+        _build_settings_panel()
+    _settings_panel.visible = not _settings_panel.visible
+    if _settings_panel.visible:
+        _refresh_speed_buttons()
+
+
+func _build_settings_panel() -> void:
+    _settings_panel = PanelContainer.new()
+    _settings_panel.visible = false
+    var sb: StyleBoxFlat = StyleBoxFlat.new()
+    sb.bg_color = Color(0.10, 0.14, 0.22, 0.96)
+    sb.border_color = Color(0.55, 0.65, 0.85, 0.9)
+    sb.set_border_width_all(2)
+    sb.set_corner_radius_all(12)
+    _settings_panel.add_theme_stylebox_override("panel", sb)
+    var vbox: VBoxContainer = VBoxContainer.new()
+    vbox.add_theme_constant_override("separation", 12)
+    _settings_panel.add_child(vbox)
+    var title: Label = Label.new()
+    title.text = "Battle Speed"
+    title.add_theme_font_size_override("font_size", 20)
+    title.add_theme_color_override("font_color", Color(0.95, 0.97, 1.0))
+    title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+    vbox.add_child(title)
+    var hbox: HBoxContainer = HBoxContainer.new()
+    hbox.add_theme_constant_override("separation", 8)
+    hbox.alignment = BoxContainer.ALIGNMENT_CENTER
+    _speed_1_button = _make_small_button("1x", _on_speed_1_pressed)
+    _speed_2_button = _make_small_button("2x", _on_speed_2_pressed)
+    _speed_4_button = _make_small_button("4x", _on_speed_4_pressed)
+    hbox.add_child(_speed_1_button)
+    hbox.add_child(_speed_2_button)
+    hbox.add_child(_speed_4_button)
+    vbox.add_child(hbox)
+    _settings_panel.set_anchors_preset(Control.PRESET_CENTER)
+    add_child(_settings_panel)
+
+
+func _make_small_button(text: String, callback: Callable) -> Button:
+    var btn: Button = Button.new()
+    btn.text = text
+    btn.custom_minimum_size = Vector2(60, 40)
+    btn.add_theme_font_size_override("font_size", 16)
+    btn.pressed.connect(callback)
+    return btn
+
+
+func _on_speed_1_pressed() -> void:
+    _set_speed(1.0)
+
+
+func _on_speed_2_pressed() -> void:
+    _set_speed(2.0)
+
+
+func _on_speed_4_pressed() -> void:
+    _set_speed(4.0)
+
+
+func _set_speed(s: float) -> void:
+    if _profile == null:
+        return
+    _profile.battle_speed = s
+    SaveService.save_meta(_profile)
+    _refresh_speed_buttons()
+
+
+func _refresh_speed_buttons() -> void:
+    if _profile == null:
+        return
+    var current: float = _profile.battle_speed
+    for btn in [_speed_1_button, _speed_2_button, _speed_4_button]:
+        if btn == null:
+            continue
+        var is_current: bool = (
+            (btn == _speed_1_button and current == 1.0)
+            or (btn == _speed_2_button and current == 2.0)
+            or (btn == _speed_4_button and current == 4.0)
+        )
+        var sb: StyleBoxFlat = StyleBoxFlat.new()
+        sb.bg_color = Color(0.40, 0.55, 0.40) if is_current else Color(0.30, 0.30, 0.40)
+        sb.set_corner_radius_all(6)
+        btn.add_theme_stylebox_override("normal", sb)
 
 
 func _start_battle_scene(seed: int) -> void:
