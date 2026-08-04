@@ -24,10 +24,13 @@ jobs:
           unzip -qj templates.zip "templates/web_nothreads_release.zip" -d $HOME/.local/share/godot/export_templates/4.7.stable/
       - name: Build
         run: |
+          set -eo pipefail
+          mkdir -p build
           /opt/godot/Godot_v${GODOT_VERSION}_linux.x86_64 \
             --headless \
             --path "$GITHUB_WORKSPACE" \
-            --export-release "Web (no threads)" "build/index.html" 2>&1 | tail -20
+            --export-release "Web (no threads)" "build/index.html"
+          ls -la build/
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
