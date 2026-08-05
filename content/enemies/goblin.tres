@@ -1,4 +1,4 @@
-[gd_resource type="Resource" script_class="UnitDef" format=3]
+[gd_resource type="Resource" format=3]
 
 [ext_resource type="Script" path="res://core/data/unit_def.gd" id="1_unitdef"]
 [ext_resource type="Resource" path="res://content/abilities/fireball.tres" id="2_fireball"]

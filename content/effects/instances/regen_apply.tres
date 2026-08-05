@@ -1,4 +1,4 @@
-[gd_resource type="Resource" script_class="ApplyStatusEffect" format=3]
+[gd_resource type="Resource" format=3]
 
 [ext_resource type="Script" path="res://core/effects/apply_status_effect.gd" id="1_apply"]
 [ext_resource type="Resource" path="res://content/effects/regen.tres" id="2_regen"]

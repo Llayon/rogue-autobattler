@@ -1,4 +1,4 @@
-[gd_resource type="Resource" script_class="CleaveEffect" format=3]
+[gd_resource type="Resource" format=3]
 
 [ext_resource type="Script" path="res://core/effects/cleave_effect.gd" id="1_cleave"]
 

@@ -1,4 +1,4 @@
-[gd_resource type="Resource" script_class="AbilityDef" format=3]
+[gd_resource type="Resource" format=3]
 
 [ext_resource type="Script" path="res://core/data/ability_def.gd" id="1_abilitydef"]
 [ext_resource type="Resource" path="res://content/effects/instances/heal_basic.tres" id="2_heal"]
