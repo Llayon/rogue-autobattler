@@ -135,10 +135,10 @@ func _build_item_buttons() -> void:
 	var list: VBoxContainer = get_node_or_null("Center/Panel/VBox/ItemsList")
 	if list == null:
 		return
-	var offered: int = run_controller.shop.get_offered_count()
+	var offered: int = run_controller.merchant_shop.get_offered_count()
 	for i in offered:
-		var def: Resource = run_controller.shop.get_item_def(i)
-		var price: int = run_controller.shop.get_discounted_price(i)
+		var def: Resource = run_controller.merchant_shop.get_item_def(i)
+		var price: int = run_controller.merchant_shop.get_discounted_price(i)
 		# Row: name + bonuses | Buy button.
 		var row: HBoxContainer = HBoxContainer.new()
 		row.add_theme_constant_override("separation", 12)
@@ -190,7 +190,7 @@ func _on_buy_pressed(slot: int) -> void:
 		# Re-check if we can still afford remaining items by re-rendering buttons.
 		for btn in _item_buttons:
 			var i: int = btn.name.trim_prefix("BuyItem_").to_int()
-			var price: int = run_controller.shop.get_discounted_price(i)
+			var price: int = run_controller.merchant_shop.get_discounted_price(i)
 			btn.disabled = run_controller.state.gold < price or run_controller.inventory_count() >= 12
 
 

@@ -9,6 +9,8 @@ const MetaProfileScript = preload("res://core/progression/meta_profile.gd")
 const SaveService = preload("res://core/save/save_service.gd")
 const RngScript = preload("res://core/utils/rng_service.gd")
 
+signal run_requested(seed: int)
+
 var _profile: MetaProfileScript = null
 var _new_run_button: Button = null
 var _continue_button: Button = null
@@ -200,18 +202,4 @@ func _refresh_speed_buttons() -> void:
 
 
 func _start_battle_scene(seed: int) -> void:
-    var tree: SceneTree = Engine.get_main_loop() as SceneTree
-    if tree == null:
-        return
-    var packed: PackedScene = load("res://scenes/battle/battle_scene.tscn") as PackedScene
-    if packed == null:
-        push_error("Failed to load battle_scene.tscn")
-        return
-    packed.set_meta("initial_seed", seed)
-    var inst: Node = packed.instantiate()
-    var root: Node = tree.root
-    # Удаляем все дети root кроме autoload (autoloads имеют имя начинающееся с "@").
-    for child in root.get_children():
-        if not child.name.begins_with("@"):
-            child.queue_free()
-    root.add_child(inst)
+    run_requested.emit(seed)

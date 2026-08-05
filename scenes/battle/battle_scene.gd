@@ -223,7 +223,10 @@ func _find_event_bus() -> Node:
 func restart_with_seed(seed: int) -> void:
 	if run_controller != null:
 		run_controller.start_run(seed)
-	speed = 1.0
+	if run_controller != null and run_controller.profile != null:
+		speed = run_controller.profile.battle_speed
+	_refresh_hud()
+	_refresh_status()
 
 
 func _process(delta: float) -> void:
@@ -427,7 +430,12 @@ func _on_run_phase_changed(new_phase: int) -> void:
 			encounter_map_scene.visible = false
 	# Reward modal — видна на REWARD phase, скрыта иначе.
 	if reward_modal != null:
-		reward_modal.visible = (new_phase == RUN_CONTROLLER_SCRIPT.Phase.REWARD)
+		if new_phase == RUN_CONTROLLER_SCRIPT.Phase.REWARD:
+			# Direct ownership keeps Web UI valid even if EventBus delivery is delayed.
+			reward_modal.show_offer(run_controller.reward.offered_ids(), run_controller)
+			reward_modal.visible = true
+		else:
+			reward_modal.visible = false
 	# S7.2: PREP scene — also pass inventory_scene для equip wiring.
 	if prep_scene != null and inventory_scene != null:
 		prep_scene.set_inventory_scene(inventory_scene)

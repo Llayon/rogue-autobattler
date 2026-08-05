@@ -16,11 +16,13 @@ const GridScript = preload("res://core/battle/grid.gd")
 const BalanceScript = preload("res://core/balance.gd")
 const EncounterMapScript = preload("res://core/encounter/encounter_map.gd")
 const EncounterTypeScript = preload("res://core/encounter/encounter_type.gd")
+const ShopScreenScript = preload("res://core/progression/shop_screen.gd")
 # S5.4: RunUnitState имеет class_name — ссылаемся напрямую, без const.
 # const RunUnitStateScript = preload("res://core/progression/run_unit_state.gd")
 
 var state: RunState = RunState.new()
 var shop: Shop = Shop.new()
+var merchant_shop = ShopScreenScript.new()
 var reward: RewardScreen = RewardScreen.new()
 var ctx: BattleContext = null
 var runner: BattleRunner = null
@@ -256,13 +258,13 @@ func get_unit_bonus_stats(board_idx: int) -> Dictionary:
 ## S7.4: покупает item из текущего shop offer (с MAP_MERCHANT_DISCOUNT).
 ## Возвращает true если успешно.
 func buy_item(slot: int) -> bool:
-	var offered: int = shop.get_offered_count()
+	var offered: int = merchant_shop.get_offered_count()
 	if slot < 0 or slot >= offered:
 		return false
-	var id: StringName = shop.get_item_id(slot)
+	var id: StringName = merchant_shop.get_item_id(slot)
 	if id == &"":
 		return false
-	var price: int = shop.get_discounted_price(slot)
+	var price: int = merchant_shop.get_discounted_price(slot)
 	if state.gold < price:
 		GameLog.warn("run", "Shop buy: not enough gold",
 			{"gold": state.gold, "price": price})
@@ -689,12 +691,12 @@ func _pick_random_item_id() -> StringName:
 	return ids[idx] if idx >= 0 else &""
 
 
-## MERCHANT: переходит в PREP (shop уже обновлён в _refresh_shop).
+## MERCHANT: переходит в PREP с отдельным item offer.
 func _apply_merchant_effect() -> void:
 	GameLog.info("run", "MERCHANT: shop opened")
 	state.just_visited_merchant = true
+	_refresh_merchant_shop()
 	_set_phase(Phase.PREP)
-	_refresh_shop()
 
 
 ## REST: heal all + +1 attack всем юнитам игрока (permanent на ран).
@@ -805,6 +807,10 @@ func _enter_map() -> void:
 
 func _refresh_shop() -> void:
 	shop.refresh(profile.unlocked_units)
+
+
+func _refresh_merchant_shop() -> void:
+	merchant_shop.refresh()
 
 
 func _spawn_enemy_wave(round_index: int) -> Array:

@@ -161,8 +161,8 @@ func show_offer(unit_ids: Array, run_controller: Node) -> void:
 		var bench_size: int = _run_controller.state.bench_unit_ids.size()
 		no_room = (board_size >= BalanceScript.MAX_BOARD_UNITS and
 			bench_size >= BalanceScript.MAX_BENCH_UNITS)
-	if no_room and _skip_button != null:
-		_skip_button.text = "Skip — bench & board full"
+	if _skip_button != null:
+		_skip_button.text = "Skip — bench & board full" if no_room else "Skip (SPACE)"
 	for i in _buttons.size():
 		var btn: Button = _buttons[i]
 		if i < unit_ids.size():
@@ -187,23 +187,25 @@ func show_offer(unit_ids: Array, run_controller: Node) -> void:
 
 
 func _on_choice_pressed(slot: int) -> void:
-	print("[reward_modal] _on_choice_pressed slot=", slot, " run_controller=", _run_controller)
 	if _run_controller == null:
 		return
-	var phase: int = _run_controller.phase
-	var offered_id: StringName = &""
-	if slot >= 0 and slot < _buttons.size():
-		offered_id = _buttons[slot].text.split("\n")[0] if _buttons[slot].text.length() > 0 else &""
-	print("[reward_modal]   phase=", phase, " offered[slot]=", offered_id)
-	_run_controller.choose_reward(slot)
-	visible = false
-	print("[reward_modal]   after choose_reward phase=", _run_controller.phase)
+	var chosen: Resource = _run_controller.choose_reward(slot)
+	if chosen != null:
+		visible = false
 
 
 func _on_skip_pressed() -> void:
-	print("[reward_modal] _on_skip_pressed run_controller=", _run_controller)
 	if _run_controller == null:
 		return
-	_run_controller.skip_reward()
-	visible = false
-	print("[reward_modal]   after skip_reward phase=", _run_controller.phase)
+	if _run_controller.skip_reward():
+		visible = false
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if not visible or _run_controller == null:
+		return
+	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_SPACE:
+		_on_skip_pressed()
+		var viewport: Viewport = get_viewport()
+		if viewport != null:
+			viewport.set_input_as_handled()

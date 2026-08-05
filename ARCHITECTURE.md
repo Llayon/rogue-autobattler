@@ -204,6 +204,8 @@ class_name UnitDef extends Resource
 ## 9. Экономика и мета
 
 - **Золото** — покупки в магазине между раундами. Получается за раунды, серии побед, проигрыши (как в TFT).
+- **Unit shop** (`RunController.shop`) — предложения юнитов для найма между боями.
+- **Merchant shop** (`RunController.merchant_shop`) — отдельные предложения предметов для MERCHANT encounter; API двух магазинов не смешиваются.
 - **XP / Level** — сколько юнитов можно ставить на доску.
 - **Интерес-кривая** — стоимость юнитов, тиры, синергии (отложено в v2).
 - **Мета-профиль:** постоянный `MetaProfile` с разблокировками, статистикой, настройками. Сохраняется отдельно от рана.
@@ -231,6 +233,12 @@ class_name UnitDef extends Resource
 | `SaveManager`| Чтение/запись сейвов с миграциями                |
 
 Все autoload — это `Node`-обёртки над чистыми классами (которые лежат в `core/utils/` и тестируются отдельно).
+
+### UI lifecycle в Web build
+
+- `RootScene` — полноэкранный `Control`, владеющий `MainMenu` и лениво создаваемым `BattleScene`.
+- `MainMenu` только эмитит `run_requested(seed)`; scene-код не удаляет детей `/root`, поэтому autoload-узлы сохраняются весь runtime.
+- При входе в `REWARD` `BattleScene` передаёт offer и `RunController` в `RewardModal` напрямую. `EventBus.reward_offered` остаётся дополнительным уведомлением, а не единственным источником UI-state.
 
 ---
 

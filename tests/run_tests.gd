@@ -61,6 +61,8 @@ const RunControllerScript = preload("res://core/progression/run_controller.gd")
 const RunStateScript = preload("res://core/progression/run_state.gd")
 const MetaProfileScript = preload("res://core/progression/meta_profile.gd")
 const MainMenuScript = preload("res://scenes/main_menu/main_menu.gd")
+const RootSceneScript = preload("res://scenes/root/root_scene.gd")
+const RewardModalScript = preload("res://scenes/reward/reward_modal.gd")
 const SaveSvcScript = preload("res://core/utils/save_manager.gd")
 const BattleRunnerScriptForCtrl = preload("res://core/battle/battle_runner.gd")
 const BattleStateScriptForCtrl = preload("res://core/battle/battle_state.gd")
@@ -162,6 +164,9 @@ func _initialize() -> void:
 	_test_settings_persists_battle_speed()
 	_test_main_menu_continue_hidden_when_no_seed()
 	_test_main_menu_continue_visible_after_save()
+	_test_root_scene_is_full_rect_control()
+	_test_main_menu_routes_run_request_without_tree_replacement()
+	_test_reward_phase_populates_and_handles_actions_without_event_bus()
 	_test_dos_classify()
 	_test_dos_natural_crit()
 	_test_dos_damage_multiplier()
@@ -2343,7 +2348,7 @@ func _test_damage_dealt_signal_emits() -> void:
 	dmg_effect.variance = 0.0
 	dmg_effect.is_magic = false
 	var ability = AbilityDefScript.new()
-	ability.effects = [dmg_effect]
+	ability.effects.append(dmg_effect)
 	AbilityResolverScript.cast(ability, source, ctx2, target)
 	_assert(dmg_box[0] != null and dmg_box[0] > 0,
 		"damage_dealt signal emitted (got amount=%s)" % str(dmg_box[0]))
@@ -2963,7 +2968,8 @@ func _test_run_controller_merchant_node_effect() -> void:
 	var merchant_node = EncounterNodeScript.new(102, EncounterTypeScript.Kind.MERCHANT, 1)
 	ctrl._apply_service_effect(merchant_node)
 	_assert(ctrl.phase == RunControllerScript.Phase.PREP, "phase = PREP after MERCHANT (got %d)" % ctrl.phase)
-	_assert(ctrl.shop.get_offered_ids().size() > 0, "shop refreshed (offered_ids size %d)" % ctrl.shop.get_offered_ids().size())
+	_assert(ctrl.merchant_shop.get_offered_ids().size() > 0,
+		"merchant shop refreshed (offered_ids size %d)" % ctrl.merchant_shop.get_offered_ids().size())
 	_cleanup_ctrl(ctrl)
 
 
@@ -4060,8 +4066,9 @@ func _test_shop_screen_refresh_populates_offer() -> void:
 	get_root().add_child.call_deferred(ctrl)
 	await process_frame
 	ctrl.start_run(42)
-	ctrl.shop.refresh()
-	_assert(ctrl.shop.get_offered_count() == 3, "offer has 3 items (got %d)" % ctrl.shop.get_offered_count())
+	ctrl.merchant_shop.refresh()
+	_assert(ctrl.merchant_shop.get_offered_count() == 3,
+		"offer has 3 items (got %d)" % ctrl.merchant_shop.get_offered_count())
 	_cleanup_ctrl(ctrl)
 
 
@@ -4071,16 +4078,16 @@ func _test_shop_screen_discount_50_percent() -> void:
 	get_root().add_child.call_deferred(ctrl)
 	await process_frame
 	ctrl.start_run(42)
-	ctrl.shop.refresh()
+	ctrl.merchant_shop.refresh()
 	# Find item with known cost.
-	var expected_discount: float = ctrl.shop.get_discount()
+	var expected_discount: float = ctrl.merchant_shop.get_discount()
 	_assert(abs(expected_discount - 0.5) < 0.001, "discount = 0.5 (got %f)" % expected_discount)
 	# Check at least one slot has correct discounted price.
 	var checked: bool = false
-	for i in ctrl.shop.get_offered_count():
-		var id: StringName = ctrl.shop.get_item_id(i)
-		var def: Resource = ctrl.shop.get_item_def(i)
-		var price: int = ctrl.shop.get_discounted_price(i)
+	for i in ctrl.merchant_shop.get_offered_count():
+		var id: StringName = ctrl.merchant_shop.get_item_id(i)
+		var def: Resource = ctrl.merchant_shop.get_item_def(i)
+		var price: int = ctrl.merchant_shop.get_discounted_price(i)
 		if def != null:
 			_assert(price == int(round(float(def.cost) * 0.5)),
 				"slot %d price=%d (cost=%d)" % [i, price, def.cost])
@@ -4095,11 +4102,11 @@ func _test_run_controller_buy_item_grants_and_deducts() -> void:
 	get_root().add_child.call_deferred(ctrl)
 	await process_frame
 	ctrl.start_run(42)
-	ctrl.shop.refresh()
+	ctrl.merchant_shop.refresh()
 	var before_gold: int = ctrl.state.gold
 	var before_inv: int = ctrl.inventory_count()
 	var slot: int = 0
-	var price: int = ctrl.shop.get_discounted_price(slot)
+	var price: int = ctrl.merchant_shop.get_discounted_price(slot)
 	_assert(price > 0, "shop has positive price")
 	var ok: bool = ctrl.buy_item(slot)
 	_assert(ok, "buy_item returned true")
@@ -4114,7 +4121,7 @@ func _test_run_controller_buy_item_rejects_without_gold() -> void:
 	get_root().add_child.call_deferred(ctrl)
 	await process_frame
 	ctrl.start_run(42)
-	ctrl.shop.refresh()
+	ctrl.merchant_shop.refresh()
 	ctrl.state.gold = 0  # broke
 	var before_inv: int = ctrl.inventory_count()
 	var ok: bool = ctrl.buy_item(0)
@@ -4130,7 +4137,7 @@ func _test_run_controller_buy_item_rejects_full_inventory() -> void:
 	get_root().add_child.call_deferred(ctrl)
 	await process_frame
 	ctrl.start_run(42)
-	ctrl.shop.refresh()
+	ctrl.merchant_shop.refresh()
 	# Fill inv to MAX.
 	for i in 12:
 		ctrl.grant_item(&"potion_strength")
@@ -4146,7 +4153,7 @@ func _test_shop_scene_builds_three_buy_buttons() -> void:
 	get_root().add_child.call_deferred(ctrl)
 	await process_frame
 	ctrl.start_run(42)
-	ctrl.shop.refresh()
+	ctrl.merchant_shop.refresh()
 	var scene: Control = ShopSceneScript.new()
 	scene.set_run_controller(ctrl)
 	root.add_child.call_deferred(scene)
@@ -4158,7 +4165,7 @@ func _test_shop_scene_builds_three_buy_buttons() -> void:
 	var before_gold: int = ctrl.state.gold
 	btns[0].emit_signal("pressed")
 	await process_frame
-	_assert(ctrl.state.gold == before_gold - ctrl.shop.get_discounted_price(0),
+	_assert(ctrl.state.gold == before_gold - ctrl.merchant_shop.get_discounted_price(0),
 		"gold deducted after buy click")
 	_cleanup_ctrl(ctrl)
 	scene.queue_free()
@@ -4178,8 +4185,8 @@ func _test_battle_scene_has_shop_scene_overlay() -> void:
 		# Buy from shop.
 		var rc = scene.run_controller
 		rc.start_run(42)
-		rc.shop.set_discount(0.5)
-		rc.shop.refresh()
+		rc.merchant_shop.set_discount(0.5)
+		rc.merchant_shop.refresh()
 		var before_gold: int = rc.state.gold
 		var before_inv: int = rc.inventory_count()
 		scene.shop_scene.set_run_controller(rc)
@@ -4189,8 +4196,8 @@ func _test_battle_scene_has_shop_scene_overlay() -> void:
 		var ok: bool = rc.buy_item(0)
 		_assert(ok, "buy_item via run_controller returned true")
 		# Verify state updated.
-		_assert(rc.state.gold == before_gold - rc.shop.get_discounted_price(0),
-			"gold deducted (got %d expected %d)" % [rc.state.gold, before_gold - rc.shop.get_discounted_price(0)])
+		_assert(rc.state.gold == before_gold - rc.merchant_shop.get_discounted_price(0),
+			"gold deducted (got %d expected %d)" % [rc.state.gold, before_gold - rc.merchant_shop.get_discounted_price(0)])
 		_assert(rc.inventory_count() == before_inv + 1, "inventory grew")
 	scene.queue_free()
 	await process_frame
@@ -4268,3 +4275,89 @@ func _test_settings_persists_battle_speed() -> void:
 	_assert(loaded != null, "profile reloaded")
 	_assert(loaded.battle_speed == 4.0, "battle_speed persisted (got %s)" % str(loaded.battle_speed))
 
+
+func _test_root_scene_is_full_rect_control() -> void:
+	print("[test] Web UI: RootScene is a full-rect Control")
+	var packed: PackedScene = load("res://scenes/root/root_scene.tscn") as PackedScene
+	var scene: Node = packed.instantiate() if packed != null else null
+	_assert(scene is Control, "RootScene uses Control layout under the viewport")
+	if scene != null:
+		scene.free()
+
+
+func _test_main_menu_routes_run_request_without_tree_replacement() -> void:
+	print("[test] Web UI: MainMenu emits run_requested without replacing /root")
+	var menu: Control = MainMenuScript.new()
+	_assert(menu.has_signal("run_requested"), "MainMenu exposes run_requested(seed)")
+	if not menu.has_signal("run_requested"):
+		menu.free()
+		return
+	var received_seed: Array[int] = [0]
+	menu.connect("run_requested", func(seed: int) -> void: received_seed[0] = seed)
+	menu._start_battle_scene(24680)
+	_assert(received_seed[0] == 24680, "MainMenu routes seed through RootScene signal")
+	menu.free()
+	var root_scene: Control = RootSceneScript.new()
+	root_scene._ready()
+	var routed_menu: Control = root_scene.get_main_menu()
+	routed_menu._start_battle_scene(86420)
+	_assert(root_scene.get_current_view() == "battle", "RootScene switches to battle view")
+	_assert(root_scene.get_battle_scene() != null, "RootScene lazily creates BattleScene")
+	_assert(not routed_menu.visible, "RootScene hides MainMenu without replacing /root")
+	root_scene.free()
+
+
+func _test_reward_phase_populates_and_handles_actions_without_event_bus() -> void:
+	print("[test] Web UI: reward phase owns data and actions without EventBus delivery")
+	var ctrl: Node = RunControllerScript.new()
+	ctrl.profile = MetaProfileScript.new()
+	ctrl.state = RunStateScript.new()
+	ctrl.state.seed = 13579
+	ctrl.state.gold = BalanceScript.STARTING_GOLD
+	ctrl.phase = RunControllerScript.Phase.REWARD
+	Rng.seed_run(ctrl.state.seed)
+	ctrl.reward.generate_offer(ctrl.state.round_index)
+	var modal: Control = RewardModalScript.new()
+	modal._ready()
+	var battle_scene: Control = BattleSceneScript.new()
+	battle_scene.run_controller = ctrl
+	battle_scene.reward_modal = modal
+	battle_scene._on_run_phase_changed(RunControllerScript.Phase.REWARD)
+	_assert(modal._run_controller == ctrl, "reward modal receives RunController directly")
+	_assert(not modal._buttons.is_empty() and modal._buttons[0].text != "",
+		"reward choice contains unit information")
+	var board_before: int = ctrl.state.player_unit_ids.size()
+	modal._buttons[0].emit_signal("pressed")
+	_assert(ctrl.state.player_unit_ids.size() == board_before + 1,
+		"reward choice adds selected unit")
+	_assert(ctrl.phase != RunControllerScript.Phase.REWARD,
+		"reward choice leaves REWARD phase")
+
+	var skip_ctrl: Node = RunControllerScript.new()
+	skip_ctrl.profile = MetaProfileScript.new()
+	skip_ctrl.state = RunStateScript.new()
+	skip_ctrl.state.seed = 97531
+	skip_ctrl.phase = RunControllerScript.Phase.REWARD
+	var skip_modal: Control = RewardModalScript.new()
+	skip_modal._ready()
+	var skip_scene: Control = BattleSceneScript.new()
+	skip_scene.run_controller = skip_ctrl
+	skip_scene.reward_modal = skip_modal
+	skip_scene._on_run_phase_changed(RunControllerScript.Phase.REWARD)
+	skip_modal._skip_button.emit_signal("pressed")
+	_assert(skip_ctrl.phase != RunControllerScript.Phase.REWARD,
+		"reward skip leaves REWARD phase")
+	skip_ctrl.phase = RunControllerScript.Phase.REWARD
+	skip_modal.visible = true
+	var space_event: InputEventKey = InputEventKey.new()
+	space_event.keycode = KEY_SPACE
+	space_event.pressed = true
+	skip_modal._unhandled_input(space_event)
+	_assert(skip_ctrl.phase != RunControllerScript.Phase.REWARD,
+		"SPACE skips reward")
+	modal.free()
+	battle_scene.free()
+	ctrl.free()
+	skip_modal.free()
+	skip_scene.free()
+	skip_ctrl.free()
