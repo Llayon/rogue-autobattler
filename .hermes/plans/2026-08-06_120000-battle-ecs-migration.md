@@ -593,7 +593,7 @@ Limit failures return diagnostic result with trace chain; they do not recurse in
 
 **System rules:**
 
-- State-changing operations are queued as commands/events. Pure query/resolver/helper objects may be called directly. A system must not directly mutate a component owned by another state-changing phase.
+- State-changing systems do not directly invoke other state-changing systems. Pure resolvers, queries, calculators and validators may be called directly. Cross-phase state mutations pass through commands/events.
 - Use explicit phase order per tick: input/commands → gauge → AI/targeting → movement → attacks → damage → death → victory.
 - Dead entities cannot submit or execute actions.
 - Target tie-break: distance, then position, then numeric entity ID.
@@ -774,9 +774,22 @@ Architectural deviation: `BattlePresenter` belongs under `scenes/battle`, not `c
 
 ---
 
-### P6-T2: Integrate RunUnit and RunItem into BattleSetupFactory and BattleResultApplier
+### P6-T2: Integrate Run Domain with BattleSimulation
 
-**Objective:** Wire the existing `RunUnit`/`RunItem` instance identity (created in Phase 1) into the Run Domain integration layer without re-implementing identity.
+**Objective:** Wire Run Domain to the selected `BattleSimulation` backend without exposing internal world/components.
+
+**Flow:**
+
+```text
+RunUnit/RunItem
+→ BattleSetupFactory
+→ selected BattleSimulation backend
+→ BattleResult
+→ BattleResultApplier
+→ RunValidator
+→ one atomic save
+→ UI notification
+```
 
 **Files:**
 - Create: `core/progression/battle_setup_factory.gd`
@@ -786,43 +799,16 @@ Architectural deviation: `BattlePresenter` belongs under `scenes/battle`, not `c
 
 Rules:
 
-- Use `RunUnit.instance_id: String` (stable across persistence and migrations) and `RunItem.instance_id: String`. Use `StringName` only for `definition_id`, `status_id`, tags and event types.
+- Use `String` (or `int`) for unique `instance_id`. Use `StringName` only for `definition_id`, `status_id`, tags and event types. `instance_id` и `definition_id` не смешивать.
 - `BattleSetupFactory` consumes ordered `RunUnit`s and produces `BattleSetup` + `BattleUnitSetup`; it must copy `instance_id` verbatim and never derive identity from index, position or `definition_id`.
 - `BattleResultApplier` consumes `BattleResult`, applies HP/rewards/round transitions and writes back through existing per-unit state.
+- `RunValidator` rejects duplicate `instance_id`s and undefined `definition_id` references.
+- Run Domain sees only `BattleSetup`, `BattleResult`, `RunUnit`, `RunItem`; it must not import `BattleWorld` or component types.
+- No intermediate save before result application; one atomic save after `RunValidator` accepts the result.
 - Do not duplicate `SaveManager`, migrator, validator or RNG contract work from Phase 1.
 - No new battle simulation code in this task.
 
-**Commit:** `feat(progression): wire run unit and item instances into battle integration`
-
----
-
-### P6-T3: Convert RunState → BattleSetup → BattleResult → RunState
-
-**Objective:** Integrate ECS without exposing internal world/components to Run Domain.
-
-**Files:**
-- Modify: `core/progression/run_controller.gd`
-- Create: `core/progression/battle_setup_factory.gd` or a pure adapter near Run Domain
-- Create: `core/progression/battle_result_applier.gd`
-- Tests: `tests/integration/run_battle_integration_test.gd`
-
-Flow:
-
-```text
-RunUnit/RunItem
-→ BattleSetupFactory
-→ BattleSimulation backend
-→ BattleResult
-→ BattleResultApplier
-→ HP/rewards/round/phase
-→ RunValidator
-→ one atomic save
-→ UI notification
-```
-
-No intermediate save before result application. Run Domain sees only `BattleSetup`, `BattleResult`, `RunUnit`, `RunItem`; it must not import `BattleWorld` or component types. Preserve existing reward/shop/map behavior and save semantics.
-
-**Commit:** `feat(progression): apply battle results through backend contract`
+**Commit:** `feat(progression): integrate run domain with battle simulation`
 
 ---
 
@@ -934,7 +920,7 @@ Record average/max tick time, events per tick, max chain depth, stat recomputes,
 Preconditions before deletion:
 
 - ECS backend is default and used by RunController.
-- All golden scenarios pass through ECS and legacy parity is documented.
+- All normative BattleSimulation contract scenarios pass through ECS. Legacy characterization scenarios remain legacy-only regression tests. Selected characterization scenarios may be projected into explicitly approved normative invariants, but ECS must not reproduce undocumented legacy quirks.
 - No production caller imports legacy backend.
 - UI consumes only `BattleEvent[]`/presenter APIs.
 - Run Domain has no ECS imports.
@@ -969,12 +955,16 @@ The migration is complete only when:
 
 - A battle runs headlessly without a scene.
 - UI receives logical events through `BattlePresenter` only.
-- Same setup and seed produce identical event trace/hash.
+- Within one backend, the same setup and seed produce the same backend-local normative trace/hash.
+- Across legacy and ECS, only explicitly approved normative invariants must match.
+- Backend-local trace hashes are not compared across different backends.
+- All normative BattleSimulation contract scenarios pass through ECS.
+- Legacy characterization scenarios remain legacy-only regression tests. Selected characterization scenarios may be projected into explicitly approved normative invariants, but ECS must not reproduce undocumented legacy quirks.
 - A normal new status is data-driven and does not require central system edits.
 - A new archetype is composition, not a central unit-ID branch.
 - Equal classes have independent instance IDs and state.
 - Items belong to unit instances.
 - Reaction chains have parent/root trace and hard limits.
 - Run Domain does not depend on ECS internals.
-- Legacy backend is no longer used by production, with removal justified by parity evidence.
+- Legacy backend is no longer used by production, with removal justified by normative-invariants parity evidence.
 - Golden, content validation, determinism, integration and headless tests are CI gates before Web export/deploy.
