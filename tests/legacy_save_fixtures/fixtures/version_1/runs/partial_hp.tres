@@ -1,0 +1,14 @@
+[gd_resource type="Resource" script_class="RunState" format=3]
+
+[ext_resource type="Script" path="res://core/progression/run_state.gd" id="1_04ait"]
+
+[resource]
+script = ExtResource("1_04ait")
+version = 1
+seed = 9005
+round_index = 5
+gold = 5
+player_unit_ids = Array[StringName]([&"warrior", &"archer"])
+unit_states = [Object(RefCounted,"script":Resource("res://core/progression/run_unit_state.gd"),"unit_id":&"warrior","current_hp":33,"max_hp":100,"bonus_attack":0)
+, Object(RefCounted,"script":Resource("res://core/progression/run_unit_state.gd"),"unit_id":&"archer","current_hp":12,"max_hp":70,"bonus_attack":0)
+]

@@ -1,0 +1,17 @@
+[gd_resource type="Resource" script_class="RunState" format=3]
+
+[ext_resource type="Script" path="res://core/progression/run_state.gd" id="1_0dj7n"]
+
+[resource]
+script = ExtResource("1_0dj7n")
+version = 1
+seed = 9003
+round_index = 3
+gold = 22
+player_unit_ids = Array[StringName]([&"warrior", &"archer"])
+bench_unit_ids = Array[StringName]([&"cleric", &"mage"])
+unit_states = [Object(RefCounted,"script":Resource("res://core/progression/run_unit_state.gd"),"unit_id":&"warrior","current_hp":200,"max_hp":200,"bonus_attack":0)
+, Object(RefCounted,"script":Resource("res://core/progression/run_unit_state.gd"),"unit_id":&"archer","current_hp":70,"max_hp":70,"bonus_attack":0)
+, Object(RefCounted,"script":Resource("res://core/progression/run_unit_state.gd"),"unit_id":&"cleric","current_hp":90,"max_hp":90,"bonus_attack":0)
+, Object(RefCounted,"script":Resource("res://core/progression/run_unit_state.gd"),"unit_id":&"mage","current_hp":90,"max_hp":90,"bonus_attack":0)
+]

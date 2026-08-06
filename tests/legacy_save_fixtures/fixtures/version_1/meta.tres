@@ -1,0 +1,15 @@
+[gd_resource type="Resource" script_class="MetaProfile" format=3]
+
+[ext_resource type="Script" path="res://core/progression/meta_profile.gd" id="1_6hg5w"]
+
+[resource]
+script = ExtResource("1_6hg5w")
+unlocked_units = Array[StringName]([&"warrior", &"archer", &"cleric", &"goblin"])
+unlocked_enemies = Array[StringName]([&"goblin", &"goblin_archer", &"orc_warrior"])
+total_runs = 7
+total_wins = 3
+best_round = 5
+total_units_killed = 41
+soul_currency = 25
+current_run_seed = 9005
+battle_speed = 2.0
