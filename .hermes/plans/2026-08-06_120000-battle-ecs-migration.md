@@ -669,7 +669,11 @@ Required tests:
 - cyclic reaction terminates at `MAX_CHAIN_DEPTH`/reaction limit with diagnostic trace;
 - shield block, counterattack, attack of opportunity and on-death effects preserve parent/root IDs;
 - trigger order is stable when multiple statuses subscribe to the same event;
-- no system directly calls another system.
+- coupling: state-changing systems do not directly invoke other state-changing systems; pure resolvers, queries, calculators and validators may be called directly; cross-phase state mutations pass through commands/events.
+
+
+
+**Cross-cutting coupling rule (applies to every system):** state-changing systems do not directly invoke other state-changing systems. Pure resolvers, queries, calculators and validators may be called directly. Cross-phase state mutations pass through commands/events.
 
 **Commit:** `feat(triggers): add bounded reaction dispatcher`
 
