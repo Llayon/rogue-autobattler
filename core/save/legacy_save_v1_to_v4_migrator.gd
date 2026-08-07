@@ -1,0 +1,426 @@
+class_name LegacySaveV1ToV4Migrator extends RefCounted
+## Pure, in-memory migrator from the legacy on-disk v1 run shape
+## (`RunState` with `unit_states` as embedded
+## `Object(RefCounted,...)` blocks) to the v4 DTO defined by
+## `SaveSchemaV4`.
+##
+## Inputs: a `RunState` resource loaded from the production
+## save path, or any `Dictionary` that structurally matches the
+## legacy v1 shape.
+##
+## Outputs: a `Dictionary` matching the v4 DTO, plus diagnostics.
+##
+## This migrator never writes to `user://`. It does not modify the
+## source. It never throws for expected validation failures; an
+## invalid equip index or a missing state row produces a diagnostic
+## and a predictable fallback.
+
+const ID_FORMAT_UNIT: String = "unit_%06d"
+const ID_FORMAT_ITEM: String = "item_%06d"
+const SOURCE_SCHEMA: int = 1
+const TARGET_SCHEMA: int = 4
+const CODE_UNIT_STATES_COUNT_MISMATCH: String = "unit_states_count_mismatch"
+const CODE_ITEM_EQUIP_BOARD_IDX_OUT_OF_RANGE: String = "item_equip_board_idx_out_of_range"
+const CODE_ITEM_EQUIP_BOARD_IDX_NOT_INT: String = "item_equip_board_idx_not_int"
+const CODE_ITEM_EQUIP_BOARD_IDX_NEGATIVE: String = "item_equip_board_idx_negative"
+const CODE_SOURCE_NOT_LEGACY: String = "source_not_legacy_v1"
+
+
+## Returns a `MigrationResult` Dictionary with the following keys:
+##   success: bool
+##   data: Dictionary (v4 DTO when success==true; empty otherwise)
+##   diagnostics: Array[RefCounted]
+##   source_schema: int
+##   target_schema: int
+static func migrate_run(source: Variant) -> Dictionary:
+	var result: Dictionary = _empty_result()
+	if source == null:
+		_add(result, MigrationDiagnostic.error(CODE_SOURCE_NOT_LEGACY, "source is null", ""))
+		return result
+	# Source may be a RunState resource or a plain Dictionary that
+	# structurally matches the legacy v1 shape.
+	var src: Dictionary = _read_source(source)
+	if src.is_empty():
+		_add(result, MigrationDiagnostic.error(CODE_SOURCE_NOT_LEGACY, "source is not legacy v1", ""))
+		return result
+	var player_unit_ids: Array = src.get("player_unit_ids", [])
+	var bench_unit_ids: Array = src.get("bench_unit_ids", [])
+	var unit_states: Array = src.get("unit_states", [])
+	var item_ids: Array = src.get("item_ids", [])
+	var item_equip_board_idx: Array = src.get("item_equip_board_idx", [])
+
+	# Build deterministic ordered unit list: board, then bench.
+	var ordered_definitions: Array = []
+	for id in player_unit_ids:
+		ordered_definitions.append({"definition_id": id, "location": 0})
+	for id in bench_unit_ids:
+		ordered_definitions.append({"definition_id": id, "location": 1})
+
+	# Validate unit_states length.
+	if unit_states.size() != ordered_definitions.size():
+		_add(result, MigrationDiagnostic.warning(
+			CODE_UNIT_STATES_COUNT_MISMATCH,
+			"expected %d unit_states, got %d" % [ordered_definitions.size(), unit_states.size()],
+			""))
+
+	var v4: Dictionary = SaveSchemaV4.empty_dto()
+	v4["run_id"] = "run_%d" % int(src.get("seed", 0))
+	v4["seed"] = int(src.get("seed", 0))
+	v4["round_index"] = int(src.get("round_index", 1))
+	v4["gold"] = int(src.get("gold", 0))
+	v4["wins"] = int(src.get("wins", 0))
+	v4["losses"] = int(src.get("losses", 0))
+	v4["units_killed"] = int(src.get("units_killed", 0))
+	v4["lives"] = int(src.get("lives", 0))
+	v4["xp"] = int(src.get("xp", 0))
+	v4["level"] = int(src.get("level", 0))
+	v4["current_encounter_id"] = int(src.get("current_encounter_id", -1))
+	v4["just_visited_merchant"] = bool(src.get("just_visited_merchant", false))
+	var phase_visited: Array = src.get("encounter_visited_ids", [])
+	if phase_visited is Array:
+		v4["encounter_visited_ids"] = (phase_visited as Array).duplicate()
+	var meta_modifiers: Variant = src.get("meta_modifiers", {})
+	if meta_modifiers is Dictionary:
+		v4["meta_modifiers"] = (meta_modifiers as Dictionary).duplicate()
+	# Phase is a runtime-only field in the legacy save. We surface
+	# "prep" by default; the production repository task is the one
+	# that sources it from RunController.
+	v4["phase"] = "prep"
+
+	# Build units.
+	var units: Array = []
+	var unit_id_to_instance: Dictionary = {}
+	var next_unit_seq: int = 1
+	var board_order: int = 0
+	var bench_order: int = 0
+	for i in ordered_definitions.size():
+		var definition_id: StringName = StringName(String(ordered_definitions[i]["definition_id"]))
+		var location: int = int(ordered_definitions[i]["location"])
+		var order: int = board_order if location == 0 else bench_order
+		if location == 0:
+			board_order += 1
+		else:
+			bench_order += 1
+		var instance_id: String = ID_FORMAT_UNIT % next_unit_seq
+		next_unit_seq += 1
+		var state: Dictionary = _read_unit_state(unit_states, i, result, definition_id)
+		var u: Dictionary = {
+			"instance_id": instance_id,
+			"definition_id": definition_id,
+			"current_hp": int(state.get("current_hp", -1)),
+			"max_hp": int(state.get("max_hp", -1)),
+			"bonus_attack": int(state.get("bonus_attack", 0)),
+			"dead": _is_dead(state),
+			"location": location,
+			"order": order,
+			"equipped_item_ids": [] as Array,
+		}
+		units.append(u)
+		unit_id_to_instance[String(definition_id) + "@" + str(i)] = instance_id
+	v4["units"] = units
+	v4["next_unit_instance_seq"] = next_unit_seq - 1
+
+	# Build items in source order.
+	var items: Array = []
+	var next_item_seq: int = 1
+	var board_units: Array = []
+	for u in units:
+		if int(u.get("location", -1)) == 0:
+			board_units.append(u)
+	for i in item_ids.size():
+		var item_def: StringName = StringName(String(item_ids[i]))
+		var instance_id: String = ID_FORMAT_ITEM % next_item_seq
+		next_item_seq += 1
+		var owner: String = ""
+		if i < item_equip_board_idx.size():
+			var raw_idx: Variant = item_equip_board_idx[i]
+			if typeof(raw_idx) != TYPE_INT:
+				_add(result, MigrationDiagnostic.warning(
+					CODE_ITEM_EQUIP_BOARD_IDX_NOT_INT,
+					"item_equip_board_idx is not an int",
+					str(i)))
+			else:
+				var idx: int = int(raw_idx)
+				if idx < 0:
+					owner = ""
+				elif idx < board_units.size():
+					owner = String(board_units[idx].get("instance_id", ""))
+					(board_units[idx]["equipped_item_ids"] as Array).append(instance_id)
+				else:
+					_add(result, MigrationDiagnostic.warning(
+						CODE_ITEM_EQUIP_BOARD_IDX_OUT_OF_RANGE,
+						"item_equip_board_idx %d out of range" % idx,
+						str(idx)))
+					owner = ""
+		var item_record: Dictionary = {
+			"instance_id": instance_id,
+			"definition_id": item_def,
+			"owner_unit_id": owner,
+		}
+		items.append(item_record)
+	v4["items"] = items
+	v4["next_item_instance_seq"] = next_item_seq - 1
+
+	result["data"] = v4
+	result["success"] = true
+	result["source_schema"] = SOURCE_SCHEMA
+	result["target_schema"] = TARGET_SCHEMA
+	return result
+
+
+## Serialize a v4 DTO into a canonical Dictionary. The output is
+## the only byte-faithful wire form. The input must already satisfy
+## `SaveSchemaV4.is_v4_dto`; missing keys are emitted as zero values.
+static func serialize(data: Dictionary) -> Dictionary:
+	var out: Dictionary = {}
+	for key in SaveSchemaV4.TOP_LEVEL_KEYS:
+		if data.has(key):
+			out[key] = _clone_value(data[key])
+		else:
+			out[key] = _zero_for(key)
+	return out
+
+
+## Deserialize a previously serialized v4 DTO. Defensive: missing
+## keys are filled with zero values; extra keys are dropped.
+static func deserialize(serialized: Dictionary) -> Dictionary:
+	var out: Dictionary = {}
+	for key in SaveSchemaV4.TOP_LEVEL_KEYS:
+		if serialized.has(key):
+			out[key] = _clone_value(serialized[key])
+		else:
+			out[key] = _zero_for(key)
+	return out
+
+
+## Returns a canonical encoding of a v4 DTO with all keys in
+## `SaveSchemaV4.TOP_LEVEL_KEYS` order and nested values cloned
+## so callers can hash without aliasing.
+static func canonicalize(data: Dictionary) -> Dictionary:
+	return serialize(data)
+
+
+## Validates a v4 DTO. Returns `{success: bool, diagnostics:
+## Array[RefCounted]}`. The validator never mutates the input.
+static func validate(data: Dictionary) -> Dictionary:
+	var result: Dictionary = {
+		"success": true,
+		"diagnostics": [] as Array,
+	}
+	if not SaveSchemaV4.is_v4_dto(data):
+		result["success"] = false
+		var d: RefCounted = MigrationDiagnostic.error("not_v4_dto", "data does not satisfy SaveSchemaV4.is_v4_dto", "")
+		result["diagnostics"].append(d)
+		return result
+
+	# Unit checks
+	var units: Array = data.get("units", [])
+	var unit_instance_to_idx: Dictionary = {}
+	for i in units.size():
+		var u: Dictionary = units[i]
+		var instance_id: String = String(u.get("instance_id", ""))
+		if instance_id == "":
+			result["success"] = false
+			result["diagnostics"].append(MigrationDiagnostic.error(
+				"empty_unit_instance_id", "unit[%d] has empty instance_id" % i, str(i)))
+		if unit_instance_to_idx.has(instance_id):
+			result["success"] = false
+			result["diagnostics"].append(MigrationDiagnostic.error(
+				"duplicate_unit_instance_id",
+				"duplicate unit instance_id %s" % instance_id,
+				instance_id))
+		unit_instance_to_idx[instance_id] = i
+
+	# Item checks
+	var items: Array = data.get("items", [])
+	var item_instance_to_idx: Dictionary = {}
+	for i in items.size():
+		var it: Dictionary = items[i]
+		var instance_id: String = String(it.get("instance_id", ""))
+		if instance_id == "":
+			result["success"] = false
+			result["diagnostics"].append(MigrationDiagnostic.error(
+				"empty_item_instance_id", "item[%d] has empty instance_id" % i, str(i)))
+		if item_instance_to_idx.has(instance_id):
+			result["success"] = false
+			result["diagnostics"].append(MigrationDiagnostic.error(
+				"duplicate_item_instance_id",
+				"duplicate item instance_id %s" % instance_id,
+				instance_id))
+		item_instance_to_idx[instance_id] = i
+		var owner: String = String(it.get("owner_unit_id", ""))
+		if owner != "" and not unit_instance_to_idx.has(owner):
+			result["success"] = false
+			result["diagnostics"].append(MigrationDiagnostic.error(
+				"unknown_item_owner",
+				"item %s owner %s does not exist" % [instance_id, owner],
+				instance_id))
+
+	# Inconsistent equip: item points to unit, unit does not list item.
+	for i in items.size():
+		var it: Dictionary = items[i]
+		var instance_id: String = String(it.get("instance_id", ""))
+		var owner: String = String(it.get("owner_unit_id", ""))
+		if owner != "":
+			if not unit_instance_to_idx.has(owner):
+				continue  # already flagged
+			var u_idx: int = int(unit_instance_to_idx[owner])
+			var u: Dictionary = units[u_idx]
+			var equipped: Array = u.get("equipped_item_ids", [])
+			if not equipped.has(instance_id):
+				result["success"] = false
+				result["diagnostics"].append(MigrationDiagnostic.error(
+					"inconsistent_equip",
+					"item %s owned by %s but unit does not list it" % [instance_id, owner],
+					instance_id))
+
+	# HP range: current_hp must be -1 (sentinel) or in [0, max_hp].
+	for i in units.size():
+		var u: Dictionary = units[i]
+		var current_hp: int = int(u.get("current_hp", 0))
+		var max_hp: int = int(u.get("max_hp", 0))
+		if current_hp != -1 and (current_hp < 0 or current_hp > max_hp):
+			result["success"] = false
+			result["diagnostics"].append(MigrationDiagnostic.error(
+				"hp_out_of_range",
+				"unit %s current_hp %d out of [0,%d]" % [u.get("instance_id", ""), current_hp, max_hp],
+				String(u.get("instance_id", ""))))
+
+	# next_unit_instance_seq / next_item_instance_seq must be >= the
+	# max sequence used.
+	var max_unit_seq: int = 0
+	for u in units:
+		var seq: int = _seq_from_instance_id(String(u.get("instance_id", "")), "unit_")
+		if seq > max_unit_seq:
+			max_unit_seq = seq
+	var max_item_seq: int = 0
+	for it in items:
+		var seq2: int = _seq_from_instance_id(String(it.get("instance_id", "")), "item_")
+		if seq2 > max_item_seq:
+			max_item_seq = seq2
+	if int(data.get("next_unit_instance_seq", 0)) < max_unit_seq:
+		result["success"] = false
+		result["diagnostics"].append(MigrationDiagnostic.error(
+			"next_unit_instance_seq_too_small",
+			"next_unit_instance_seq %d < max used %d" % [int(data.get("next_unit_instance_seq", 0)), max_unit_seq],
+			str(max_unit_seq)))
+	if int(data.get("next_item_instance_seq", 0)) < max_item_seq:
+		result["success"] = false
+		result["diagnostics"].append(MigrationDiagnostic.error(
+			"next_item_instance_seq_too_small",
+			"next_item_instance_seq %d < max used %d" % [int(data.get("next_item_instance_seq", 0)), max_item_seq],
+			str(max_item_seq)))
+
+	return result
+
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
+
+static func _empty_result() -> Dictionary:
+	return {
+		"success": false,
+		"data": {},
+		"diagnostics": [] as Array,
+		"source_schema": SOURCE_SCHEMA,
+		"target_schema": TARGET_SCHEMA,
+	}
+
+
+static func _add(result: Dictionary, diagnostic: RefCounted) -> void:
+	if diagnostic != null:
+		result["diagnostics"].append(diagnostic)
+
+
+static func _read_source(source: Variant) -> Dictionary:
+	if source is Dictionary:
+		if source.has("player_unit_ids") and source.has("unit_states") and source.has("item_ids"):
+			return source
+		return {}
+	if source is Resource:
+		var d: Dictionary = {}
+		for key in [
+			"version", "seed", "round_index", "gold", "xp", "level", "lives",
+			"player_unit_ids", "bench_unit_ids", "item_ids", "item_equip_board_idx",
+			"just_visited_merchant", "wins", "losses", "units_killed",
+			"current_encounter_id", "encounter_visited_ids", "meta_modifiers",
+			"unit_states",
+		]:
+			if key in source:
+				d[key] = source.get(key)
+		return d
+	return {}
+
+
+static func _read_unit_state(unit_states: Array, ordered_index: int, result: Dictionary, definition_id: StringName) -> Dictionary:
+	if ordered_index >= unit_states.size():
+		return {}
+	var s: Variant = unit_states[ordered_index]
+	if s is Dictionary:
+		return s
+	# Legacy .tres files embed `Object(RefCounted,...)` blocks.
+	# RunUnitState is a RefCounted (not a Resource), so check both.
+	if s is Resource or (s != null and s is RefCounted):
+		var d: Dictionary = {}
+		for key in ["unit_id", "current_hp", "max_hp", "bonus_attack"]:
+			if key in s:
+				d[key] = s.get(key)
+		return d
+	return {}
+
+
+static func _is_dead(state: Dictionary) -> bool:
+	var current_hp: int = int(state.get("current_hp", -1))
+	var max_hp: int = int(state.get("max_hp", -1))
+	if current_hp == 0 and max_hp == 0:
+		return false
+	if current_hp == -1:
+		return false
+	return current_hp <= 0
+
+
+static func _clone_value(value: Variant) -> Variant:
+	if value is Array:
+		return (value as Array).duplicate(true)
+	if value is Dictionary:
+		return (value as Dictionary).duplicate(true)
+	return value
+
+
+static func _zero_for(key: String) -> Variant:
+	match key:
+		"schema_version": return TARGET_SCHEMA
+		"game_build": return ""
+		"run_id": return ""
+		"seed": return 0
+		"round_index": return 1
+		"phase": return "prep"
+		"gold": return 0
+		"units": return [] as Array
+		"items": return [] as Array
+		"next_unit_instance_seq": return 0
+		"next_item_instance_seq": return 0
+		"shop": return {}
+		"map": return {}
+		"rewards": return {}
+		"wins": return 0
+		"losses": return 0
+		"units_killed": return 0
+		"lives": return 0
+		"xp": return 0
+		"level": return 0
+		"current_encounter_id": return -1
+		"encounter_visited_ids": return [] as Array
+		"meta_modifiers": return {}
+		"just_visited_merchant": return false
+		_: return null
+
+
+static func _seq_from_instance_id(instance_id: String, prefix: String) -> int:
+	if not instance_id.begins_with(prefix):
+		return 0
+	var rest: String = instance_id.substr(prefix.length(), instance_id.length() - prefix.length())
+	if not rest.is_valid_int():
+		return 0
+	return int(rest)
