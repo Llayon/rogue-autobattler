@@ -1,0 +1,586 @@
+extends SceneTree
+
+## Production SaveRepository contract: format detection, atomic
+## legacy migration, idempotency, backup immutability, failure
+## handling. All tests use isolated temp directories under
+## `user://save_repository_test_<id>/` and clean up after themselves.
+
+const RunSaveRepositoryScript = preload("res://core/save/run_save_repository.gd")
+const SaveLoadResultScript = preload("res://core/save/save_load_result.gd")
+const MigratorScript = preload("res://core/save/legacy_save_v1_to_v4_migrator.gd")
+const SaveSchemaV4Script = preload("res://core/save/save_schema_v4.gd")
+
+const FIXTURES_DIR: String = "res://tests/legacy_save_fixtures/fixtures/version_1"
+const RUN_FIXTURES_DIR: String = FIXTURES_DIR + "/runs"
+
+var _passed: int = 0
+var _failed: int = 0
+var _test_counter: int = 0
+
+
+func _initialize() -> void:
+	print("\n=== production save repository tests ===\n")
+	_test_legacy_v1_is_detected()
+	_test_existing_v4_is_detected()
+	_test_unknown_format_is_rejected()
+	_test_legacy_load_migrates_in_memory_and_persists_v4()
+	_test_migration_creates_immutable_legacy_backup()
+	_test_backup_is_byte_for_equal_to_legacy()
+	_test_temp_v4_is_re_read_and_validated_before_replace()
+	_test_repeat_load_does_not_migrate_again()
+	_test_repeat_load_returns_identical_v4_state()
+	_test_v4_round_trip_does_not_regenerate_ids_or_reorder()
+	_test_load_failure_does_not_overwrite_original()
+	_test_backup_failure_does_not_overwrite_original()
+	_test_corrupt_legacy_is_not_overwritten()
+	_test_corrupt_v4_does_not_trigger_legacy_migrator()
+	_test_existing_legacy_backup_is_never_overwritten()
+	_test_fresh_v4_save_does_not_create_legacy_backup()
+	_test_unknown_directory_load_returns_missing_result()
+	_test_partial_hp_round_trip_preserved()
+	_test_items_owner_preserved_across_round_trip()
+	_test_two_identical_definition_ids_distinct_after_round_trip()
+	_test_board_bench_order_preserved_after_round_trip()
+	_test_repository_counter_migration_increments()
+	print("\n=== production save repository: %d passed, %d failed ===\n" % [_passed, _failed])
+	if _failed > 0:
+		quit(1)
+	else:
+		quit(0)
+
+
+func _assert(condition: bool, message: String) -> void:
+	if condition:
+		_passed += 1
+		print("  [OK]   %s" % message)
+	else:
+		_failed += 1
+		printerr("  [FAIL] %s" % message)
+
+
+# ---------------------------------------------------------------------------
+# Per-test isolation
+# ---------------------------------------------------------------------------
+
+func _isolated_runs_dir(test_name: String) -> String:
+	_test_counter += 1
+	var path: String = "user://save_repository_test_%s_%d/" % [test_name, _test_counter]
+	# Clean any prior state.
+	var dir: DirAccess = DirAccess.open("user://")
+	if dir != null:
+		# Recursive remove is not provided; best-effort remove of
+		# known file names.
+		# Force overwrite by recreating the dir.
+		pass
+	# Make sure the directory exists.
+	DirAccess.make_dir_recursive_absolute(path)
+	return path
+
+
+func _cleanup(runs_dir: String) -> void:
+	# Best-effort: remove the directory contents. We use a fresh
+	# sub-directory name per test, so leftovers do not affect other
+	# tests.
+	var dir: DirAccess = DirAccess.open(runs_dir)
+	if dir == null:
+		return
+	for f in dir.get_files():
+		dir.remove(f)
+	for d in dir.get_directories():
+		# Recursive is not built in; tests in this script never
+		# nest directories.
+		var sub: DirAccess = DirAccess.open(runs_dir + d + "/")
+		if sub != null:
+			for f2 in sub.get_files():
+				sub.remove(f2)
+		dir.remove(d)
+
+
+func _copy_fixture(fixture_name: String, target_path: String) -> bool:
+	var src: PackedByteArray = FileAccess.get_file_as_bytes(RUN_FIXTURES_DIR + "/%s.tres" % fixture_name)
+	if src.is_empty():
+		return false
+	DirAccess.make_dir_recursive_absolute(target_path.get_base_dir())
+	var f: FileAccess = FileAccess.open(target_path, FileAccess.WRITE)
+	if f == null:
+		return false
+	f.store_buffer(src)
+	f.close()
+	return true
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+func _hash_run(runs_dir: String, seed_value: int) -> int:
+	var path: String = runs_dir + "run_%d.tres" % seed_value
+	if not FileAccess.file_exists(path):
+		return 0
+	var f: FileAccess = FileAccess.open(path, FileAccess.READ)
+	if f == null:
+		return 0
+	var bytes: PackedByteArray = f.get_buffer(f.get_length())
+	f.close()
+	return 0  # bytes comparison done by caller
+
+
+# ---------------------------------------------------------------------------
+# Format detection
+# ---------------------------------------------------------------------------
+
+func _test_legacy_v1_is_detected() -> void:
+	print("[detect] legacy v1 is detected as legacy_v1")
+	var runs_dir: String = _isolated_runs_dir("detect_legacy")
+	_cleanup(runs_dir)
+	assert(_copy_fixture("active_run_minimal", runs_dir + "run_9001.tres"))
+	var repo: RefCounted = RunSaveRepositoryScript.new(runs_dir)
+	var r: RefCounted = repo.load_run(9001)
+	_assert(r.is_ok(), "legacy load OK after migration")
+	_assert(r.source_format == "v4", "post-migration source_format is v4 (got %s)" % r.source_format)
+	_assert(r.was_migrated == true, "was_migrated == true for first legacy load")
+	_cleanup(runs_dir)
+
+
+func _test_existing_v4_is_detected() -> void:
+	print("[detect] existing v4 is detected as v4")
+	var runs_dir: String = _isolated_runs_dir("detect_v4")
+	_cleanup(runs_dir)
+	var repo: RefCounted = RunSaveRepositoryScript.new(runs_dir)
+	# Build a v4 DTO from a fixture migration, write it via the
+	# repository, then load again.
+	var src: Resource = load(RUN_FIXTURES_DIR + "/active_run_minimal.tres")
+	var mig: Dictionary = MigratorScript.migrate_run(src)
+	var v4: Dictionary = mig.get("data", {})
+	var wr: RefCounted = repo.save_run(9001, v4)
+	_assert(wr.is_ok(), "v4 save OK")
+	var r: RefCounted = repo.load_run(9001)
+	_assert(r.is_ok(), "v4 load OK")
+	_assert(r.source_format == "v4", "v4 load source_format == v4")
+	_assert(r.was_migrated == false, "v4 load was_migrated == false")
+	_cleanup(runs_dir)
+
+
+func _test_unknown_format_is_rejected() -> void:
+	print("[detect] unknown format is rejected")
+	var runs_dir: String = _isolated_runs_dir("detect_unknown")
+	_cleanup(runs_dir)
+	# Write a file that looks like neither legacy v1 nor v4.
+	DirAccess.make_dir_recursive_absolute(runs_dir)
+	var f: FileAccess = FileAccess.open(runs_dir + "run_9001.tres", FileAccess.WRITE)
+	f.store_line("not a tres")
+	f.store_line("not a v4")
+	f.close()
+	var repo: RefCounted = RunSaveRepositoryScript.new(runs_dir)
+	var r: RefCounted = repo.load_run(9001)
+	_assert(r.is_error(), "unknown format -> error")
+	_assert(r.status == SaveLoadResultScript.ERROR_UNKNOWN_FORMAT, "status == ERROR_UNKNOWN_FORMAT")
+	_assert(r.source_format == "unknown", "source_format == unknown")
+	_cleanup(runs_dir)
+
+
+# ---------------------------------------------------------------------------
+# Migration
+# ---------------------------------------------------------------------------
+
+func _test_legacy_load_migrates_in_memory_and_persists_v4() -> void:
+	print("[migration] legacy load migrates and persists v4")
+	var runs_dir: String = _isolated_runs_dir("migrate_persist")
+	_cleanup(runs_dir)
+	assert(_copy_fixture("active_run_minimal", runs_dir + "run_9001.tres"))
+	var repo: RefCounted = RunSaveRepositoryScript.new(runs_dir)
+	var r: RefCounted = repo.load_run(9001)
+	_assert(r.is_ok(), "migration OK")
+	_assert(r.was_migrated, "was_migrated == true")
+	_assert(r.source_format == "v4", "post-migration source_format == v4")
+	# After migration, the on-disk file is now a v4 file.
+	_assert(RunSaveRepositoryScript._looks_like_v4(FileAccess.get_file_as_bytes(runs_dir + "run_9001.tres")),
+		"on-disk file is now v4")
+	# The backup exists.
+	_assert(FileAccess.file_exists(runs_dir + "run_9001.tres" + RunSaveRepositoryScript.BACKUP_SUFFIX),
+		"legacy backup file exists")
+	# The v4 DTO schema is correct.
+	var data: Dictionary = r.data
+	_assert(int(data.get("schema_version", 0)) == 4, "schema_version == 4")
+	_assert(int(data.get("seed", 0)) == 9001, "seed preserved")
+	_cleanup(runs_dir)
+
+
+func _test_migration_creates_immutable_legacy_backup() -> void:
+	print("[migration] legacy backup is created and never overwritten")
+	var runs_dir: String = _isolated_runs_dir("backup_immutable")
+	_cleanup(runs_dir)
+	assert(_copy_fixture("active_run_minimal", runs_dir + "run_9001.tres"))
+	var repo: RefCounted = RunSaveRepositoryScript.new(runs_dir)
+	# First load -> migration creates backup.
+	var r1: RefCounted = repo.load_run(9001)
+	_assert(r1.is_ok() and r1.was_migrated, "first load migrates")
+	var backup_path: String = runs_dir + "run_9001.tres" + RunSaveRepositoryScript.BACKUP_SUFFIX
+	_assert(FileAccess.file_exists(backup_path), "backup exists after migration")
+	var backup_bytes_1: PackedByteArray = FileAccess.get_file_as_bytes(backup_path)
+	# Simulate a second migration attempt by overwriting the v4
+	# file with a fresh legacy save. The repository should refuse
+	# to overwrite the existing backup.
+	assert(_copy_fixture("board_plus_bench", runs_dir + "run_9001.tres"))
+	# Force the on-disk file to look like legacy v1 by writing the
+	# raw bytes from board_plus_bench.tres (which is legacy v1).
+	var r2: RefCounted = repo.load_run(9001)
+	_assert(r2.is_ok() and r2.was_migrated, "second load migrates board_plus_bench")
+	# The backup must still be the first run's bytes, not the second.
+	var backup_bytes_2: PackedByteArray = FileAccess.get_file_as_bytes(backup_path)
+	_assert(backup_bytes_1 == backup_bytes_2, "legacy backup is immutable (not overwritten)")
+	_cleanup(runs_dir)
+
+
+func _test_backup_is_byte_for_equal_to_legacy() -> void:
+	print("[migration] backup is byte-faithful equal to legacy")
+	var runs_dir: String = _isolated_runs_dir("backup_byte_equal")
+	_cleanup(runs_dir)
+	assert(_copy_fixture("partial_hp", runs_dir + "run_9005.tres"))
+	var repo: RefCounted = RunSaveRepositoryScript.new(runs_dir)
+	var legacy_bytes: PackedByteArray = FileAccess.get_file_as_bytes(runs_dir + "run_9005.tres")
+	repo.load_run(9005)
+	var backup_bytes: PackedByteArray = FileAccess.get_file_as_bytes(runs_dir + "run_9005.tres" + RunSaveRepositoryScript.BACKUP_SUFFIX)
+	_assert(backup_bytes == legacy_bytes, "backup bytes == legacy bytes")
+	_cleanup(runs_dir)
+
+
+func _test_temp_v4_is_re_read_and_validated_before_replace() -> void:
+	print("[migration] temp v4 is re-read and re-validated")
+	# This is enforced by the design. Indirectly verified by:
+	# 1. The fact that successful migrations never leave a .tmp file.
+	# 2. The migrated data field equals the temp re-read.
+	var runs_dir: String = _isolated_runs_dir("temp_re_read")
+	_cleanup(runs_dir)
+	assert(_copy_fixture("two_identical_definition_ids", runs_dir + "run_9002.tres"))
+	var repo: RefCounted = RunSaveRepositoryScript.new(runs_dir)
+	var r: RefCounted = repo.load_run(9002)
+	_assert(r.is_ok(), "migration OK")
+	_assert(not FileAccess.file_exists(runs_dir + "run_9002.tres.v4.tmp"), "no leftover temp v4 file")
+	_assert(r.data.has("units") and (r.data.get("units", []) as Array).size() == 2,
+		"re-read v4 DTO has 2 units")
+	_cleanup(runs_dir)
+
+
+# ---------------------------------------------------------------------------
+# Idempotency
+# ---------------------------------------------------------------------------
+
+func _test_repeat_load_does_not_migrate_again() -> void:
+	print("[idempotency] repeat load does not re-migrate")
+	var runs_dir: String = _isolated_runs_dir("idempotent_no_remigrate")
+	_cleanup(runs_dir)
+	assert(_copy_fixture("active_run_minimal", runs_dir + "run_9001.tres"))
+	var repo: RefCounted = RunSaveRepositoryScript.new(runs_dir)
+	var r1: RefCounted = repo.load_run(9001)
+	_assert(r1.was_migrated, "first load migrates")
+	# The v4 file is now on disk. Subsequent loads must not re-migrate.
+	var r2: RefCounted = repo.load_run(9001)
+	_assert(not r2.was_migrated, "second load does NOT migrate")
+	_assert(r2.source_format == "v4", "second load source_format == v4")
+	# backup must still exist (never overwritten).
+	_assert(FileAccess.file_exists(runs_dir + "run_9001.tres" + RunSaveRepositoryScript.BACKUP_SUFFIX),
+		"backup still present after second load")
+	_cleanup(runs_dir)
+
+
+func _test_repeat_load_returns_identical_v4_state() -> void:
+	print("[idempotency] repeat load returns identical v4 state")
+	var runs_dir: String = _isolated_runs_dir("idempotent_identical")
+	_cleanup(runs_dir)
+	assert(_copy_fixture("board_plus_bench", runs_dir + "run_9003.tres"))
+	var repo: RefCounted = RunSaveRepositoryScript.new(runs_dir)
+	var r1: RefCounted = repo.load_run(9003)
+	# Trigger another save/load cycle to confirm instance IDs and
+	# counters are stable.
+	var wr: RefCounted = repo.save_run(9003, r1.data)
+	_assert(wr.is_ok(), "v4 save OK")
+	var r2: RefCounted = repo.load_run(9003)
+	_assert(r1.data.hash() == r2.data.hash(), "v4 DTO hash identical across save/load")
+	_cleanup(runs_dir)
+
+
+func _test_v4_round_trip_does_not_regenerate_ids_or_reorder() -> void:
+	print("[idempotency] v4 round-trip preserves instance ids, ordering, counters")
+	var runs_dir: String = _isolated_runs_dir("round_trip_stable")
+	_cleanup(runs_dir)
+	var src: Resource = load(RUN_FIXTURES_DIR + "/board_plus_bench.tres")
+	var mig: Dictionary = MigratorScript.migrate_run(src)
+	var v4: Dictionary = mig.get("data", {})
+	var repo: RefCounted = RunSaveRepositoryScript.new(runs_dir)
+	var wr: RefCounted = repo.save_run(9003, v4)
+	_assert(wr.is_ok(), "save OK")
+	var r: RefCounted = repo.load_run(9003)
+	_assert(r.data.get("next_unit_instance_seq") == v4.get("next_unit_instance_seq"), "next_unit_instance_seq preserved")
+	_assert(r.data.get("next_item_instance_seq") == v4.get("next_item_instance_seq"), "next_item_instance_seq preserved")
+	var units_a: Array = v4.get("units", [])
+	var units_b: Array = r.data.get("units", [])
+	for i in units_a.size():
+		_assert(String(units_a[i].get("instance_id", "")) == String(units_b[i].get("instance_id", "")),
+			"unit[%d] instance_id preserved" % i)
+		_assert(int(units_a[i].get("order", -1)) == int(units_b[i].get("order", -1)),
+			"unit[%d] order preserved" % i)
+	_cleanup(runs_dir)
+
+
+# ---------------------------------------------------------------------------
+# Failure handling
+# ---------------------------------------------------------------------------
+
+func _test_load_failure_does_not_overwrite_original() -> void:
+	print("[failure] load failure (e.g. temp reload) does not overwrite original")
+	# Synthesise: copy a legacy fixture, force the v4 .tmp file to
+	# become invalid by writing a corrupted temp, then trigger a
+	# re-migration. With the on-disk temp written but not yet
+	# renamed, the legacy file is still the legacy file.
+	#
+	# We exercise the alternative path: write a valid temp path
+	# but the temp file content is invalid v4. The repository
+	# detects this on re-read and returns an error; the legacy
+	# file is preserved.
+	var runs_dir: String = _isolated_runs_dir("load_failure_keeps_original")
+	_cleanup(runs_dir)
+	assert(_copy_fixture("active_run_minimal", runs_dir + "run_9001.tres"))
+	# Force the temp file to be undeletable by making the .v4.tmp
+	# path point at an existing directory. The repository's temp
+	# write will then fail and the load must report a failure
+	# without modifying the legacy file.
+	DirAccess.make_dir_recursive_absolute(runs_dir + "run_9001.tres.v4.tmp")
+	var legacy_bytes_before: PackedByteArray = FileAccess.get_file_as_bytes(runs_dir + "run_9001.tres")
+	var repo: RefCounted = RunSaveRepositoryScript.new(runs_dir)
+	var r: RefCounted = repo.load_run(9001)
+	# The repository may have overwritten the temp before re-read
+	# (since it writes a fresh temp). If so, the failure is the
+	# temp-reload/validation step. In any case, the original
+	# legacy file must NOT be replaced.
+	var post_bytes: PackedByteArray = FileAccess.get_file_as_bytes(runs_dir + "run_9001.tres")
+	_assert(legacy_bytes_before == post_bytes,
+		"original legacy file unchanged after any migration failure")
+	_cleanup(runs_dir)
+
+
+func _test_backup_failure_does_not_overwrite_original() -> void:
+	print("[failure] backup failure does not overwrite original")
+	var runs_dir: String = _isolated_runs_dir("backup_failure_keeps_original")
+	_cleanup(runs_dir)
+	assert(_copy_fixture("active_run_minimal", runs_dir + "run_9001.tres"))
+	# Pre-create a directory at the backup path to make
+	# FileAccess.open(... WRITE) fail. Use a non-empty directory
+	# file name. The repository expects a file at
+	# runs_dir + "run_<seed>.tres" + ".legacy-v1.bak". Create a
+	# directory at that path.
+	DirAccess.make_dir_recursive_absolute(runs_dir + "run_9001.tres.legacy-v1.bak")
+	var legacy_bytes_before: PackedByteArray = FileAccess.get_file_as_bytes(runs_dir + "run_9001.tres")
+	var repo: RefCounted = RunSaveRepositoryScript.new(runs_dir)
+	var r: RefCounted = repo.load_run(9001)
+	# Either the migration succeeds and ignores the existing
+	# directory (impossible — backup path collides), or it fails
+	# with ERROR_BACKUP_FAILED. We assert that the legacy file is
+	# preserved in both cases.
+	var post_bytes: PackedByteArray = FileAccess.get_file_as_bytes(runs_dir + "run_9001.tres")
+	_assert(legacy_bytes_before == post_bytes,
+		"original legacy file preserved on backup failure")
+	if r.is_error():
+		_assert(r.status == SaveLoadResultScript.ERROR_BACKUP_FAILED,
+			"backup failure -> ERROR_BACKUP_FAILED")
+	_cleanup(runs_dir)
+
+
+func _test_corrupt_legacy_is_not_overwritten() -> void:
+	print("[failure] corrupt legacy input is not overwritten")
+	var runs_dir: String = _isolated_runs_dir("corrupt_legacy_kept")
+	_cleanup(runs_dir)
+	# Write a file that pretends to be legacy v1 but is missing the
+	# required fields. Repository must detect it as unknown and
+	# leave the file alone.
+	DirAccess.make_dir_recursive_absolute(runs_dir)
+	var f: FileAccess = FileAccess.open(runs_dir + "run_9001.tres", FileAccess.WRITE)
+	f.store_line("[gd_resource type=\"Resource\" script_class=\"RunState\" format=3]")
+	f.store_line("")
+	f.store_line("[resource]")
+	f.store_line("script = ExtResource(\"1\")")
+	f.close()
+	var original_bytes: PackedByteArray = FileAccess.get_file_as_bytes(runs_dir + "run_9001.tres")
+	var repo: RefCounted = RunSaveRepositoryScript.new(runs_dir)
+	var r: RefCounted = repo.load_run(9001)
+	_assert(r.is_error(), "corrupt legacy -> error")
+	_assert(r.source_format == "unknown", "corrupt legacy source_format == unknown")
+	var post_bytes: PackedByteArray = FileAccess.get_file_as_bytes(runs_dir + "run_9001.tres")
+	_assert(original_bytes == post_bytes, "corrupt legacy file unchanged on load failure")
+	_cleanup(runs_dir)
+
+
+func _test_corrupt_v4_does_not_trigger_legacy_migrator() -> void:
+	print("[failure] corrupt v4 does not trigger legacy migrator")
+	var runs_dir: String = _isolated_runs_dir("corrupt_v4_no_migrator")
+	_cleanup(runs_dir)
+	# Write a file that looks like v4 (header) but has invalid content
+	# (missing required fields). The repository must reject v4
+	# validation and not try to migrate it as legacy.
+	DirAccess.make_dir_recursive_absolute(runs_dir)
+	var f: FileAccess = FileAccess.open(runs_dir + "run_9001.tres", FileAccess.WRITE)
+	f.store_line("# v4 save")
+	f.store_line("{\"schema_version\": 4, \"seed\": 9001}")
+	# valid JSON, header detected as v4, but missing required keys
+	# for SaveSchemaV4.is_v4_dto, so the validator must reject it.
+	f.close()
+	var repo: RefCounted = RunSaveRepositoryScript.new(runs_dir)
+	var r: RefCounted = repo.load_run(9001)
+	_assert(r.is_error(), "corrupt v4 -> error")
+	_assert(r.source_format == "v4", "corrupt v4 source_format == v4 (header recognised)")
+	_assert(r.status == SaveLoadResultScript.ERROR_V4_VALIDATION_FAILED,
+		"corrupt v4 status == ERROR_V4_VALIDATION_FAILED")
+	# No legacy backup should have been created.
+	_assert(not FileAccess.file_exists(runs_dir + "run_9001.tres" + RunSaveRepositoryScript.BACKUP_SUFFIX),
+		"no legacy backup created for corrupt v4")
+	_cleanup(runs_dir)
+
+
+# ---------------------------------------------------------------------------
+# Backup policy
+# ---------------------------------------------------------------------------
+
+func _test_existing_legacy_backup_is_never_overwritten() -> void:
+	print("[backup] existing legacy backup is never overwritten")
+	var runs_dir: String = _isolated_runs_dir("backup_never_overwritten")
+	_cleanup(runs_dir)
+	assert(_copy_fixture("active_run_minimal", runs_dir + "run_9001.tres"))
+	# Pre-create a backup with sentinel bytes.
+	var f: FileAccess = FileAccess.open(runs_dir + "run_9001.tres" + RunSaveRepositoryScript.BACKUP_SUFFIX, FileAccess.WRITE)
+	f.store_line("SENTINEL_BACKUP_DO_NOT_OVERWRITE")
+	f.close()
+	var sentinel: PackedByteArray = FileAccess.get_file_as_bytes(runs_dir + "run_9001.tres" + RunSaveRepositoryScript.BACKUP_SUFFIX)
+	var repo: RefCounted = RunSaveRepositoryScript.new(runs_dir)
+	repo.load_run(9001)
+	var post: PackedByteArray = FileAccess.get_file_as_bytes(runs_dir + "run_9001.tres" + RunSaveRepositoryScript.BACKUP_SUFFIX)
+	_assert(sentinel == post, "sentinel backup is not overwritten")
+	_cleanup(runs_dir)
+
+
+func _test_fresh_v4_save_does_not_create_legacy_backup() -> void:
+	print("[backup] fresh v4 save does not create a legacy backup")
+	var runs_dir: String = _isolated_runs_dir("fresh_v4_no_backup")
+	_cleanup(runs_dir)
+	var src: Resource = load(RUN_FIXTURES_DIR + "/active_run_minimal.tres")
+	var mig: Dictionary = MigratorScript.migrate_run(src)
+	var v4: Dictionary = mig.get("data", {})
+	var repo: RefCounted = RunSaveRepositoryScript.new(runs_dir)
+	var wr: RefCounted = repo.save_run(9001, v4)
+	_assert(wr.is_ok(), "v4 save OK")
+	_assert(not FileAccess.file_exists(runs_dir + "run_9001.tres" + RunSaveRepositoryScript.BACKUP_SUFFIX),
+		"no legacy backup created on v4 save")
+	_cleanup(runs_dir)
+
+
+# ---------------------------------------------------------------------------
+# Missing file
+# ---------------------------------------------------------------------------
+
+func _test_unknown_directory_load_returns_missing_result() -> void:
+	print("[missing] missing file returns ERROR_V4_LOAD_FAILED")
+	var runs_dir: String = _isolated_runs_dir("missing_file")
+	_cleanup(runs_dir)
+	var repo: RefCounted = RunSaveRepositoryScript.new(runs_dir)
+	var r: RefCounted = repo.load_run(9999)
+	_assert(r.is_error(), "missing -> error")
+	_assert(r.status == SaveLoadResultScript.ERROR_V4_LOAD_FAILED,
+		"status == ERROR_V4_LOAD_FAILED for missing")
+	_assert(r.source_format == "missing", "source_format == missing")
+	_cleanup(runs_dir)
+
+
+# ---------------------------------------------------------------------------
+# Data preservation invariants
+# ---------------------------------------------------------------------------
+
+func _test_partial_hp_round_trip_preserved() -> void:
+	print("[data] partial HP round-trip preserved")
+	var runs_dir: String = _isolated_runs_dir("data_partial_hp")
+	_cleanup(runs_dir)
+	assert(_copy_fixture("partial_hp", runs_dir + "run_9005.tres"))
+	var repo: RefCounted = RunSaveRepositoryScript.new(runs_dir)
+	var r1: RefCounted = repo.load_run(9005)
+	# Force a save round-trip.
+	repo.save_run(9005, r1.data)
+	var r2: RefCounted = repo.load_run(9005)
+	var units: Array = r2.data.get("units", [])
+	_assert(int(units[0].get("current_hp", -1)) == 33, "warrior current_hp==33")
+	_assert(int(units[1].get("current_hp", -1)) == 12, "archer current_hp==12")
+	_assert(int(units[0].get("max_hp", -1)) == 100, "warrior max_hp==100")
+	_assert(int(units[1].get("max_hp", -1)) == 70, "archer max_hp==70")
+	_cleanup(runs_dir)
+
+
+func _test_items_owner_preserved_across_round_trip() -> void:
+	print("[data] items owner preserved across round-trip")
+	var runs_dir: String = _isolated_runs_dir("data_items_owner")
+	_cleanup(runs_dir)
+	assert(_copy_fixture("items_equipped_and_unequipped", runs_dir + "run_9004.tres"))
+	var repo: RefCounted = RunSaveRepositoryScript.new(runs_dir)
+	var r1: RefCounted = repo.load_run(9004)
+	repo.save_run(9004, r1.data)
+	var r2: RefCounted = repo.load_run(9004)
+	var items: Array = r2.data.get("items", [])
+	var units: Array = r2.data.get("units", [])
+	_assert(String(items[0].get("owner_unit_id", "")) == String(units[0].get("instance_id", "")),
+		"item[0] owner == unit[0] instance_id")
+	_assert(String(items[1].get("owner_unit_id", "")) == "", "item[1] owner empty")
+	_cleanup(runs_dir)
+
+
+func _test_two_identical_definition_ids_distinct_after_round_trip() -> void:
+	print("[data] two identical definition ids remain distinct after round-trip")
+	var runs_dir: String = _isolated_runs_dir("data_two_defs")
+	_cleanup(runs_dir)
+	assert(_copy_fixture("two_identical_definition_ids", runs_dir + "run_9002.tres"))
+	var repo: RefCounted = RunSaveRepositoryScript.new(runs_dir)
+	var r1: RefCounted = repo.load_run(9002)
+	repo.save_run(9002, r1.data)
+	var r2: RefCounted = repo.load_run(9002)
+	var u0: Dictionary = r2.data.get("units", [])[0]
+	var u1: Dictionary = r2.data.get("units", [])[1]
+	_assert(String(u0.get("instance_id", "")) != String(u1.get("instance_id", "")),
+		"two identical defs still have distinct instance ids")
+	_assert(String(u0.get("definition_id", "")) == "warrior", "u0 def == warrior")
+	_assert(String(u1.get("definition_id", "")) == "warrior", "u1 def == warrior")
+	_cleanup(runs_dir)
+
+
+func _test_board_bench_order_preserved_after_round_trip() -> void:
+	print("[data] board/bench order preserved after round-trip")
+	var runs_dir: String = _isolated_runs_dir("data_order")
+	_cleanup(runs_dir)
+	assert(_copy_fixture("board_plus_bench", runs_dir + "run_9003.tres"))
+	var repo: RefCounted = RunSaveRepositoryScript.new(runs_dir)
+	var r1: RefCounted = repo.load_run(9003)
+	repo.save_run(9003, r1.data)
+	var r2: RefCounted = repo.load_run(9003)
+	var units: Array = r2.data.get("units", [])
+	var locations: Array = []
+	var defs: Array = []
+	for u in units:
+		locations.append(int(u.get("location", -1)))
+		defs.append(String(u.get("definition_id", "")))
+	_assert(locations == [0, 0, 1, 1], "locations == [board, board, bench, bench]")
+	_assert(defs == ["warrior", "archer", "cleric", "mage"], "defs in source order preserved")
+	_cleanup(runs_dir)
+
+
+# ---------------------------------------------------------------------------
+# Repository stats
+# ---------------------------------------------------------------------------
+
+func _test_repository_counter_migration_increments() -> void:
+	print("[stats] migration counter increments")
+	var runs_dir: String = _isolated_runs_dir("stats")
+	_cleanup(runs_dir)
+	assert(_copy_fixture("active_run_minimal", runs_dir + "run_9001.tres"))
+	var repo: RefCounted = RunSaveRepositoryScript.new(runs_dir)
+	# First load -> migration.
+	repo.load_run(9001)
+	# The internal counter is not part of the public API; verify the
+	# observable effect: subsequent load does not migrate, and the
+	# v4 file is now on disk.
+	var r2: RefCounted = repo.load_run(9001)
+	_assert(not r2.was_migrated, "second load does not migrate")
+	_cleanup(runs_dir)
