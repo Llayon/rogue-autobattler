@@ -331,23 +331,24 @@ This phase is deliberately before `BattleSetup`. It is not executable in the cur
 
 Use `String` or `int` for unique `instance_id`; use `StringName` only for `definition_id`. IDs are allocated by a run-scoped allocator and serialized explicitly. Never derive an ID from board index, bench index, cell, definition ID or array order. Two equal definitions must receive distinct IDs and preserve their state across board/bench swaps.
 
-### P1-T2: Save Schema v4 serializer/deserializer and validation
+### P1-T2: Production SaveRepository and atomic migration (deferred)
 
-**Objective:** Add an explicit, backward-compatible save contract before any BattleSetup can consume run state.
+**Objective:** Wire the in-memory migrator to a new `SaveRepository` API and replace legacy `.tres` files with atomic writes. **Not in this work order.** Requires separate approval before any user save is touched.
 
-**Files:**
-- Create: `core/save/save_schema_v4.gd`
-- Create: `core/save/save_serializer_v4.gd`
-- Create: `core/save/save_deserializer_v4.gd`
-- Create: `core/save/save_validator.gd`
-- Create: `core/save/save_migrator_v3_to_v4.gd`
-- Create: `tests/integration/save_schema_v4_test.gd`
-- Create: `tests/integration/fixtures/save_v3_*.json`
+**Files (deferred):**
+- Create: `core/save/save_repository.gd`
+- Modify: `core/save/save_service.gd`
+- Modify: `core/progression/run_controller.gd`
 - Modify: `core/utils/save_manager.gd`
+- Test: `tests/save_schema_v4/repository_integration_test.gd`
 
-Required behavior: schema version field; v3 fixture migration; round-trip serializer/deserializer; duplicate/missing instance ID validation; reference validation; atomic temp-file write followed by replace; rollback/failed-write leaves the previous save readable and unchanged. Do not mix battle simulation changes into this task.
+Atomic replace uses `user://saves/runs/<seed>.tmp` followed by rename. Failed replace leaves the prior file intact and emits a `MigrationResult` with `success == false`. Until this task is approved and merged, the production `SaveService` keeps reading the legacy format and the migrator is only invoked from tests.
 
-### P1-T3: Freeze the simulation-scoped RNG contract
+**Commit (deferred):** `feat(save): wire production save repository and atomic migration`
+
+---
+
+## P1-T3: Freeze the simulation-scoped RNG contract
 
 **Objective:** Define deterministic random ownership before BattleSetup or ECS code exists.
 
@@ -937,7 +938,9 @@ Do not mass-rename or mass-move files; remove only dead files proven by search a
 
 ---
 
-## Cross-cutting implementation rules
+## Cross-cutting implementation rules\n**Cross-cutting coupling rule (canonical):** state-changing systems do not directly invoke other state-changing systems. Pure resolvers, queries, calculators and validators may be called directly. Cross-phase state mutations pass through commands/events. This is the only accepted form of system coupling.
+
+
 
 1. Before every major phase, report current state, exact files to change, regression risk, commands to run, and known limitations.
 2. Every production behavior change follows strict RED → verify failure → minimal GREEN → verify targeted test → full suite → refactor.
