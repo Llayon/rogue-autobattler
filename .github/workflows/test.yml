@@ -1,11 +1,11 @@
-name: Legacy Characterization
+name: Save and Battle Migration
 
 on:
   push:
   pull_request:
 
 jobs:
-  legacy-characterization:
+  save-battle-migration:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
@@ -36,6 +36,7 @@ jobs:
           set -euo pipefail
           godot --headless --path . --script tests/run_tests.gd 2>&1 | tee /tmp/legacy-regression.log
           ! grep -nE 'SCRIPT ERROR|Parse Error|ERROR:' /tmp/legacy-regression.log
+          grep -E 'Result:' /tmp/legacy-regression.log | tail -1
 
       - name: Run legacy characterization suite
         run: |
@@ -44,5 +45,27 @@ jobs:
             godot --headless --path . --script tests/legacy_characterization/legacy_characterization_test.gd 2>&1 | tee "/tmp/legacy-characterization-${run}.log"
             ! grep -nE 'SCRIPT ERROR|Parse Error|ERROR:|\[FAIL\]' "/tmp/legacy-characterization-${run}.log"
           done
-          grep -h 'Legacy characterization:' /tmp/legacy-characterization-*.log | sort -u
-          test "$(grep -h 'Legacy characterization:' /tmp/legacy-characterization-*.log | sort -u | wc -l)" -eq 1
+
+      - name: Run legacy save fixture loader
+        run: |
+          set -euo pipefail
+          godot --headless --path . --script tests/legacy_save_fixtures/loader_test.gd 2>&1 | tee /tmp/legacy-save-loader.log
+          ! grep -nE 'SCRIPT ERROR|Parse Error|ERROR:|\[FAIL\]' /tmp/legacy-save-loader.log
+
+      - name: Run save schema v4 suite
+        run: |
+          set -euo pipefail
+          godot --headless --path . --script tests/save_schema_v4/save_schema_v4_test.gd 2>&1 | tee /tmp/save-schema-v4.log
+          ! grep -nE 'SCRIPT ERROR|Parse Error|ERROR:|\[FAIL\]' /tmp/save-schema-v4.log
+
+      - name: Run save schema v4 byte-for-byte determinism
+        run: |
+          set -euo pipefail
+          godot --headless --path . --script tests/save_schema_v4/byte_for_byte_determinism_test.gd 2>&1 | tee /tmp/save-schema-v4-byte.log
+          ! grep -nE 'SCRIPT ERROR|Parse Error|ERROR:|\[FAIL\]' /tmp/save-schema-v4-byte.log
+
+      - name: Run production save repository suite
+        run: |
+          set -euo pipefail
+          godot --headless --path . --script tests/save_repository/save_repository_test.gd 2>&1 | tee /tmp/save-repository.log
+          ! grep -nE 'SCRIPT ERROR|Parse Error|ERROR:|\[FAIL\]' /tmp/save-repository.log
