@@ -29,9 +29,14 @@ var order: int = 0
 var equipped_item_ids: Array[String] = []
 
 
-## Returns `true` if the unit is alive in the run (HP > 0 and not
-## marked dead). Mirrors the legacy `RunUnitState.is_alive()`.
+## Returns `true` if the unit is alive in the run. The canonical
+## sentinel `current_hp == -1` means "use max_hp" and is alive
+## unless `dead` is set. `current_hp == 0` is not alive.
+## `current_hp < -1` is invalid state and must be rejected by the
+## v4 validator; this method returns `false` for it.
 func is_alive() -> bool:
 	if dead:
 		return false
+	if current_hp == -1:
+		return true
 	return current_hp > 0
