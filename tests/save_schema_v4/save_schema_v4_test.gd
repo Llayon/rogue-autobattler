@@ -304,21 +304,36 @@ func _test_canonical_key_order_is_independent_of_insertion_order() -> void:
 
 func _test_next_instance_seqs_after_migration() -> void:
 	print("[migration] next_unit_instance_seq / next_item_instance_seq")
-	# active_run_minimal: 2 board units, no items -> seq 2 / 0
+	# next_*_instance_seq is the FIRST UNUSED sequence (max_used + 1).
+	# active_run_minimal: 2 board units, no items -> unit_seq 3 / item_seq 1
 	var r1: Dictionary = _migrate_run("active_run_minimal")
 	var d1: Dictionary = r1.get("data", {})
-	_assert(int(d1.get("next_unit_instance_seq", -1)) == 2, "active: next_unit_instance_seq==2")
-	_assert(int(d1.get("next_item_instance_seq", -1)) == 0, "active: next_item_instance_seq==0")
-	# board_plus_bench: 4 units, no items -> seq 4 / 0
+	_assert(int(d1.get("next_unit_instance_seq", -1)) == 3, "active: next_unit_instance_seq==3 (first unused)")
+	_assert(int(d1.get("next_item_instance_seq", -1)) == 1, "active: next_item_instance_seq==1 (first unused)")
+	# board_plus_bench: 4 units, no items -> unit_seq 5 / item_seq 1
 	var r2: Dictionary = _migrate_run("board_plus_bench")
 	var d2: Dictionary = r2.get("data", {})
-	_assert(int(d2.get("next_unit_instance_seq", -1)) == 4, "board_plus_bench: next_unit_instance_seq==4")
-	_assert(int(d2.get("next_item_instance_seq", -1)) == 0, "board_plus_bench: next_item_instance_seq==0")
-	# items_equipped_and_unequipped: 1 unit, 2 items -> seq 1 / 2
+	_assert(int(d2.get("next_unit_instance_seq", -1)) == 5, "board_plus_bench: next_unit_instance_seq==5 (first unused)")
+	_assert(int(d2.get("next_item_instance_seq", -1)) == 1, "board_plus_bench: next_item_instance_seq==1 (first unused)")
+	# items_equipped_and_unequipped: 1 unit, 2 items -> unit_seq 2 / item_seq 3
 	var r3: Dictionary = _migrate_run("items_equipped_and_unequipped")
 	var d3: Dictionary = r3.get("data", {})
-	_assert(int(d3.get("next_unit_instance_seq", -1)) == 1, "items: next_unit_instance_seq==1")
-	_assert(int(d3.get("next_item_instance_seq", -1)) == 2, "items: next_item_instance_seq==2")
+	_assert(int(d3.get("next_unit_instance_seq", -1)) == 2, "items: next_unit_instance_seq==2 (first unused)")
+	_assert(int(d3.get("next_item_instance_seq", -1)) == 3, "items: next_item_instance_seq==3 (first unused)")
+
+
+func _test_empty_units_yields_next_one() -> void:
+	print("[migration] empty units + items yields next=1 for both")
+	# Synthetic minimal RunState with no units/items at all.
+	var src = RunStateScript.new()
+	src.player_unit_ids = []
+	src.bench_unit_ids = []
+	src.unit_states = []
+	src.item_ids = []
+	src.item_equip_board_idx = []
+	var r = Migrator.migrate_run(src)
+	_assert(int(r.data.next_unit_instance_seq) == 1, "empty: next_unit_instance_seq==1")
+	_assert(int(r.data.next_item_instance_seq) == 1, "empty: next_item_instance_seq==1")
 
 
 func _test_legacy_fixture_file_unchanged() -> void:

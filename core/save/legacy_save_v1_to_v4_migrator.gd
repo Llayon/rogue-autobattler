@@ -118,7 +118,8 @@ static func migrate_run(source: Variant) -> Dictionary:
 		units.append(u)
 		unit_id_to_instance[String(definition_id) + "@" + str(i)] = instance_id
 	v4["units"] = units
-	v4["next_unit_instance_seq"] = next_unit_seq - 1
+	# next_*_instance_seq is the FIRST UNUSED sequence (max_used + 1).
+	v4["next_unit_instance_seq"] = next_unit_seq
 
 	# Build items in source order.
 	var items: Array = []
@@ -159,7 +160,8 @@ static func migrate_run(source: Variant) -> Dictionary:
 		}
 		items.append(item_record)
 	v4["items"] = items
-	v4["next_item_instance_seq"] = next_item_seq - 1
+	# next_*_instance_seq is the FIRST UNUSED sequence (max_used + 1).
+	v4["next_item_instance_seq"] = next_item_seq
 
 	result["data"] = v4
 	result["success"] = true
@@ -298,16 +300,17 @@ static func validate(data: Dictionary) -> Dictionary:
 		var seq2: int = _seq_from_instance_id(String(it.get("instance_id", "")), "item_")
 		if seq2 > max_item_seq:
 			max_item_seq = seq2
-	if int(data.get("next_unit_instance_seq", 0)) < max_unit_seq:
+	# next_unit_instance_seq must be exactly max_used + 1 (first unused).
+	if int(data.get("next_unit_instance_seq", 0)) != max_unit_seq + 1:
 		result["success"] = false
 		result["diagnostics"].append(MigrationDiagnostic.error(
-			"next_unit_instance_seq_too_small",
-			"next_unit_instance_seq %d < max used %d" % [int(data.get("next_unit_instance_seq", 0)), max_unit_seq],
-			str(max_unit_seq)))
-	if int(data.get("next_item_instance_seq", 0)) < max_item_seq:
+			"next_unit_instance_seq_invalid",
+			"next_unit_instance_seq must be first unused sequence (expected %d, got %d)" % [max_unit_seq + 1, int(data.get("next_unit_instance_seq", 0))],
+			str(max_unit_seq + 1)))
+	if int(data.get("next_item_instance_seq", 0)) != max_item_seq + 1:
 		result["success"] = false
 		result["diagnostics"].append(MigrationDiagnostic.error(
-			"next_item_instance_seq_too_small",
+			"next_item_instance_seq_invalid",
 			"next_item_instance_seq %d < max used %d" % [int(data.get("next_item_instance_seq", 0)), max_item_seq],
 			str(max_item_seq)))
 
