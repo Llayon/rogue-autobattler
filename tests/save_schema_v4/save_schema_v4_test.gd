@@ -12,6 +12,7 @@ const RunStateScript = preload("res://core/progression/run_state.gd")
 const MetaProfileScript = preload("res://core/progression/meta_profile.gd")
 const SaveSvc = preload("res://core/utils/save_manager.gd")
 const Migrator = preload("res://core/save/legacy_save_v1_to_v4_migrator.gd")
+const RunSaveRepositoryScript = preload("res://core/save/run_save_repository.gd")
 
 const FIXTURE_DIR: String = "res://tests/legacy_save_fixtures/fixtures/version_1"
 const RUN_FIXTURE_DIR: String = FIXTURE_DIR + "/runs"
@@ -39,6 +40,18 @@ func _initialize() -> void:
 	_test_validator_rejects_unknown_item_owner()
 	_test_validator_rejects_inconsistent_equip_state()
 	_test_validator_rejects_duplicate_item_instance_id()
+	_test_is_v4_dto_unchanged_public_api()
+	_test_validate_shape_returns_dictionary()
+	_test_invalid_top_level_types_do_not_crash()
+	_test_current_hp_below_minus_one_rejected()
+	_test_unit_location_invalid_rejected()
+	_test_duplicate_unit_order_in_location_rejected()
+	_test_equipment_invariant_A_owner_set_unit_missing_item()
+	_test_equipment_invariant_B_unit_lists_empty_owner()
+	_test_equipment_invariant_C_same_item_two_units()
+	_test_equipment_invariant_D_unknown_item()
+	_test_equipment_invariant_E_duplicate_in_unit()
+	_test_save_seed_mismatch_rejected()
 	print("\n=== save schema v4 + migrator: %d passed, %d failed ===\n" % [_passed, _failed])
 	if _failed > 0:
 		quit(1)
@@ -444,3 +457,311 @@ func _test_validator_rejects_duplicate_item_instance_id() -> void:
 			found = true
 			break
 	_assert(found, "duplicate item id: diagnostic emitted")
+
+
+# ---------------------------------------------------------------------------
+# Task 6/7 — Defensive validator (H4) + bidirectional equipment (H5)
+# ---------------------------------------------------------------------------
+
+func _test_is_v4_dto_unchanged_public_api() -> void:
+	print("[validator] is_v4_dto() returns bool (H4 public API preserved)")
+	var valid: Dictionary = Migrator.canonicalize(_migrate_run("active_run_minimal").get("data", {}))
+	_assert(typeof(SaveSchemaV4.is_v4_dto(valid)) == TYPE_BOOL, "is_v4_dto() returns bool for valid DTO")
+	_assert(SaveSchemaV4.is_v4_dto(valid) == true, "is_v4_dto()=true for valid DTO")
+	_assert(SaveSchemaV4.is_v4_dto({}) == false, "is_v4_dto()=false for empty dict")
+	_assert(SaveSchemaV4.is_v4_dto("not a dict") == false, "is_v4_dto()=false for string")
+
+
+func _test_validate_shape_returns_dictionary() -> void:
+	print("[validator] validate_shape() returns {success, diagnostics}")
+	var valid: Dictionary = Migrator.canonicalize(_migrate_run("active_run_minimal").get("data", {}))
+	var r: Dictionary = SaveSchemaV4.validate_shape(valid)
+	_assert(r.has("success") and r.has("diagnostics"), "validate_shape has success and diagnostics keys")
+	_assert(bool(r.get("success", false)) == true, "validate_shape success=true for valid DTO")
+	var empty_r: Dictionary = SaveSchemaV4.validate_shape({})
+	_assert(bool(empty_r.get("success", true)) == false, "validate_shape success=false for empty")
+	var diags: Array = empty_r.get("diagnostics", [])
+	_assert(diags.size() > 0, "empty DTO produces diagnostics")
+
+
+func _test_invalid_top_level_types_do_not_crash() -> void:
+	print("[validator] invalid top-level types do not crash (H4 type-defensive)")
+	# Build a DTO where some top-level fields have wrong types.
+	var data: Dictionary = SaveSchemaV4.empty_dto()
+	# schema_version must be int but is a string.
+	# We bypass SaveSchemaV4.empty_dto here and craft raw.
+	var raw: Dictionary = {
+		"schema_version": "not int",
+		"game_build": 0,  # must be string
+		"run_id": 0,  # must be string
+		"seed": "9001",  # string seed
+		"round_index": "1",  # string round
+		"phase": 0,  # must be string
+		"gold": "0",  # string gold
+		"units": "bad",  # must be array
+		"items": "bad",  # must be array
+		"next_unit_instance_seq": 0,
+		"next_item_instance_seq": 0,
+		"shop": "bad",  # must be dict
+		"map": "bad",  # must be dict
+		"rewards": "bad",  # must be dict
+		"wins": 0, "losses": 0, "units_killed": 0, "lives": 0, "xp": 0, "level": 0,
+		"current_encounter_id": 0,
+		"encounter_visited_ids": "bad",  # must be array
+		"meta_modifiers": "bad",  # must be dict
+		"just_visited_merchant": 0,  # must be bool
+	}
+	# No SCRIPT ERROR; only diagnostics.
+	var r: Dictionary = SaveSchemaV4.validate_shape(raw)
+	_assert(bool(r.get("success", true)) == false, "validate_shape fails for bad types")
+	var diags: Array = r.get("diagnostics", [])
+	_assert(diags.size() > 0, "bad types produce diagnostics")
+	# All diagnostic codes start with "top_level_type_mismatch" or
+	# "missing_top_level_key".
+	for d in diags:
+		if d is RefCounted:
+			_assert(d.code.begins_with("top_level_type_mismatch")
+				or d.code == "missing_top_level_key", "diagnostic code well-formed: %s" % d.code)
+
+
+func _test_current_hp_below_minus_one_rejected() -> void:
+	print("[validator] current_hp < -1 rejected (H2 sentinel)")
+	var data: Dictionary = SaveSchemaV4.empty_dto()
+	var unit: Dictionary = {
+		"instance_id": "unit_000001",
+		"definition_id": "warrior",
+		"current_hp": -5,  # below sentinel
+		"max_hp": 100,
+		"bonus_attack": 0,
+		"dead": false,
+		"location": 0,
+		"order": 0,
+		"equipped_item_ids": [],
+	}
+	data["units"] = [unit]
+	data["next_unit_instance_seq"] = 2
+	var r: Dictionary = Migrator.validate(data)
+	_assert(not bool(r.get("success", false)), "current_hp < -1 -> validation fails")
+	var found: bool = false
+	for d in r.get("diagnostics", []):
+		if d is RefCounted and d.code == "current_hp_below_sentinel":
+			found = true
+			break
+	_assert(found, "current_hp_below_sentinel diagnostic emitted")
+
+
+func _test_unit_location_invalid_rejected() -> void:
+	print("[validator] unit location not in {0,1} rejected")
+	var data: Dictionary = SaveSchemaV4.empty_dto()
+	var unit: Dictionary = {
+		"instance_id": "unit_000001",
+		"definition_id": "warrior",
+		"current_hp": -1, "max_hp": 100, "bonus_attack": 0, "dead": false,
+		"location": 5,  # invalid
+		"order": 0,
+		"equipped_item_ids": [],
+	}
+	data["units"] = [unit]
+	data["next_unit_instance_seq"] = 2
+	var r: Dictionary = Migrator.validate(data)
+	_assert(not bool(r.get("success", false)), "invalid location -> validation fails")
+	var found: bool = false
+	for d in r.get("diagnostics", []):
+		if d is RefCounted and d.code == "unit_location_invalid":
+			found = true
+			break
+	_assert(found, "unit_location_invalid diagnostic emitted")
+
+
+func _test_duplicate_unit_order_in_location_rejected() -> void:
+	print("[validator] duplicate order in one location rejected")
+	var data: Dictionary = SaveSchemaV4.empty_dto()
+	var u0: Dictionary = {
+		"instance_id": "unit_000001", "definition_id": "warrior",
+		"current_hp": -1, "max_hp": 100, "bonus_attack": 0, "dead": false,
+		"location": 0, "order": 0, "equipped_item_ids": [],
+	}
+	var u1: Dictionary = {
+		"instance_id": "unit_000002", "definition_id": "warrior",
+		"current_hp": -1, "max_hp": 100, "bonus_attack": 0, "dead": false,
+		"location": 0, "order": 0,  # duplicate order
+		"equipped_item_ids": [],
+	}
+	data["units"] = [u0, u1]
+	data["next_unit_instance_seq"] = 3
+	var r: Dictionary = Migrator.validate(data)
+	_assert(not bool(r.get("success", false)), "duplicate order -> validation fails")
+	var found: bool = false
+	for d in r.get("diagnostics", []):
+		if d is RefCounted and d.code == "duplicate_unit_order_in_location":
+			found = true
+			break
+	_assert(found, "duplicate_unit_order_in_location diagnostic emitted")
+
+
+# H5 A: item.owner set but unit.equipped_item_ids does not list it.
+func _test_equipment_invariant_A_owner_set_unit_missing_item() -> void:
+	print("[validator] H5 A: item.owner set but unit does not list item")
+	var data: Dictionary = SaveSchemaV4.empty_dto()
+	var unit: Dictionary = {
+		"instance_id": "unit_000001", "definition_id": "warrior",
+		"current_hp": -1, "max_hp": 100, "bonus_attack": 0, "dead": false,
+		"location": 0, "order": 0, "equipped_item_ids": [],  # empty
+	}
+	var item: Dictionary = {
+		"instance_id": "item_000001", "definition_id": "potion_strength",
+		"owner_unit_id": "unit_000001",  # set
+	}
+	data["units"] = [unit]
+	data["items"] = [item]
+	data["next_unit_instance_seq"] = 2
+	data["next_item_instance_seq"] = 2
+	var r: Dictionary = Migrator.validate(data)
+	_assert(not bool(r.get("success", false)), "H5 A: validation fails")
+	var found: bool = false
+	for d in r.get("diagnostics", []):
+		if d is RefCounted and d.code == "inconsistent_equip":
+			found = true
+			break
+	_assert(found, "H5 A: inconsistent_equip diagnostic emitted")
+
+
+# H5 B: unit lists item but item.owner is empty.
+func _test_equipment_invariant_B_unit_lists_empty_owner() -> void:
+	print("[validator] H5 B: unit lists item but item.owner empty")
+	var data: Dictionary = SaveSchemaV4.empty_dto()
+	var unit: Dictionary = {
+		"instance_id": "unit_000001", "definition_id": "warrior",
+		"current_hp": -1, "max_hp": 100, "bonus_attack": 0, "dead": false,
+		"location": 0, "order": 0, "equipped_item_ids": ["item_000001"],
+	}
+	var item: Dictionary = {
+		"instance_id": "item_000001", "definition_id": "potion_strength",
+		"owner_unit_id": "",  # empty
+	}
+	data["units"] = [unit]
+	data["items"] = [item]
+	data["next_unit_instance_seq"] = 2
+	data["next_item_instance_seq"] = 2
+	var r: Dictionary = Migrator.validate(data)
+	_assert(not bool(r.get("success", false)), "H5 B: validation fails")
+	var found: bool = false
+	for d in r.get("diagnostics", []):
+		if d is RefCounted and d.code == "inconsistent_equip":
+			found = true
+			break
+	_assert(found, "H5 B: inconsistent_equip diagnostic emitted")
+
+
+# H5 C: same item id listed by two units.
+func _test_equipment_invariant_C_same_item_two_units() -> void:
+	print("[validator] H5 C: same item id listed by two units")
+	var data: Dictionary = SaveSchemaV4.empty_dto()
+	var u0: Dictionary = {
+		"instance_id": "unit_000001", "definition_id": "warrior",
+		"current_hp": -1, "max_hp": 100, "bonus_attack": 0, "dead": false,
+		"location": 0, "order": 0, "equipped_item_ids": ["item_000001"],
+	}
+	var u1: Dictionary = {
+		"instance_id": "unit_000002", "definition_id": "archer",
+		"current_hp": -1, "max_hp": 70, "bonus_attack": 0, "dead": false,
+		"location": 0, "order": 1, "equipped_item_ids": ["item_000001"],
+	}
+	var item: Dictionary = {
+		"instance_id": "item_000001", "definition_id": "potion_strength",
+		"owner_unit_id": "unit_000001",
+	}
+	data["units"] = [u0, u1]
+	data["items"] = [item]
+	data["next_unit_instance_seq"] = 3
+	data["next_item_instance_seq"] = 2
+	var r: Dictionary = Migrator.validate(data)
+	_assert(not bool(r.get("success", false)), "H5 C: validation fails")
+	var found: bool = false
+	for d in r.get("diagnostics", []):
+		if d is RefCounted and d.code == "item_listed_by_multiple_units":
+			found = true
+			break
+	_assert(found, "H5 C: item_listed_by_multiple_units diagnostic emitted")
+
+
+# H5 D: unit references unknown item.
+func _test_equipment_invariant_D_unknown_item() -> void:
+	print("[validator] H5 D: unit references unknown item")
+	var data: Dictionary = SaveSchemaV4.empty_dto()
+	var unit: Dictionary = {
+		"instance_id": "unit_000001", "definition_id": "warrior",
+		"current_hp": -1, "max_hp": 100, "bonus_attack": 0, "dead": false,
+		"location": 0, "order": 0, "equipped_item_ids": ["item_does_not_exist"],
+	}
+	data["units"] = [unit]
+	data["items"] = []
+	data["next_unit_instance_seq"] = 2
+	data["next_item_instance_seq"] = 1
+	var r: Dictionary = Migrator.validate(data)
+	_assert(not bool(r.get("success", false)), "H5 D: validation fails")
+	var found: bool = false
+	for d in r.get("diagnostics", []):
+		if d is RefCounted and d.code == "unknown_item_in_equipped_list":
+			found = true
+			break
+	_assert(found, "H5 D: unknown_item_in_equipped_list diagnostic emitted")
+
+
+# H5 E: same item id listed twice inside one unit's equipped_item_ids.
+func _test_equipment_invariant_E_duplicate_in_unit() -> void:
+	print("[validator] H5 E: duplicate equipped id in one unit")
+	var data: Dictionary = SaveSchemaV4.empty_dto()
+	var unit: Dictionary = {
+		"instance_id": "unit_000001", "definition_id": "warrior",
+		"current_hp": -1, "max_hp": 100, "bonus_attack": 0, "dead": false,
+		"location": 0, "order": 0,
+		"equipped_item_ids": ["item_000001", "item_000001"],  # duplicate
+	}
+	var item: Dictionary = {
+		"instance_id": "item_000001", "definition_id": "potion_strength",
+		"owner_unit_id": "",
+	}
+	data["units"] = [unit]
+	data["items"] = [item]
+	data["next_unit_instance_seq"] = 2
+	data["next_item_instance_seq"] = 2
+	var r: Dictionary = Migrator.validate(data)
+	_assert(not bool(r.get("success", false)), "H5 E: validation fails")
+	var found: bool = false
+	for d in r.get("diagnostics", []):
+		if d is RefCounted and d.code == "duplicate_in_unit_equipped":
+			found = true
+			break
+	_assert(found, "H5 E: duplicate_in_unit_equipped diagnostic emitted")
+
+
+# H6: save seed mismatch rejected.
+func _test_save_seed_mismatch_rejected() -> void:
+	print("[repository] save seed mismatch rejected (H6)")
+	# Build a v4 DTO with seed=9001, then save with requested seed=9002.
+	var runs_dir: String = "user://seed_mismatch_test/"
+	DirAccess.make_dir_recursive_absolute(runs_dir)
+	_cleanup_test_dir(runs_dir)
+	var src: Resource = load(RUN_FIXTURE_DIR + "/active_run_minimal.tres")
+	var mig: Dictionary = Migrator.migrate_run(src)
+	var v4: Dictionary = mig.get("data", {})
+	v4["seed"] = 9001
+	v4["run_id"] = "run_9001"
+	var repo: RefCounted = RunSaveRepositoryScript.new(runs_dir)
+	# First save: seed matches.
+	repo.save_run(9001, v4)
+	# Second save: requested seed=9002 but data has seed=9001.
+	var wr: RefCounted = repo.save_run(9002, v4)
+	_assert(wr.is_error(), "save with seed mismatch -> error")
+	# Either the validator catches it (pre-validate) or the post-commit
+	# validate catches it. Both are valid failure paths.
+	_cleanup_test_dir(runs_dir)
+
+
+func _cleanup_test_dir(runs_dir: String) -> void:
+	var d: DirAccess = DirAccess.open(runs_dir)
+	if d == null:
+		return
+	for f in d.get_files():
+		d.remove(f)

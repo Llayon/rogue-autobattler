@@ -204,6 +204,8 @@ static func canonicalize(data: Dictionary) -> Dictionary:
 
 ## Validates a v4 DTO. Returns `{success: bool, diagnostics:
 ## Array[RefCounted]}`. The validator never mutates the input.
+## Type-defensive: malformed input produces diagnostics, never
+## SCRIPT ERROR or runtime type errors.
 static func validate(data: Dictionary) -> Dictionary:
 	var result: Dictionary = {
 		"success": true,
@@ -211,96 +213,212 @@ static func validate(data: Dictionary) -> Dictionary:
 	}
 	if not SaveSchemaV4.is_v4_dto(data):
 		result["success"] = false
-		var d: RefCounted = MigrationDiagnostic.error("not_v4_dto", "data does not satisfy SaveSchemaV4.is_v4_dto", "")
-		result["diagnostics"].append(d)
+		result["diagnostics"].append(MigrationDiagnostic.error(
+			"not_v4_dto",
+			"data does not satisfy SaveSchemaV4.is_v4_dto",
+			""))
 		return result
 
-	# Unit checks
-	var units: Array = data.get("units", [])
+	# Unit checks: each entry must be a Dictionary with the right
+	# field types. No SCRIPT ERROR on malformed input.
 	var unit_instance_to_idx: Dictionary = {}
-	for i in units.size():
-		var u: Dictionary = units[i]
-		var instance_id: String = String(u.get("instance_id", ""))
-		if instance_id == "":
-			result["success"] = false
-			result["diagnostics"].append(MigrationDiagnostic.error(
-				"empty_unit_instance_id", "unit[%d] has empty instance_id" % i, str(i)))
-		if unit_instance_to_idx.has(instance_id):
-			result["success"] = false
-			result["diagnostics"].append(MigrationDiagnostic.error(
-				"duplicate_unit_instance_id",
-				"duplicate unit instance_id %s" % instance_id,
-				instance_id))
-		unit_instance_to_idx[instance_id] = i
+	var unit_owner_listings: Dictionary = {}  # instance_id -> Array[String]
+	var units_by_location: Dictionary = {0: {}, 1: {}}  # location -> {order -> instance_id}
+	var max_unit_seq: int = 0
 
-	# Item checks
-	var items: Array = data.get("items", [])
+	var units_value: Variant = data.get("units", [])
+	if units_value is Array:
+		var units: Array = units_value
+		for i in units.size():
+			var u_value: Variant = units[i]
+			if not (u_value is Dictionary):
+				result["success"] = false
+				result["diagnostics"].append(MigrationDiagnostic.error(
+					"unit_not_dict",
+					"unit[%d] is not a Dictionary" % i,
+					str(i)))
+				continue
+			var u: Dictionary = u_value
+			var instance_id: String = _safe_str(u.get("instance_id", ""))
+			if instance_id == "":
+				result["success"] = false
+				result["diagnostics"].append(MigrationDiagnostic.error(
+					"empty_unit_instance_id",
+					"unit[%d] has empty instance_id" % i,
+					str(i)))
+			elif unit_instance_to_idx.has(instance_id):
+				result["success"] = false
+				result["diagnostics"].append(MigrationDiagnostic.error(
+					"duplicate_unit_instance_id",
+					"duplicate unit instance_id %s" % instance_id,
+					instance_id))
+			unit_instance_to_idx[instance_id] = i
+			var definition_id: String = _safe_str(u.get("definition_id", ""))
+			if definition_id == "":
+				result["success"] = false
+				result["diagnostics"].append(MigrationDiagnostic.error(
+					"empty_unit_definition_id",
+					"unit[%d] (%s) has empty definition_id" % [i, instance_id],
+					instance_id))
+			var current_hp: int = _safe_int(u.get("current_hp", 0))
+			var max_hp: int = _safe_int(u.get("max_hp", 0))
+			var bonus_attack: int = _safe_int(u.get("bonus_attack", 0))
+			var location: int = _safe_int(u.get("location", -1))
+			var order: int = _safe_int(u.get("order", -1))
+			var dead_v: Variant = u.get("dead", false)
+			var dead: bool = (dead_v is bool) and (dead_v as bool)
+			var equipped: Array = []
+			var equipped_value: Variant = u.get("equipped_item_ids", [])
+			if equipped_value is Array:
+				equipped = equipped_value
+			# Location must be 0 or 1.
+			if location != 0 and location != 1:
+				result["success"] = false
+				result["diagnostics"].append(MigrationDiagnostic.error(
+					"unit_location_invalid",
+					"unit %s location %d not in {0,1}" % [instance_id, location],
+					instance_id))
+			# order must be >= 0 and unique within location.
+			if order < 0:
+				result["success"] = false
+				result["diagnostics"].append(MigrationDiagnostic.error(
+					"unit_order_negative",
+					"unit %s order %d < 0" % [instance_id, order],
+					instance_id))
+			elif location == 0 or location == 1:
+				var loc_orders: Dictionary = units_by_location[location]
+				if loc_orders.has(order):
+					result["success"] = false
+					result["diagnostics"].append(MigrationDiagnostic.error(
+						"duplicate_unit_order_in_location",
+						"duplicate order %d in location %d" % [order, location],
+						str(location)))
+				else:
+					loc_orders[order] = instance_id
+			# current_hp: -1 is sentinel; 0..max_hp valid; < -1 invalid.
+			if current_hp < -1:
+				result["success"] = false
+				result["diagnostics"].append(MigrationDiagnostic.error(
+					"current_hp_below_sentinel",
+					"unit %s current_hp %d < -1" % [instance_id, current_hp],
+					instance_id))
+			elif current_hp > max_hp:
+				result["success"] = false
+				result["diagnostics"].append(MigrationDiagnostic.error(
+					"hp_out_of_range",
+					"unit %s current_hp %d > max_hp %d" % [instance_id, current_hp, max_hp],
+					instance_id))
+			# Duplicate equipped_item_id entries inside one unit.
+			var seen_equipped: Dictionary = {}
+			for itm in equipped:
+				var itm_str: String = _safe_str(itm)
+				if seen_equipped.has(itm_str):
+					result["success"] = false
+					result["diagnostics"].append(MigrationDiagnostic.error(
+						"duplicate_in_unit_equipped",
+						"unit %s has duplicate equipped item id %s" % [instance_id, itm_str],
+						instance_id))
+				seen_equipped[itm_str] = true
+			unit_owner_listings[instance_id] = equipped
+			var seq: int = _seq_from_instance_id(instance_id, "unit_")
+			if seq > max_unit_seq:
+				max_unit_seq = seq
+
+	# Item checks.
 	var item_instance_to_idx: Dictionary = {}
-	for i in items.size():
-		var it: Dictionary = items[i]
-		var instance_id: String = String(it.get("instance_id", ""))
-		if instance_id == "":
-			result["success"] = false
-			result["diagnostics"].append(MigrationDiagnostic.error(
-				"empty_item_instance_id", "item[%d] has empty instance_id" % i, str(i)))
-		if item_instance_to_idx.has(instance_id):
-			result["success"] = false
-			result["diagnostics"].append(MigrationDiagnostic.error(
-				"duplicate_item_instance_id",
-				"duplicate item instance_id %s" % instance_id,
-				instance_id))
-		item_instance_to_idx[instance_id] = i
-		var owner: String = String(it.get("owner_unit_id", ""))
-		if owner != "" and not unit_instance_to_idx.has(owner):
-			result["success"] = false
-			result["diagnostics"].append(MigrationDiagnostic.error(
-				"unknown_item_owner",
-				"item %s owner %s does not exist" % [instance_id, owner],
-				instance_id))
+	var max_item_seq: int = 0
+	var items_value: Variant = data.get("items", [])
+	if items_value is Array:
+		var items: Array = items_value
+		for i in items.size():
+			var it_value: Variant = items[i]
+			if not (it_value is Dictionary):
+				result["success"] = false
+				result["diagnostics"].append(MigrationDiagnostic.error(
+					"item_not_dict",
+					"item[%d] is not a Dictionary" % i,
+					str(i)))
+				continue
+			var it: Dictionary = it_value
+			var instance_id: String = _safe_str(it.get("instance_id", ""))
+			if instance_id == "":
+				result["success"] = false
+				result["diagnostics"].append(MigrationDiagnostic.error(
+					"empty_item_instance_id",
+					"item[%d] has empty instance_id" % i,
+					str(i)))
+			elif item_instance_to_idx.has(instance_id):
+				result["success"] = false
+				result["diagnostics"].append(MigrationDiagnostic.error(
+					"duplicate_item_instance_id",
+					"duplicate item instance_id %s" % instance_id,
+					instance_id))
+			item_instance_to_idx[instance_id] = i
+			var definition_id: String = _safe_str(it.get("definition_id", ""))
+			if definition_id == "":
+				result["success"] = false
+				result["diagnostics"].append(MigrationDiagnostic.error(
+					"empty_item_definition_id",
+					"item[%d] (%s) has empty definition_id" % [i, instance_id],
+					instance_id))
+			var owner: String = _safe_str(it.get("owner_unit_id", ""))
+			if owner != "" and not unit_instance_to_idx.has(owner):
+				result["success"] = false
+				result["diagnostics"].append(MigrationDiagnostic.error(
+					"unknown_item_owner",
+					"item %s owner %s does not exist" % [instance_id, owner],
+					instance_id))
+			var seq2: int = _seq_from_instance_id(instance_id, "item_")
+			if seq2 > max_item_seq:
+				max_item_seq = seq2
 
-	# Inconsistent equip: item points to unit, unit does not list item.
-	for i in items.size():
-		var it: Dictionary = items[i]
-		var instance_id: String = String(it.get("instance_id", ""))
-		var owner: String = String(it.get("owner_unit_id", ""))
-		if owner != "":
-			if not unit_instance_to_idx.has(owner):
-				continue  # already flagged
-			var u_idx: int = int(unit_instance_to_idx[owner])
-			var u: Dictionary = units[u_idx]
-			var equipped: Array = u.get("equipped_item_ids", [])
-			if not equipped.has(instance_id):
+	# Bidirectional equipment consistency (H5 A-E).
+	for instance_id in item_instance_to_idx.keys():
+		var it2: Dictionary = items_value[item_instance_to_idx[instance_id]] as Dictionary
+		var owner2: String = _safe_str(it2.get("owner_unit_id", ""))
+		# Invariant A: item.owner set but unit does not list it.
+		if owner2 != "" and unit_instance_to_idx.has(owner2):
+			var unit_equipped: Array = unit_owner_listings.get(owner2, [])
+			if not unit_equipped.has(instance_id):
 				result["success"] = false
 				result["diagnostics"].append(MigrationDiagnostic.error(
 					"inconsistent_equip",
-					"item %s owned by %s but unit does not list it" % [instance_id, owner],
+					"item %s owned by %s but unit does not list it" % [instance_id, owner2],
 					instance_id))
-
-	# HP range: current_hp must be -1 (sentinel) or in [0, max_hp].
-	for i in units.size():
-		var u: Dictionary = units[i]
-		var current_hp: int = int(u.get("current_hp", 0))
-		var max_hp: int = int(u.get("max_hp", 0))
-		if current_hp != -1 and (current_hp < 0 or current_hp > max_hp):
+		# Invariant C: same item id listed by two units.
+		var item_in_unit_count: int = 0
+		for unit_id in unit_owner_listings.keys():
+			var listed: Array = unit_owner_listings[unit_id]
+			if listed.has(instance_id):
+				item_in_unit_count += 1
+		if item_in_unit_count > 1:
 			result["success"] = false
 			result["diagnostics"].append(MigrationDiagnostic.error(
-				"hp_out_of_range",
-				"unit %s current_hp %d out of [0,%d]" % [u.get("instance_id", ""), current_hp, max_hp],
-				String(u.get("instance_id", ""))))
+				"item_listed_by_multiple_units",
+				"item %s listed by %d units" % [instance_id, item_in_unit_count],
+				instance_id))
 
-	# next_unit_instance_seq / next_item_instance_seq must be >= the
-	# max sequence used.
-	var max_unit_seq: int = 0
-	for u in units:
-		var seq: int = _seq_from_instance_id(String(u.get("instance_id", "")), "unit_")
-		if seq > max_unit_seq:
-			max_unit_seq = seq
-	var max_item_seq: int = 0
-	for it in items:
-		var seq2: int = _seq_from_instance_id(String(it.get("instance_id", "")), "item_")
-		if seq2 > max_item_seq:
-			max_item_seq = seq2
-	# next_unit_instance_seq must be exactly max_used + 1 (first unused).
+	# Invariant B: unit lists item but item.owner is empty.
+	for unit_id in unit_owner_listings.keys():
+		var listed2: Array = unit_owner_listings[unit_id]
+		for itm2 in listed2:
+			var itm_str2: String = _safe_str(itm2)
+			if not item_instance_to_idx.has(itm_str2):
+				result["success"] = false
+				result["diagnostics"].append(MigrationDiagnostic.error(
+					"unknown_item_in_equipped_list",
+					"unit %s lists unknown item id %s" % [unit_id, itm_str2],
+					unit_id))
+				continue
+			var owner3: String = _safe_str((items_value[item_instance_to_idx[itm_str2]] as Dictionary).get("owner_unit_id", ""))
+			if owner3 == "":
+				result["success"] = false
+				result["diagnostics"].append(MigrationDiagnostic.error(
+					"inconsistent_equip",
+					"item %s listed by unit %s has empty owner" % [itm_str2, unit_id],
+					unit_id))
+
+	# next_*_instance_seq must be exactly max_used + 1 (first unused).
 	if int(data.get("next_unit_instance_seq", 0)) != max_unit_seq + 1:
 		result["success"] = false
 		result["diagnostics"].append(MigrationDiagnostic.error(
@@ -311,10 +429,37 @@ static func validate(data: Dictionary) -> Dictionary:
 		result["success"] = false
 		result["diagnostics"].append(MigrationDiagnostic.error(
 			"next_item_instance_seq_invalid",
-			"next_item_instance_seq %d < max used %d" % [int(data.get("next_item_instance_seq", 0)), max_item_seq],
-			str(max_item_seq)))
+			"next_item_instance_seq must be first unused sequence (expected %d, got %d)" % [max_item_seq + 1, int(data.get("next_item_instance_seq", 0))],
+			str(max_item_seq + 1)))
 
 	return result
+
+
+## Safe coercion helpers used by validate(). Never crash; never
+## mutate the input. Each helper returns a typed default on type
+## mismatch.
+static func _safe_str(value: Variant) -> String:
+	if typeof(value) == TYPE_STRING:
+		return value
+	if typeof(value) == TYPE_STRING_NAME:
+		return String(value)
+	return ""
+
+
+static func _safe_int(value: Variant) -> int:
+	if typeof(value) == TYPE_INT:
+		return int(value)
+	if typeof(value) == TYPE_FLOAT:
+		var f: float = float(value)
+		if is_finite(f) and f == floor(f):
+			return int(f)
+	return 0
+
+
+static func _safe_bool(value: Variant) -> bool:
+	if typeof(value) == TYPE_BOOL:
+		return bool(value)
+	return false
 
 
 # ---------------------------------------------------------------------------
