@@ -1,103 +1,206 @@
-# Save Schema v4 migration
+# Save Schema v4 — Pure Migration, Repository, and Hardening
 
-Pure, in-memory migration from the legacy on-disk v1 run shape to
-schema v4. No production save path is wired in this step; see
-`tests/legacy_save_fixtures/loader_test.gd` for the legacy loader
-verification and `docs/LEGACY_V1_TO_V4_MAPPING.md` for the field
-mapping contract.
+This directory contains the pure in-memory migration from the legacy
+on-disk v1 run shape to schema v4, the production save repository,
+and the Phase 1H hardening layer.
+
+The production `RunSaveRepository` is wired through its own public
+API; the legacy `SaveService` path is unchanged and remains
+operational. The repository has not yet been connected to
+`RunController.save_now()` / `resume_run()`.
 
 ## Files
 
 Production code:
 
 - `core/progression/run_unit.gd` — `RunUnit` (pure data class, stable
-  `instance_id`).
-- `core/progression/run_item.gd` — `RunItem` (pure data class,
-  owner is `RunUnit.instance_id` or empty string).
+  `instance_id`; `is_alive()` honours the `current_hp == -1`
+  sentinel).
+- `core/progression/run_item.gd` — `RunItem` (pure data class, owner
+  is `RunUnit.instance_id` or empty string).
 - `core/save/save_schema_v4.gd` — v4 DTO contract and `TOP_LEVEL_KEYS`
-  order; `is_v4_dto()` and `empty_dto()`.
-- `core/save/migration_diagnostic.gd` — diagnostic record.
+  canonical order; `is_v4_dto()` bool API, `validate_shape()` returns
+  `{success, diagnostics}`; wire helpers `_wire_int`, `_wire_bool`,
+  `_wire_string`, `_wire_array`, `_wire_dict`.
+- `core/save/migration_diagnostic.gd` — diagnostic record
+  (`severity` / `code` / `detail` / `context`).
 - `core/save/migration_result.gd` — `MigrationResult` shape.
 - `core/save/legacy_save_v1_to_v4_migrator.gd` — `migrate_run`,
-  `serialize`, `deserialize`, `canonicalize`, `validate`.
-- `core/save/save_serializer_v4.gd`, `save_deserializer_v4.gd`,
-  `save_validator_v4.gd` are folded into the migrator file
-  because they share the same `TOP_LEVEL_KEYS` contract and are
-  only a few lines each.
+  `serialize`, `deserialize`, `canonicalize`, `validate`,
+  `serialize_canonical_bytes`. Type-defensive validator.
+- `core/save/save_load_result.gd` — `SaveLoadResult` typed result
+  for repository calls; `OK` plus 14 `ERROR_*` codes.
+- `core/save/run_save_file_ops.gd` — production filesystem adapter
+  (`exists`, `read_bytes`, `write_bytes_and_flush`, `rename`,
+  `remove`, `sha256`).
+- `core/save/run_save_repository.gd` — `RunSaveRepository` with
+  format detection, single recovery state machine, and the
+  crash-recoverable commit protocol.
 
 Tests:
 
+- `tests/save_repository/save_repository_test.gd` — production
+  repository contract, recovery matrix, backup protocol,
+  equipment invariants, format detection, seed / run_id
+  consistency.
+- `tests/save_repository/run_save_file_ops_test.gd` — filesystem
+  adapter contract (production + fault-injection).
+- `tests/save_repository/support/run_save_file_ops_fault.gd` —
+  test-only fault-injection adapter (no global `class_name`).
 - `tests/save_schema_v4/save_schema_v4_test.gd` — migration
-  contract, fixtures round-trip, validator rules.
+  contract, fixtures round-trip, validator rules, equipment
+  invariants, sentinel semantics.
 - `tests/save_schema_v4/byte_for_byte_determinism_test.gd` —
-  repeated-migration canonical hash stability.
+  serialized-byte determinism across repeated migrations.
+- `tests/progression/run_unit_test.gd` — `is_alive()` sentinel
+  semantics.
+- `tests/legacy_save_fixtures/` — byte-faithful v1 fixtures.
 
-## Diagnostics policy
+## Wire format
 
-The migrator never throws for expected validation failures. Every
-diagnostic carries a stable `code`, a `severity` (`info`, `warning`,
-`error`), a human-readable `detail`, and a stable `context` string.
+```
+# v4 save
+{schema_version: 4, ...canonical JSON sorted by key...}
+```
 
-- `unit_states_count_mismatch` (warning) — emitted when
-  `player_unit_ids + bench_unit_ids` length differs from
-  `unit_states` length. The migrator proceeds; remaining legacy
-  states are matched by occurrence order, and missing slots
-  resolve to default HP values.
-- `item_equip_board_idx_out_of_range` (warning) — the equipped
-  index points past the board. The item is unequipped and
-  recorded as in inventory; the original index is captured in
-  `context`.
-- `item_equip_board_idx_not_int` (warning) — the slot is not an
-  integer. The item is unequipped.
-- `item_equip_board_idx_negative` (warning) — treated as
-  inventory; no diagnostic emitted (negative is the in-inventory
-  sentinel).
-- `not_v4_dto`, `duplicate_unit_instance_id`,
-  `duplicate_item_instance_id`, `unknown_item_owner`,
-  `inconsistent_equip`, `empty_unit_instance_id`,
-  `empty_item_instance_id`, `hp_out_of_range`,
-  `next_unit_instance_seq_too_small`,
-  `next_item_instance_seq_too_small`, `source_not_legacy_v1` —
-  validator errors. The validator never mutates the input; the
-  migrator never throws on these.
+The first line is the marker `# v4 save`. The body is
+`JSON.stringify(data, "", true)` — key sort applied. Canonical
+arrays (`units`, `items`, `encounter_visited_ids`, `equipped_item_ids`)
+keep their semantic order.
 
 ## Source detection
 
-A source is treated as legacy v1 when:
+A file is detected as:
 
-- it is a `Resource` whose class extends `Resource` and has the
-  expected legacy field names (`player_unit_ids`, `unit_states`,
-  `item_ids`); or
-- it is a `Dictionary` that structurally matches the same
-  fields.
+| marker / content | classification |
+|---|---|
+| `# v4 save` + JSON parse OK + `schema_version == 4` (int) | v4 |
+| `# v4 save` + JSON parse fails | `corrupt_v4` (never legacy fallback) |
+| `# v4 save` + `schema_version` missing / wrong type | `corrupt_v4` |
+| `# v4 save` + `schema_version` is int but != 4 | `unsupported_schema` (never legacy fallback) |
+| `[gd_resource` + `player_unit_ids` + `unit_states` keys | `legacy_v1_candidate` |
+| otherwise | `unknown` |
 
-The internal class constant `RunState.SAVE_VERSION = 3` is
-irrelevant to the wire format because `SaveSvc.save_resource`
-overwrites `version` to `1` on every save.
+The `schema_version` on the wire is wire-classified by
+`SaveSchemaV4._wire_int`: integral floats accepted, non-integral
+floats / strings / bools / nulls / NaN / Infinity rejected.
+
+## Recovery state machine
+
+A single `_recover_startup_state` runs at the top of both `load_run`
+and `save_run`. The postcondition after a successful recovery is
+**commit-old MUST NOT exist when a new commit begins**.
+
+| `target` | `commit-old` | Action | Resulting state |
+|---|---|---|---|
+| valid | none | no-op | target valid, no commit-old |
+| missing | valid (v4 or legacy) | restore commit-old → target | target valid, no commit-old |
+| valid | valid (stale) | target authoritative; remove stale | target valid, no commit-old |
+| valid | invalid (stale) | target authoritative; remove stale | target valid, no commit-old |
+| invalid | valid | preserve invalid target; restore commit-old | target valid, no commit-old |
+| invalid | invalid | controlled error; destroy nothing | files preserved unchanged |
+| missing | invalid | controlled error; destroy nothing | files preserved unchanged |
+| missing | none | (downstream returns missing) | (no file) |
+
+The immutable `.legacy-v1.bak` is NEVER touched by recovery.
+
+## Commit protocol
+
+The crash-recoverable commit uses only `DirAccess.rename`. There is
+no `target → WRITE` byte-copy fallback. Fresh save is a single
+rename. Existing save is `target → commit-old → temp → target` with
+rollback on every step. Post-commit validate re-reads the file and
+verifies `seed` and `schema_version`; on failure, preserve the
+invalid target as `<target>.invalid.<timestamp>` and restore
+commit-old.
+
+## Backup protocol
+
+Path: `<save>.legacy-v1.bak`. Created exactly once per run file via
+temp-write + sha256-verify + rename + post-create re-verification.
+Existing-but-corrupt backup → `ERROR_BACKUP_INVALID` (migrator
+refuses, no overwrite). Existing-but-different backup →
+`ERROR_BACKUP_CONFLICT` (migrator refuses). The immutable backup
+is NEVER auto-repaired or auto-overwritten.
 
 ## Instance ID rules
 
-- `unit_000001`, `unit_000002`, … allocated in board order then
-  bench order.
-- `item_000001`, `item_000002`, … allocated in `item_ids` source
-  order.
-- The migrator persists `next_unit_instance_seq` and
-  `next_item_instance_seq` so the next `RunController` step can
-  allocate further IDs without colliding.
+`unit_000001`, `unit_000002`, … allocated in board order then bench
+order. `item_000001`, `item_000002`, … allocated in `item_ids`
+source order. Format: `<prefix>_<6-digit zero-padded>`. No UUID, no
+time, no random.
 
-## Round-trip
+`next_unit_instance_seq` and `next_item_instance_seq` are the FIRST
+UNUSED sequence after migration (i.e. `max_used + 1`). The validator
+requires them to be exactly `max_used + 1`.
 
-- `serialize(data)` produces a canonical Dictionary with all
-  `SaveSchemaV4.TOP_LEVEL_KEYS` present in fixed order.
-- `deserialize(serialized)` accepts any key order and produces the
-  same canonical form.
-- `canonicalize(data) == serialize(data)`.
+## `unit_states` matching policy
 
-## Out of scope for this step
+1. `expected_definitions` = `player_unit_ids` source order, then
+   `bench_unit_ids` source order.
+2. Match legacy `unit_states` by `definition_id` and occurrence
+   order. Each legacy state is consumed at most once.
+3. If a particular expected unit has no recoverable state, the
+   migrated unit uses content-independent sentinel defaults:
+   `current_hp = -1`, `max_hp = -1`, `bonus_attack = 0`,
+   `dead = false`. Plus a warning diagnostic
+   `unit_state_defaulted_to_sentinel`.
+4. The migrator NEVER queries `ContentDB` or `UnitDef`.
+5. If all `unit_states` are absent while expected non-empty, return
+   migration failure with diagnostic
+   `unit_states_completely_missing`.
+6. If expected empty but `unit_states` non-empty, ignore extra states
+   with diagnostic `ignored_legacy_state`.
 
-- Wiring the migrator into `SaveService.load_run` (deferred to
-  P1-T2 in the plan).
-- Atomic replace of legacy `.tres` files (deferred).
-- `MetaProfile` migration (not in this run migrator; if the
-  future `MetaProfile` schema migration is required, it is a
-  separate file).
+## Equipment consistency invariants
+
+The validator enforces bidirectional invariants:
+
+```
+item.owner_unit_id == unit.instance_id
+  iff
+unit.equipped_item_ids contains item.instance_id
+```
+
+Invalid cases (all rejected with diagnostics):
+
+| Case | Diagnostic |
+|---|---|
+| A: item.owner = unit_X but unit_X.equipped_item_ids does not contain item | `inconsistent_equip` |
+| B: unit_X lists item but item.owner = "" | `inconsistent_equip` |
+| C: same item id listed by two units | `item_listed_by_multiple_units` |
+| D: unit references unknown item id | `unknown_item_in_equipped_list` |
+| E: duplicate id inside one unit's equipped_item_ids | `duplicate_in_unit_equipped` |
+
+## Validator contract
+
+The `validate(data)` function is type-defensive: malformed input
+produces diagnostics, never `SCRIPT ERROR` or runtime type errors.
+Each field access uses safe coercion helpers (`_safe_str`,
+`_safe_int`, `_safe_bool`).
+
+Required v4 DTO checks (all produce diagnostics on failure):
+
+- non-Dictionary input (`not_v4_dto`)
+- missing or wrong-type top-level keys (`missing_top_level_key`,
+  `top_level_type_mismatch`)
+- duplicate unit / item instance_id
+- empty unit / item definition_id
+- unknown item owner
+- inconsistent equipment (above)
+- invalid location (not 0 or 1) → `unit_location_invalid`
+- negative order → `unit_order_negative`
+- duplicate order in one location → `duplicate_unit_order_in_location`
+- HP out of range → `hp_out_of_range`
+- `current_hp < -1` → `current_hp_below_sentinel`
+- `next_*_instance_seq != max_used + 1` →
+  `next_*_instance_seq_invalid`
+
+## Out of scope for this directory
+
+- `RunController.save_now()` / `resume_run()` wiring (deferred to
+  P1-T2 in the migration plan).
+- `BattleSetup` / `BattleSimulation` / `BattleWorld` / `Effect Engine`.
+- Simulation RNG contract.
+- `MetaProfile` schema migration.
+- Renaming the `.tres` save filename.
