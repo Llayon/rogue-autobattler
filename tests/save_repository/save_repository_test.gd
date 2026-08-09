@@ -55,6 +55,11 @@ func _initialize() -> void:
 	_test_existing_corrupt_backup_blocks_migration()
 	_test_rollback_does_not_delete_immutable_backup()
 	_test_post_migration_backup_sha256_matches_original()
+	_test_load_seed_mismatch_rejected()
+	_test_load_run_id_mismatch_rejected()
+	_test_schema_version_5_rejected_as_unsupported()
+	_test_string_schema_version_5_is_corrupt_v4_not_v5()
+	_test_missing_schema_version_is_corrupt_v4()
 	print("\n=== production save repository: %d passed, %d failed ===\n" % [_passed, _failed])
 	if _failed > 0:
 		quit(1)
@@ -959,4 +964,129 @@ func _test_stale_state_cleanup_removes_invalid_temp_files() -> void:
 		var post_tmp: PackedByteArray = FileAccess.get_file_as_bytes(stale_tmp)
 		_assert(post_tmp.get_string_from_utf8() != "stale",
 			"stale .tmp content overwritten by current save temp")
+	_cleanup(runs_dir)
+
+
+# ---------------------------------------------------------------------------
+# Task 8 — Seed / filename / run_id consistency
+# ---------------------------------------------------------------------------
+
+func _test_load_seed_mismatch_rejected() -> void:
+	print("[repository] load seed mismatch rejected (H6)")
+	var runs_dir: String = _isolated_runs_dir("load_seed_mismatch")
+	_cleanup(runs_dir)
+	# Build a v4 file via migration, save it with seed=9001.
+	var src: Resource = load(RUN_FIXTURES_DIR + "/active_run_minimal.tres")
+	var mig: Dictionary = MigratorScript.migrate_run(src)
+	var v4: Dictionary = mig.get("data", {})
+	var repo: RefCounted = RunSaveRepositoryScript.new(runs_dir)
+	repo.save_run(9001, v4)
+	# Rename the file from run_9001.tres to run_9002.tres so that
+	# load_run(9002) actually opens it. The on-disk seed=9001 will
+	# not match the requested seed=9002, so the repository must
+	# reject the load.
+	var ProductionFileOps = preload("res://core/save/run_save_file_ops.gd")
+	var ops = ProductionFileOps.new()
+	assert(ops.rename(runs_dir + "run_9001.tres", runs_dir + "run_9002.tres"),
+		"rename to mismatched seed file succeeds")
+	var r: RefCounted = repo.load_run(9002)
+	_assert(r.is_error(), "load with wrong seed -> error")
+	_assert(r.status == SaveLoadResultScript.ERROR_V4_VALIDATION_FAILED,
+		"status == ERROR_V4_VALIDATION_FAILED")
+	_cleanup(runs_dir)
+
+
+func _test_load_run_id_mismatch_rejected() -> void:
+	print("[repository] load run_id mismatch rejected (H6)")
+	var runs_dir: String = _isolated_runs_dir("load_run_id_mismatch")
+	_cleanup(runs_dir)
+	# Save a v4 file with seed=9001 and run_id="run_9001".
+	var src: Resource = load(RUN_FIXTURES_DIR + "/active_run_minimal.tres")
+	var mig: Dictionary = MigratorScript.migrate_run(src)
+	var v4: Dictionary = mig.get("data", {})
+	var repo: RefCounted = RunSaveRepositoryScript.new(runs_dir)
+	repo.save_run(9001, v4)
+	# Manually rewrite the v4 file with run_id="run_9999" to force a
+	# run_id mismatch.
+	var v4_bytes: PackedByteArray = FileAccess.get_file_as_bytes(runs_dir + "run_9001.tres")
+	var s: String = v4_bytes.get_string_from_utf8()
+	var tampered: String = s.replace("run_9001", "run_9999")
+	# The file is JSON, not text-search-friendly for the run_id.
+	# Instead, write a new v4 file directly using the repository's
+	# canonical helper.
+	var bad_v4: Dictionary = v4.duplicate(true)
+	bad_v4["run_id"] = "run_9999"
+	var ProductionFileOps = preload("res://core/save/run_save_file_ops.gd")
+	var ops = ProductionFileOps.new()
+	var bytes: PackedByteArray = RunSaveRepositoryScript.serialize_canonical_bytes(bad_v4)
+	ops.write_bytes_and_flush(runs_dir + "run_9001.tres", bytes)
+	var r: RefCounted = repo.load_run(9001)
+	_assert(r.is_error(), "load with wrong run_id -> error")
+	_assert(r.status == SaveLoadResultScript.ERROR_V4_VALIDATION_FAILED,
+		"status == ERROR_V4_VALIDATION_FAILED")
+	_cleanup(runs_dir)
+
+
+# ---------------------------------------------------------------------------
+# Task 9 — Format detection (wire-aware)
+# ---------------------------------------------------------------------------
+
+func _test_schema_version_5_rejected_as_unsupported() -> void:
+	print("[detect] schema_version = 5 -> ERROR_UNSUPPORTED_SCHEMA")
+	var runs_dir: String = _isolated_runs_dir("schema_v5_unsupported")
+	_cleanup(runs_dir)
+	var ProductionFileOps = preload("res://core/save/run_save_file_ops.gd")
+	var ops = ProductionFileOps.new()
+	# Build a v4-shaped file with schema_version = 5.
+	var bad: Dictionary = SaveSchemaV4Script.empty_dto()
+	bad["schema_version"] = 5
+	bad["seed"] = 9001
+	bad["run_id"] = "run_9001"
+	bad["next_unit_instance_seq"] = 1
+	bad["next_item_instance_seq"] = 1
+	var bytes: PackedByteArray = RunSaveRepositoryScript.serialize_canonical_bytes(bad)
+	assert(ops.write_bytes_and_flush(runs_dir + "run_9001.tres", bytes), "write v4-with-schema-5 file")
+	var repo: RefCounted = RunSaveRepositoryScript.new(runs_dir)
+	var r: RefCounted = repo.load_run(9001)
+	_assert(r.is_error(), "schema 5 -> error")
+	_assert(r.status == SaveLoadResultScript.ERROR_UNSUPPORTED_SCHEMA,
+		"status == ERROR_UNSUPPORTED_SCHEMA")
+	_assert(r.source_format == "unsupported_schema", "source_format == unsupported_schema")
+	_cleanup(runs_dir)
+
+
+func _test_string_schema_version_5_is_corrupt_v4_not_v5() -> void:
+	print("[detect] schema_version = '\"5\"' -> ERROR_CORRUPT_V4 (not unsupported)")
+	var runs_dir: String = _isolated_runs_dir("schema_string_corrupt")
+	_cleanup(runs_dir)
+	var ProductionFileOps = preload("res://core/save/run_save_file_ops.gd")
+	var ops = ProductionFileOps.new()
+	# The repository detects v4 by marker. Once it sees the marker,
+	# it parses the JSON. A string schema_version is corrupted v4.
+	var raw: String = "# v4 save\n{\"schema_version\": \"5\", \"seed\": 9001, \"run_id\": \"run_9001\", \"units\": [], \"items\": [], \"next_unit_instance_seq\": 1, \"next_item_instance_seq\": 1, \"shop\": {}, \"map\": {}, \"rewards\": {}, \"wins\": 0, \"losses\": 0, \"units_killed\": 0, \"lives\": 0, \"xp\": 0, \"level\": 0, \"current_encounter_id\": 0, \"encounter_visited_ids\": [], \"meta_modifiers\": {}, \"just_visited_merchant\": false, \"game_build\": \"\", \"round_index\": 1, \"phase\": \"prep\", \"gold\": 0}"
+	var bytes: PackedByteArray = raw.to_utf8_buffer()
+	assert(ops.write_bytes_and_flush(runs_dir + "run_9001.tres", bytes), "write corrupt-v4 file")
+	var repo: RefCounted = RunSaveRepositoryScript.new(runs_dir)
+	var r: RefCounted = repo.load_run(9001)
+	_assert(r.is_error(), "string schema 5 -> error")
+	_assert(r.status == SaveLoadResultScript.ERROR_CORRUPT_V4,
+		"status == ERROR_CORRUPT_V4 (string schema is corrupted, not unsupported)")
+	_cleanup(runs_dir)
+
+
+func _test_missing_schema_version_is_corrupt_v4() -> void:
+	print("[detect] missing schema_version -> ERROR_CORRUPT_V4")
+	var runs_dir: String = _isolated_runs_dir("schema_missing")
+	_cleanup(runs_dir)
+	var ProductionFileOps = preload("res://core/save/run_save_file_ops.gd")
+	var ops = ProductionFileOps.new()
+	# v4 marker, valid JSON, but no schema_version key.
+	var raw: String = "# v4 save\n{\"seed\": 9001, \"run_id\": \"run_9001\", \"units\": [], \"items\": [], \"next_unit_instance_seq\": 1, \"next_item_instance_seq\": 1}"
+	var bytes: PackedByteArray = raw.to_utf8_buffer()
+	assert(ops.write_bytes_and_flush(runs_dir + "run_9001.tres", bytes), "write missing-schema file")
+	var repo: RefCounted = RunSaveRepositoryScript.new(runs_dir)
+	var r: RefCounted = repo.load_run(9001)
+	_assert(r.is_error(), "missing schema -> error")
+	_assert(r.status == SaveLoadResultScript.ERROR_CORRUPT_V4,
+		"status == ERROR_CORRUPT_V4")
 	_cleanup(runs_dir)
