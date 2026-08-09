@@ -51,6 +51,10 @@ func _initialize() -> void:
 	_test_recovery_stale_commit_old_remove_failure_returns_error()
 	_test_post_commit_validate_rejects_invalid_target()
 	_test_stale_state_cleanup_removes_invalid_temp_files()
+	_test_structural_validation_works_on_dot_bak_path()
+	_test_existing_corrupt_backup_blocks_migration()
+	_test_rollback_does_not_delete_immutable_backup()
+	_test_post_migration_backup_sha256_matches_original()
 	print("\n=== production save repository: %d passed, %d failed ===\n" % [_passed, _failed])
 	if _failed > 0:
 		quit(1)
@@ -596,6 +600,115 @@ func _test_repository_counter_migration_increments() -> void:
 	var r2: RefCounted = repo.load_run(9001)
 	_assert(not r2.migrated, "second load does not migrate")
 	_cleanup(runs_dir)
+
+
+# ---------------------------------------------------------------------------
+# Task 3 — Backup protocol hardening
+# ---------------------------------------------------------------------------
+
+func _test_structural_validation_works_on_dot_bak_path() -> void:
+	print("[backup] structural validation works on *.legacy-v1.bak path")
+	var runs_dir: String = _isolated_runs_dir("bak_structural_validation")
+	_cleanup(runs_dir)
+	# Copy a real byte-faithful legacy fixture to the .bak path.
+	var src: PackedByteArray = FileAccess.get_file_as_bytes(
+		RUN_FIXTURES_DIR + "/active_run_minimal.tres")
+	var bak_path: String = runs_dir + "run_9001.tres.legacy-v1.bak"
+	DirAccess.make_dir_recursive_absolute(runs_dir)
+	var f: FileAccess = FileAccess.open(bak_path, FileAccess.WRITE)
+	f.store_buffer(src)
+	f.close()
+	var repo: RefCounted = RunSaveRepositoryScript.new(runs_dir)
+	# Access via the bytes-only structural validator.
+	var valid: bool = repo._is_structurally_valid_legacy_v1(bak_path)
+	_assert(valid, "real legacy bytes on *.bak path pass structural validation")
+	# A file that does NOT contain the legacy keys must NOT pass.
+	var junk_path: String = runs_dir + "junk.legacy-v1.bak"
+	var f2: FileAccess = FileAccess.open(junk_path, FileAccess.WRITE)
+	f2.store_line("not a tres")
+	f2.close()
+	var valid_junk: bool = repo._is_structurally_valid_legacy_v1(junk_path)
+	_assert(not valid_junk, "junk bytes on *.bak path fail structural validation")
+	_cleanup(runs_dir)
+
+
+func _test_existing_corrupt_backup_blocks_migration() -> void:
+	print("[backup] existing corrupt backup blocks migration")
+	var runs_dir: String = _isolated_runs_dir("existing_corrupt_backup")
+	_cleanup(runs_dir)
+	# Create a valid legacy target.
+	assert(_copy_fixture("active_run_minimal", runs_dir + "run_9001.tres"))
+	# Pre-create a CORRUPT backup (does not satisfy structural validation).
+	var bak_path: String = runs_dir + "run_9001.tres" + RunSaveRepositoryScript.BACKUP_SUFFIX
+	var f: FileAccess = FileAccess.open(bak_path, FileAccess.WRITE)
+	f.store_line("not a tres")
+	f.close()
+	var repo: RefCounted = RunSaveRepositoryScript.new(runs_dir)
+	var r: RefCounted = repo.load_run(9001)
+	_assert(r.is_error(), "corrupt backup blocks migration")
+	_assert(r.status == SaveLoadResultScript.ERROR_BACKUP_INVALID,
+		"corrupt backup -> ERROR_BACKUP_INVALID")
+	# The target must NOT be modified.
+	var target_bytes: PackedByteArray = FileAccess.get_file_as_bytes(runs_dir + "run_9001.tres")
+	var expected_bytes: PackedByteArray = FileAccess.get_file_as_bytes(
+		RUN_FIXTURES_DIR + "/active_run_minimal.tres")
+	_assert(target_bytes == expected_bytes,
+		"target unchanged when backup is corrupt")
+	_cleanup(runs_dir)
+
+
+func _test_rollback_does_not_delete_immutable_backup() -> void:
+	print("[backup] rollback does not delete immutable backup")
+	var runs_dir: String = _isolated_runs_dir("rollback_keeps_backup")
+	_cleanup(runs_dir)
+	# Create a valid legacy target.
+	assert(_copy_fixture("active_run_minimal", runs_dir + "run_9001.tres"))
+	var repo: RefCounted = RunSaveRepositoryScript.new(runs_dir)
+	var r1: RefCounted = repo.load_run(9001)
+	_assert(r1.is_ok() and r1.migrated, "first migration OK")
+	var bak_path: String = runs_dir + "run_9001.tres" + RunSaveRepositoryScript.BACKUP_SUFFIX
+	var backup_bytes_1: PackedByteArray = FileAccess.get_file_as_bytes(bak_path)
+	# Force a save with bad seed so the commit swap + post-commit
+	# validate fails and triggers a rollback. The rollback path
+	# must NOT remove the immutable legacy backup.
+	var src: Resource = load(RUN_FIXTURES_DIR + "/active_run_minimal.tres")
+	var mig: Dictionary = MigratorScript.migrate_run(src)
+	var v4: Dictionary = mig.get("data", {})
+	var bad_v4: Dictionary = v4.duplicate(true)
+	bad_v4["seed"] = 9999  # wrong seed
+	var wr: RefCounted = repo.save_run(9001, bad_v4)
+	_assert(wr.is_error(), "bad seed save -> error")
+	_assert(wr.status == SaveLoadResultScript.ERROR_ATOMIC_REPLACE_FAILED,
+		"status == ERROR_ATOMIC_REPLACE_FAILED")
+	# The immutable legacy backup must still be present with the
+	# same bytes as before the failed save.
+	var backup_bytes_2: PackedByteArray = FileAccess.get_file_as_bytes(bak_path)
+	_assert(backup_bytes_1 == backup_bytes_2,
+		"immutable legacy backup preserved across rollback")
+	_cleanup(runs_dir)
+
+
+func _test_post_migration_backup_sha256_matches_original() -> void:
+	print("[backup] post-migration backup SHA-256 matches legacy source")
+	var runs_dir: String = _isolated_runs_dir("backup_sha256")
+	_cleanup(runs_dir)
+	assert(_copy_fixture("partial_hp", runs_dir + "run_9005.tres"))
+	var legacy_sha: String = _ops_sha(runs_dir + "run_9005.tres")
+	var repo: RefCounted = RunSaveRepositoryScript.new(runs_dir)
+	repo.load_run(9005)
+	var backup_sha: String = _ops_sha(runs_dir + "run_9005.tres" + RunSaveRepositoryScript.BACKUP_SUFFIX)
+	_assert(backup_sha == legacy_sha,
+		"post-migration backup SHA-256 matches legacy source byte-for-byte")
+	_assert(backup_sha != "", "backup SHA-256 is non-empty")
+	_cleanup(runs_dir)
+
+
+func _ops_sha(path: String) -> String:
+	# Tiny wrapper so the post-migration sha256 test reads through
+	# the production ops contract.
+	var ProductionFileOps = preload("res://core/save/run_save_file_ops.gd")
+	var ops = ProductionFileOps.new()
+	return ops.sha256(path)
 
 
 # ---------------------------------------------------------------------------
