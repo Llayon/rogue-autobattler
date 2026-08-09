@@ -17,6 +17,11 @@ const ERROR_V4_LOAD_FAILED: int = 11
 const ERROR_CORRUPT_INPUT: int = 12
 const ERROR_V4_ALREADY_CURRENT: int = 13
 const ERROR_IO: int = 14
+const ERROR_BACKUP_INVALID: int = 15
+const ERROR_BACKUP_CONFLICT: int = 16
+const ERROR_CORRUPT_V4: int = 17
+const ERROR_UNSUPPORTED_SCHEMA: int = 18
+const ERROR_RECOVERY_FAILED: int = 19
 
 ## One of the OK / ERROR_* constants.
 var status: int = OK
@@ -27,8 +32,8 @@ var data: Dictionary = {}
 var source_format: String = "unknown"
 ## True when the load performed a legacy v1 -> v4 migration in
 ## memory and persisted the v4 file.
-var was_migrated: bool = false
-## When `was_migrated == true`, path to the immutable legacy backup
+var migrated: bool = false
+## When `migrated == true`, path to the immutable legacy backup
 ## file. Empty otherwise.
 var backup_path: String = ""
 ## Path to the save file that was loaded (legacy or v4). Useful for
@@ -84,4 +89,9 @@ static func _error_code_name(code: int) -> String:
 		ERROR_CORRUPT_INPUT: return "corrupt_input"
 		ERROR_V4_ALREADY_CURRENT: return "v4_already_current"
 		ERROR_IO: return "io_error"
+		ERROR_BACKUP_INVALID: return "backup_invalid"
+		ERROR_BACKUP_CONFLICT: return "backup_conflict"
+		ERROR_CORRUPT_V4: return "corrupt_v4"
+		ERROR_UNSUPPORTED_SCHEMA: return "unsupported_schema"
+		ERROR_RECOVERY_FAILED: return "recovery_failed"
 		_: return "unknown"

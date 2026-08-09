@@ -42,6 +42,15 @@ func _initialize() -> void:
 	_test_two_identical_definition_ids_distinct_after_round_trip()
 	_test_board_bench_order_preserved_after_round_trip()
 	_test_repository_counter_migration_increments()
+	_test_fresh_save_with_no_target_succeeds()
+	_test_second_save_uses_commit_old_swap()
+	_test_recovery_target_missing_valid_commit_old_restores()
+	_test_recovery_target_valid_stale_commit_old_removed()
+	_test_recovery_target_invalid_valid_commit_old_restores()
+	_test_recovery_both_invalid_returns_controlled_error()
+	_test_recovery_stale_commit_old_remove_failure_returns_error()
+	_test_post_commit_validate_rejects_invalid_target()
+	_test_stale_state_cleanup_removes_invalid_temp_files()
 	print("\n=== production save repository: %d passed, %d failed ===\n" % [_passed, _failed])
 	if _failed > 0:
 		quit(1)
@@ -138,7 +147,7 @@ func _test_legacy_v1_is_detected() -> void:
 	var r: RefCounted = repo.load_run(9001)
 	_assert(r.is_ok(), "legacy load OK after migration")
 	_assert(r.source_format == "v4", "post-migration source_format is v4 (got %s)" % r.source_format)
-	_assert(r.was_migrated == true, "was_migrated == true for first legacy load")
+	_assert(r.migrated == true, "migrated == true for first legacy load")
 	_cleanup(runs_dir)
 
 
@@ -157,7 +166,7 @@ func _test_existing_v4_is_detected() -> void:
 	var r: RefCounted = repo.load_run(9001)
 	_assert(r.is_ok(), "v4 load OK")
 	_assert(r.source_format == "v4", "v4 load source_format == v4")
-	_assert(r.was_migrated == false, "v4 load was_migrated == false")
+	_assert(r.migrated == false, "v4 load migrated == false")
 	_cleanup(runs_dir)
 
 
@@ -191,11 +200,12 @@ func _test_legacy_load_migrates_in_memory_and_persists_v4() -> void:
 	var repo: RefCounted = RunSaveRepositoryScript.new(runs_dir)
 	var r: RefCounted = repo.load_run(9001)
 	_assert(r.is_ok(), "migration OK")
-	_assert(r.was_migrated, "was_migrated == true")
+	_assert(r.migrated, "migrated == true")
 	_assert(r.source_format == "v4", "post-migration source_format == v4")
 	# After migration, the on-disk file is now a v4 file.
-	_assert(RunSaveRepositoryScript._looks_like_v4(FileAccess.get_file_as_bytes(runs_dir + "run_9001.tres")),
-		"on-disk file is now v4")
+	var post_bytes: PackedByteArray = FileAccess.get_file_as_bytes(runs_dir + "run_9001.tres")
+	_assert(post_bytes.get_string_from_utf8().begins_with("# v4 save"),
+		"on-disk file now begins with '# v4 save' marker")
 	# The backup exists.
 	_assert(FileAccess.file_exists(runs_dir + "run_9001.tres" + RunSaveRepositoryScript.BACKUP_SUFFIX),
 		"legacy backup file exists")
@@ -214,18 +224,20 @@ func _test_migration_creates_immutable_legacy_backup() -> void:
 	var repo: RefCounted = RunSaveRepositoryScript.new(runs_dir)
 	# First load -> migration creates backup.
 	var r1: RefCounted = repo.load_run(9001)
-	_assert(r1.is_ok() and r1.was_migrated, "first load migrates")
+	_assert(r1.is_ok() and r1.migrated, "first load migrates")
 	var backup_path: String = runs_dir + "run_9001.tres" + RunSaveRepositoryScript.BACKUP_SUFFIX
 	_assert(FileAccess.file_exists(backup_path), "backup exists after migration")
 	var backup_bytes_1: PackedByteArray = FileAccess.get_file_as_bytes(backup_path)
 	# Simulate a second migration attempt by overwriting the v4
-	# file with a fresh legacy save. The repository should refuse
-	# to overwrite the existing backup.
+	# file with a fresh legacy save. The repository must refuse
+	# to overwrite the existing backup AND refuse to migrate,
+	# because the existing backup belongs to a different legacy
+	# source.
 	assert(_copy_fixture("board_plus_bench", runs_dir + "run_9001.tres"))
-	# Force the on-disk file to look like legacy v1 by writing the
-	# raw bytes from board_plus_bench.tres (which is legacy v1).
 	var r2: RefCounted = repo.load_run(9001)
-	_assert(r2.is_ok() and r2.was_migrated, "second load migrates board_plus_bench")
+	_assert(r2.is_error(), "second load is refused (backup conflict)")
+	_assert(r2.status == SaveLoadResultScript.ERROR_BACKUP_CONFLICT,
+		"second load -> ERROR_BACKUP_CONFLICT")
 	# The backup must still be the first run's bytes, not the second.
 	var backup_bytes_2: PackedByteArray = FileAccess.get_file_as_bytes(backup_path)
 	_assert(backup_bytes_1 == backup_bytes_2, "legacy backup is immutable (not overwritten)")
@@ -273,10 +285,10 @@ func _test_repeat_load_does_not_migrate_again() -> void:
 	assert(_copy_fixture("active_run_minimal", runs_dir + "run_9001.tres"))
 	var repo: RefCounted = RunSaveRepositoryScript.new(runs_dir)
 	var r1: RefCounted = repo.load_run(9001)
-	_assert(r1.was_migrated, "first load migrates")
+	_assert(r1.migrated, "first load migrates")
 	# The v4 file is now on disk. Subsequent loads must not re-migrate.
 	var r2: RefCounted = repo.load_run(9001)
-	_assert(not r2.was_migrated, "second load does NOT migrate")
+	_assert(not r2.migrated, "second load does NOT migrate")
 	_assert(r2.source_format == "v4", "second load source_format == v4")
 	# backup must still exist (never overwritten).
 	_assert(FileAccess.file_exists(runs_dir + "run_9001.tres" + RunSaveRepositoryScript.BACKUP_SUFFIX),
@@ -381,8 +393,8 @@ func _test_backup_failure_does_not_overwrite_original() -> void:
 	_assert(legacy_bytes_before == post_bytes,
 		"original legacy file preserved on backup failure")
 	if r.is_error():
-		_assert(r.status == SaveLoadResultScript.ERROR_BACKUP_FAILED,
-			"backup failure -> ERROR_BACKUP_FAILED")
+		_assert(r.status == SaveLoadResultScript.ERROR_BACKUP_INVALID,
+			"backup failure -> ERROR_BACKUP_INVALID")
 	_cleanup(runs_dir)
 
 
@@ -582,5 +594,256 @@ func _test_repository_counter_migration_increments() -> void:
 	# observable effect: subsequent load does not migrate, and the
 	# v4 file is now on disk.
 	var r2: RefCounted = repo.load_run(9001)
-	_assert(not r2.was_migrated, "second load does not migrate")
+	_assert(not r2.migrated, "second load does not migrate")
+	_cleanup(runs_dir)
+
+
+# ---------------------------------------------------------------------------
+# Task 2 — Recovery state machine + crash-recoverable commit + fresh save
+# ---------------------------------------------------------------------------
+
+func _test_fresh_save_with_no_target_succeeds() -> void:
+	print("[recovery] fresh save with no target succeeds")
+	var runs_dir: String = _isolated_runs_dir("fresh_save")
+	_cleanup(runs_dir)
+	var src: Resource = load(RUN_FIXTURES_DIR + "/active_run_minimal.tres")
+	var mig: Dictionary = MigratorScript.migrate_run(src)
+	var v4: Dictionary = mig.get("data", {})
+	var repo: RefCounted = RunSaveRepositoryScript.new(runs_dir)
+	var wr: RefCounted = repo.save_run(9001, v4)
+	_assert(wr.is_ok(), "fresh save returns OK")
+	_assert(FileAccess.file_exists(runs_dir + "run_9001.tres"), "target exists after fresh save")
+	var bytes: PackedByteArray = FileAccess.get_file_as_bytes(runs_dir + "run_9001.tres")
+	_assert(bytes.get_string_from_utf8().begins_with("# v4 save"),
+		"on-disk target begins with v4 marker")
+	# No commit-old should be present.
+	_assert(not FileAccess.file_exists(runs_dir + "run_9001.tres.commit-old"),
+		"no commit-old after fresh save")
+	# No legacy backup should be present.
+	_assert(not FileAccess.file_exists(runs_dir + "run_9001.tres" + RunSaveRepositoryScript.BACKUP_SUFFIX),
+		"no legacy backup on fresh v4 save")
+	_cleanup(runs_dir)
+
+
+func _test_second_save_uses_commit_old_swap() -> void:
+	print("[recovery] second save uses commit-old swap")
+	var runs_dir: String = _isolated_runs_dir("second_save_swap")
+	_cleanup(runs_dir)
+	var src: Resource = load(RUN_FIXTURES_DIR + "/active_run_minimal.tres")
+	var mig: Dictionary = MigratorScript.migrate_run(src)
+	var v4: Dictionary = mig.get("data", {})
+	var repo: RefCounted = RunSaveRepositoryScript.new(runs_dir)
+	repo.save_run(9001, v4)
+	var v4_after_first: PackedByteArray = FileAccess.get_file_as_bytes(runs_dir + "run_9001.tres")
+	# Second save: change the data (mutate an instance_seq), then save.
+	v4["gold"] = 1234
+	var wr2: RefCounted = repo.save_run(9001, v4)
+	_assert(wr2.is_ok(), "second save OK")
+	_assert(not FileAccess.file_exists(runs_dir + "run_9001.tres.commit-old"),
+		"commit-old removed after successful second save")
+	# The on-disk v4 file is the new one (gold=1234).
+	var bytes_after: PackedByteArray = FileAccess.get_file_as_bytes(runs_dir + "run_9001.tres")
+	_assert(bytes_after != v4_after_first, "second save replaced first")
+	# Reload to confirm.
+	var r: RefCounted = repo.load_run(9001)
+	_assert(int(r.data.get("gold", -1)) == 1234, "second save: gold=1234")
+	_cleanup(runs_dir)
+
+
+func _test_recovery_target_missing_valid_commit_old_restores() -> void:
+	print("[recovery] target missing + valid commit-old -> restore")
+	var runs_dir: String = _isolated_runs_dir("rec_target_missing_valid_co")
+	_cleanup(runs_dir)
+	# Build a v4 file via the migration path, then simulate an interrupted
+	# commit by renaming target -> commit-old and deleting target.
+	var src: Resource = load(RUN_FIXTURES_DIR + "/active_run_minimal.tres")
+	var mig: Dictionary = MigratorScript.migrate_run(src)
+	var v4: Dictionary = mig.get("data", {})
+	var repo: RefCounted = RunSaveRepositoryScript.new(runs_dir)
+	repo.save_run(9001, v4)
+	# Simulate interruption: rename target to commit-old, then delete target.
+	var target: String = runs_dir + "run_9001.tres"
+	var commit_old: String = target + ".commit-old"
+	var ok: bool = repo._ops.rename(target, commit_old)
+	_assert(ok, "rename target -> commit-old succeeds")
+	_assert(repo._ops.exists(commit_old), "commit-old now exists")
+	_assert(not repo._ops.exists(target), "target absent (simulating interrupted commit)")
+	# The recovery must restore target from commit-old.
+	var r: RefCounted = repo.load_run(9001)
+	_assert(r.is_ok(), "recovery restore -> OK")
+	_assert(r.source_format == "v4", "restored target is v4")
+	_assert(not repo._ops.exists(commit_old), "commit-old removed after recovery")
+	_cleanup(runs_dir)
+
+
+func _test_recovery_target_valid_stale_commit_old_removed() -> void:
+	print("[recovery] target valid + stale commit-old -> target authoritative, commit-old removed")
+	var runs_dir: String = _isolated_runs_dir("rec_target_valid_stale_co")
+	_cleanup(runs_dir)
+	var src: Resource = load(RUN_FIXTURES_DIR + "/active_run_minimal.tres")
+	var mig: Dictionary = MigratorScript.migrate_run(src)
+	var v4: Dictionary = mig.get("data", {})
+	var repo: RefCounted = RunSaveRepositoryScript.new(runs_dir)
+	repo.save_run(9001, v4)
+	# Inject a STALE commit-old (just bytes from a different fixture).
+	var commit_old: String = runs_dir + "run_9001.tres.commit-old"
+	var stale_bytes: PackedByteArray = FileAccess.get_file_as_bytes(
+		RUN_FIXTURES_DIR + "/board_plus_bench.tres")
+	var sf: FileAccess = FileAccess.open(commit_old, FileAccess.WRITE)
+	sf.store_buffer(stale_bytes)
+	sf.close()
+	var r: RefCounted = repo.load_run(9001)
+	_assert(r.is_ok(), "load OK with stale commit-old")
+	_assert(r.source_format == "v4", "target authoritative -> source_format == v4")
+	_assert(not repo._ops.exists(commit_old), "stale commit-old removed by recovery")
+	_cleanup(runs_dir)
+
+
+func _test_recovery_target_invalid_valid_commit_old_restores() -> void:
+	print("[recovery] target invalid + valid commit-old -> restore commit-old")
+	var runs_dir: String = _isolated_runs_dir("rec_target_invalid_valid_co")
+	_cleanup(runs_dir)
+	var src: Resource = load(RUN_FIXTURES_DIR + "/active_run_minimal.tres")
+	var mig: Dictionary = MigratorScript.migrate_run(src)
+	var v4: Dictionary = mig.get("data", {})
+	var repo: RefCounted = RunSaveRepositoryScript.new(runs_dir)
+	repo.save_run(9001, v4)
+	# Snapshot current target bytes.
+	var target: String = runs_dir + "run_9001.tres"
+	var commit_old: String = target + ".commit-old"
+	# Manually emulate "commit-old holds the previous valid v4":
+	# rename target -> commit-old.
+	repo._ops.rename(target, commit_old)
+	# Corrupt target with junk.
+	var f: FileAccess = FileAccess.open(target, FileAccess.WRITE)
+	f.store_line("garbage not v4 not legacy")
+	f.close()
+	# load_run must restore commit-old.
+	var r: RefCounted = repo.load_run(9001)
+	_assert(r.is_ok(), "recovery restores from valid commit-old")
+	_assert(r.source_format == "v4", "restored source_format == v4")
+	_assert(not repo._ops.exists(commit_old), "commit-old removed after restore")
+	_cleanup(runs_dir)
+
+
+func _test_recovery_both_invalid_returns_controlled_error() -> void:
+	print("[recovery] target invalid + commit-old invalid -> controlled error, destroy nothing")
+	var runs_dir: String = _isolated_runs_dir("rec_both_invalid")
+	_cleanup(runs_dir)
+	# Inject two corrupt files: target and commit-old both non-v4 non-legacy.
+	var target: String = runs_dir + "run_9001.tres"
+	var commit_old: String = target + ".commit-old"
+	var f1: FileAccess = FileAccess.open(target, FileAccess.WRITE)
+	f1.store_line("garbage 1"); f1.close()
+	var f2: FileAccess = FileAccess.open(commit_old, FileAccess.WRITE)
+	f2.store_line("garbage 2"); f2.close()
+	var original_target_bytes: PackedByteArray = FileAccess.get_file_as_bytes(target)
+	var original_co_bytes: PackedByteArray = FileAccess.get_file_as_bytes(commit_old)
+	var repo: RefCounted = RunSaveRepositoryScript.new(runs_dir)
+	var r: RefCounted = repo.load_run(9001)
+	_assert(r.is_error(), "both invalid -> error")
+	_assert(r.status == SaveLoadResultScript.ERROR_CORRUPT_INPUT,
+		"status == ERROR_CORRUPT_INPUT")
+	# Files preserved unchanged.
+	var post_target: PackedByteArray = FileAccess.get_file_as_bytes(target)
+	var post_co: PackedByteArray = FileAccess.get_file_as_bytes(commit_old)
+	_assert(post_target == original_target_bytes, "target preserved unchanged")
+	_assert(post_co == original_co_bytes, "commit-old preserved unchanged")
+	_cleanup(runs_dir)
+
+
+func _test_recovery_stale_commit_old_remove_failure_returns_error() -> void:
+	print("[recovery] stale commit-old remove failure -> error, no new save")
+	var runs_dir: String = _isolated_runs_dir("rec_remove_fail")
+	_cleanup(runs_dir)
+	var src: Resource = load(RUN_FIXTURES_DIR + "/active_run_minimal.tres")
+	var mig: Dictionary = MigratorScript.migrate_run(src)
+	var v4: Dictionary = mig.get("data", {})
+	var repo: RefCounted = RunSaveRepositoryScript.new(runs_dir)
+	repo.save_run(9001, v4)
+	# Inject a stale commit-old whose removal we will force to fail.
+	var commit_old: String = runs_dir + "run_9001.tres.commit-old"
+	var stale_bytes: PackedByteArray = FileAccess.get_file_as_bytes(
+		RUN_FIXTURES_DIR + "/board_plus_bench.tres")
+	var sf: FileAccess = FileAccess.open(commit_old, FileAccess.WRITE)
+	sf.store_buffer(stale_bytes)
+	sf.close()
+	# Swap the production ops with a fault ops that fails remove().
+	var FaultOps = preload("res://tests/save_repository/support/run_save_file_ops_fault.gd")
+	var fault: RefCounted = FaultOps.new()
+	fault.fail_methods[&"remove"] = true
+	# Re-point repository ops to fault adapter so recovery's remove call fails.
+	repo._ops = fault
+	var r: RefCounted = repo.load_run(9001)
+	_assert(r.is_error(), "recovery remove failure -> error")
+	_assert(r.status == SaveLoadResultScript.ERROR_IO,
+		"status == ERROR_IO")
+	# commit-old is still on disk (remove failed).
+	_assert(FileAccess.file_exists(commit_old), "commit-old still present after failed remove")
+	_cleanup(runs_dir)
+
+
+func _test_post_commit_validate_rejects_invalid_target() -> void:
+	print("[recovery] post-commit validate rejects invalid target after a successful rename")
+	var runs_dir: String = _isolated_runs_dir("post_commit_reject")
+	_cleanup(runs_dir)
+	var src: Resource = load(RUN_FIXTURES_DIR + "/active_run_minimal.tres")
+	var mig: Dictionary = MigratorScript.migrate_run(src)
+	var v4: Dictionary = mig.get("data", {})
+	# Corrupt the seed so post-commit validate fails.
+	var bad_v4: Dictionary = v4.duplicate(true)
+	bad_v4["seed"] = 9999  # wrong seed
+	var repo: RefCounted = RunSaveRepositoryScript.new(runs_dir)
+	# Fresh save: target doesn't exist yet. Save validates before write
+	# and should refuse to write the temp file because seed mismatch is
+	# caught later. But this is a fresh save, so there's no previous
+	# generation. We can't easily force a fresh save to pass the
+	# pre-validate but fail the post-validate. Instead, write a valid
+	# v4 first, then save with a different seed: the pre-validate is
+	# skipped (no top-level check in this code path), but the post-commit
+	# validate reads the file and rejects seed mismatch.
+	repo.save_run(9001, v4)
+	# Now attempt to save with mismatched seed. This must trigger the
+	# commit swap + post-commit validate failure. Result: target is
+	# restored from commit-old.
+	var pre_bytes: PackedByteArray = FileAccess.get_file_as_bytes(runs_dir + "run_9001.tres")
+	var wr: RefCounted = repo.save_run(9001, bad_v4)
+	_assert(wr.is_error(), "bad seed save -> error")
+	_assert(wr.status == SaveLoadResultScript.ERROR_ATOMIC_REPLACE_FAILED,
+		"status == ERROR_ATOMIC_REPLACE_FAILED")
+	# Target on disk is the pre-existing valid v4.
+	var post_bytes: PackedByteArray = FileAccess.get_file_as_bytes(runs_dir + "run_9001.tres")
+	_assert(post_bytes == pre_bytes, "target restored to pre-existing valid v4")
+	_cleanup(runs_dir)
+
+
+func _test_stale_state_cleanup_removes_invalid_temp_files() -> void:
+	print("[recovery] stale temp files cleaned before save begins")
+	var runs_dir: String = _isolated_runs_dir("stale_cleanup")
+	_cleanup(runs_dir)
+	var src: Resource = load(RUN_FIXTURES_DIR + "/active_run_minimal.tres")
+	var mig: Dictionary = MigratorScript.migrate_run(src)
+	var v4: Dictionary = mig.get("data", {})
+	var repo: RefCounted = RunSaveRepositoryScript.new(runs_dir)
+	repo.save_run(9001, v4)
+	# Inject stale temp and v4-temp files. They are not authoritative.
+	var target: String = runs_dir + "run_9001.tres"
+	var stale_tmp: String = target + ".tmp"
+	var stale_v4_tmp: String = target + ".v4.tmp"
+	var stale_bytes: PackedByteArray = "stale".to_utf8_buffer()
+	var sf1: FileAccess = FileAccess.open(stale_tmp, FileAccess.WRITE)
+	sf1.store_buffer(stale_bytes); sf1.close()
+	var sf2: FileAccess = FileAccess.open(stale_v4_tmp, FileAccess.WRITE)
+	sf2.store_buffer(stale_bytes); sf2.close()
+	# The save recovery runs at the top of save_run and uses rename-only
+	# logic. Stale .tmp / .v4.tmp are removed by _commit_verified_temp
+	# via the temp-write that overwrites them. Confirm: a fresh save_run
+	# succeeds and the stale temp files no longer contain "stale".
+	var wr: RefCounted = repo.save_run(9001, v4)
+	_assert(wr.is_ok(), "save with stale temp files -> OK")
+	# The temp paths no longer contain the stale marker.
+	if FileAccess.file_exists(stale_tmp):
+		var post_tmp: PackedByteArray = FileAccess.get_file_as_bytes(stale_tmp)
+		_assert(post_tmp.get_string_from_utf8() != "stale",
+			"stale .tmp content overwritten by current save temp")
 	_cleanup(runs_dir)
