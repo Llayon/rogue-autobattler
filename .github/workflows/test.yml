@@ -38,16 +38,18 @@ jobs:
           ! grep -nE 'SCRIPT ERROR|Parse Error|ERROR:|\[FAIL\]' /tmp/legacy-regression.log
           grep -E 'Result:' /tmp/legacy-regression.log | tail -1
 
-      - name: Run legacy characterization suite (3 runs, identical result)
+      - name: Run legacy characterization suite (3 runs, all produce result, identical)
         run: |
           set -euo pipefail
           for run in $(seq 1 3); do
             godot --headless --path . --script tests/legacy_characterization/legacy_characterization_test.gd 2>&1 | tee "/tmp/legacy-characterization-${run}.log"
             ! grep -nE 'SCRIPT ERROR|Parse Error|ERROR:|\[FAIL\]' "/tmp/legacy-characterization-${run}.log"
+            grep -q 'Legacy characterization:' "/tmp/legacy-characterization-${run}.log"
           done
           LINES=$(grep -h 'Legacy characterization:' /tmp/legacy-characterization-*.log | sort -u)
           echo "$LINES"
           test "$(echo "$LINES" | wc -l)" -eq 1
+          test "$(grep -h 'Legacy characterization:' /tmp/legacy-characterization-*.log | wc -l)" -eq 3
 
       - name: Run legacy save fixture loader
         run: |
