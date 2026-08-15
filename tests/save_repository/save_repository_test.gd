@@ -65,6 +65,7 @@ func _initialize() -> void:
 	_test_recovery_legacy_seed_mismatch_is_not_recoverable()
 	_test_save_seed_mismatch_rejected_before_filesystem_mutation()
 	_test_save_run_id_mismatch_rejected_before_filesystem_mutation()
+	_test_save_load_result_has_typed_context_field()
 	print("\n=== production save repository: %d passed, %d failed ===\n" % [_passed, _failed])
 	if _failed > 0:
 		quit(1)
@@ -688,8 +689,8 @@ func _test_rollback_does_not_delete_immutable_backup() -> void:
 	bad_v4["seed"] = 9999  # wrong seed
 	var wr: RefCounted = repo.save_run(9001, bad_v4)
 	_assert(wr.is_error(), "bad seed save -> error")
-	_assert(wr.status == SaveLoadResultScript.ERROR_ATOMIC_REPLACE_FAILED,
-		"status == ERROR_ATOMIC_REPLACE_FAILED")
+	_assert(wr.status == SaveLoadResultScript.ERROR_V4_VALIDATION_FAILED,
+		"status == ERROR_V4_VALIDATION_FAILED")
 	# The immutable legacy backup must still be present with the
 	# same bytes as before the failed save.
 	var backup_bytes_2: PackedByteArray = FileAccess.get_file_as_bytes(bak_path)
@@ -932,8 +933,8 @@ func _test_post_commit_validate_rejects_invalid_target() -> void:
 	var pre_bytes: PackedByteArray = FileAccess.get_file_as_bytes(runs_dir + "run_9001.tres")
 	var wr: RefCounted = repo.save_run(9001, bad_v4)
 	_assert(wr.is_error(), "bad seed save -> error")
-	_assert(wr.status == SaveLoadResultScript.ERROR_ATOMIC_REPLACE_FAILED,
-		"status == ERROR_ATOMIC_REPLACE_FAILED")
+	_assert(wr.status == SaveLoadResultScript.ERROR_V4_VALIDATION_FAILED,
+		"status == ERROR_V4_VALIDATION_FAILED")
 	# Target on disk is the pre-existing valid v4.
 	var post_bytes: PackedByteArray = FileAccess.get_file_as_bytes(runs_dir + "run_9001.tres")
 	_assert(post_bytes == pre_bytes, "target restored to pre-existing valid v4")
@@ -1261,4 +1262,17 @@ func _test_save_run_id_mismatch_rejected_before_filesystem_mutation() -> void:
 	_assert(wr.status == SaveLoadResultScript.ERROR_V4_VALIDATION_FAILED,
 		"status == ERROR_V4_VALIDATION_FAILED")
 	_cleanup(runs_dir)
+
+
+# ---------------------------------------------------------------------------
+# Task 1 — typed context field
+# ---------------------------------------------------------------------------
+
+func _test_save_load_result_has_typed_context_field() -> void:
+	print("[result] SaveLoadResult has typed context field")
+	var r: RefCounted = SaveLoadResultScript.error_with(
+		SaveLoadResultScript.ERROR_V4_VALIDATION_FAILED, "v4", "test detail")
+	r.context = "seed_consistency"
+	_assert(r.context == "seed_consistency",
+		"context field is typed String and roundtrips")
 

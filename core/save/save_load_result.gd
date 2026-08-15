@@ -27,6 +27,10 @@ const ERROR_RECOVERY_FAILED: int = 19
 var status: int = OK
 ## Optional `v4 DTO` (Dictionary) on success; empty on failure.
 var data: Dictionary = {}
+## Optional stable context tag (e.g. "seed_consistency",
+## "run_id_consistency"). Carries no semantic meaning beyond
+## being a stable diagnostic key for the caller.
+var context: String = ""
 ## One of "legacy_v1", "v4", "unknown", "missing". Useful for tests
 ## and for cache invalidation.
 var source_format: String = "unknown"
