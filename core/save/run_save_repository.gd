@@ -197,6 +197,52 @@ static func _to_json_safe(value: Variant) -> Variant:
 # Wire normalization
 # ---------------------------------------------------------------------------
 
+static func _normalize_wire_static(parsed: Dictionary) -> Dictionary:
+	# Wire-normalise a JSON-parsed Dictionary. JSON.parse_string
+	# returns integral numbers as floats; we coerce integral floats
+	# back to ints and reject the rest. See _normalize_wire for the
+	# legacy instance-method form which delegates here.
+	var out: Dictionary = parsed.duplicate(true)
+	for key in SaveSchemaV4Script.TOP_LEVEL_KEYS:
+		if parsed.has(key):
+			out[key] = parsed[key]
+	for key in INTEGER_FIELDS:
+		if out.has(key):
+			var r: Dictionary = SaveSchemaV4Script._wire_int(out[key])
+			if not r.ok:
+				return {}
+			out[key] = r.value
+	if out.has("units"):
+		var units_value: Variant = out["units"]
+		if not (units_value is Array):
+			return {}
+		var normalized_units: Array = []
+		for u in units_value:
+			if not (u is Dictionary):
+				return {}
+			var nu: Dictionary = (u as Dictionary).duplicate()
+			for k in UNIT_INTEGER_FIELDS:
+				if nu.has(k):
+					var r2: Dictionary = SaveSchemaV4Script._wire_int(nu[k])
+					if not r2.ok:
+						return {}
+					nu[k] = r2.value
+			normalized_units.append(nu)
+		out["units"] = normalized_units
+	if out.has("encounter_visited_ids"):
+		var ids: Variant = out["encounter_visited_ids"]
+		if not (ids is Array):
+			return {}
+		var normalized_ids: Array = []
+		for v in (ids as Array):
+			var r3: Dictionary = SaveSchemaV4Script._wire_int(v)
+			if not r3.ok:
+				return {}
+			normalized_ids.append(r3.value)
+		out["encounter_visited_ids"] = normalized_ids
+	return out
+
+
 func _normalize_wire(parsed: Dictionary) -> Dictionary:
 	var out: Dictionary = {}
 	for key in SaveSchemaV4Script.TOP_LEVEL_KEYS:
@@ -515,32 +561,77 @@ func _is_valid_recoverable_run(path: String, expected_seed: int) -> Dictionary:
 	if bytes.is_empty():
 		return {"valid": false}
 	var s: String = bytes.get_string_from_utf8()
-	# v4 path
+	# v4 path: run the strict gate. Recoverable means the file is
+	# genuinely usable for the slot, not just shape-recognisable.
 	if s.begins_with(SCHEMA_MARKER):
-		var nl: int = s.find("\n")
-		var body: String = s.substr(nl + 1, s.length() - (nl + 1))
-		var parsed: Variant = JSON.parse_string(body)
-		if not (parsed is Dictionary):
+		var parsed_v: Variant = JSON.parse_string(
+			s.substr(SCHEMA_MARKER.length() + 1))
+		if not (parsed_v is Dictionary):
 			return {"valid": false, "reason": "corrupt_v4"}
-		var schema_raw: Variant = parsed.get("schema_version", null)
-		var schema_r: Dictionary = SaveSchemaV4Script._wire_int(schema_raw)
-		if not schema_r.ok:
-			return {"valid": false, "reason": "corrupt_v4"}
-		if schema_r.value != SCHEMA_V4:
-			return {"valid": false, "reason": "unsupported_schema"}
-		if int(parsed.get("seed", -2)) != expected_seed:
+		var gate: Dictionary = _strictly_valid_v4(parsed_v)
+		if not bool(gate.get("valid", false)):
+			return {"valid": false, "reason": "strict_validation_failed"}
+		var sv: int = int((gate.data as Dictionary).get("seed", -2))
+		if sv != expected_seed:
 			return {"valid": false, "reason": "seed_mismatch"}
 		return {"valid": true, "format": "v4"}
 	# legacy v1 path: bytes-only structural check. ResourceLoader is
 	# NOT invoked here because it caches ext-resources and can mutate
-	# unrelated loads later in the same process.
+	# unrelated loads later in the same process. The legacy loader
+	# performs the actual seed match at load time.
 	if _is_structurally_valid_legacy_v1(path):
-		# Seed/version match is best-effort from bytes; we cannot read
-		# the actual `seed = N` line into a typed value without loading.
-		# The full seed match happens inside _load_legacy_and_migrate,
-		# which is allowed to call load() at the moment of migration.
+		# A .tres file is recoverable only if its seed line matches
+		# the expected slot. A mismatched-seed legacy file is NOT
+		# recoverable for that slot.
+		if not _legacy_seed_matches(path, expected_seed):
+			return {"valid": false, "reason": "legacy_seed_mismatch"}
 		return {"valid": true, "format": "legacy_v1"}
 	return {"valid": false}
+
+
+## Strict gate used by both recovery and post-commit validation:
+## validates that the parsed JSON Dictionary is a real, semantically
+## correct v4 DTO for the slot. Returns the normalised DTO on
+## success so callers don't have to repeat the work.
+static func _strictly_valid_v4(parsed: Dictionary) -> Dictionary:
+	# 0. Wire normalisation. JSON.parse_string returns integers as
+	# floats; without this step validate_shape rejects every
+	# integer-typed top-level key as "expected int got float".
+	var normalised: Dictionary = _normalize_wire_static(parsed)
+	# 1. Shape validation (catches wrong-type top-level fields).
+	var shape: Dictionary = SaveSchemaV4Script.validate_shape(normalised)
+	if not bool(shape.get("success", false)):
+		return {"valid": false, "reason": "shape_validation_failed",
+			"diagnostics": shape.get("diagnostics", [])}
+	# 2. Semantic validation (units/items shape, equipment invariants,
+	#    next_*_seq == max_used + 1, current_hp sentinel, location/order,
+	#    duplicates). SaveSchemaV4.validate_shape already rejected
+	#    top-level type mismatches; Migrator.validate catches the
+	#    nested invariants.
+	var mig: Dictionary = MigratorScript.validate(normalised)
+	if not bool(mig.get("success", false)):
+		return {"valid": false, "reason": "semantic_validation_failed",
+			"diagnostics": mig.get("diagnostics", [])}
+	return {"valid": true, "data": normalised}
+
+
+## Bytes-only legacy seed match. A .tres file's seed line is plain
+## text and can be matched without invoking ResourceLoader (which
+## caches ext-resources and can mutate unrelated loads).
+func _legacy_seed_matches(path: String, expected_seed: int) -> bool:
+	var bytes: PackedByteArray = _ops.read_bytes(path)
+	if bytes.is_empty():
+		return false
+	var s: String = bytes.get_string_from_utf8()
+	# Look for either "seed = N" or "seed=N".
+	var patterns: Array[String] = [
+		"seed = %d" % expected_seed,
+		"seed=%d" % expected_seed,
+	]
+	for pat in patterns:
+		if s.find(pat) >= 0:
+			return true
+	return false
 
 
 # ---------------------------------------------------------------------------

@@ -61,6 +61,8 @@ func _initialize() -> void:
 	_test_string_schema_version_5_is_corrupt_v4_not_v5()
 	_test_missing_schema_version_is_corrupt_v4()
 	_test_strict_validity_rejects_corrupt_v4_units()
+	_test_recovery_keeps_commit_old_when_target_is_corrupt_v4()
+	_test_recovery_legacy_seed_mismatch_is_not_recoverable()
 	print("\n=== production save repository: %d passed, %d failed ===\n" % [_passed, _failed])
 	if _failed > 0:
 		quit(1)
@@ -1118,4 +1120,78 @@ func _test_strict_validity_rejects_corrupt_v4_units() -> void:
 	var repo: RefCounted = RunSaveRepositoryScript.new(runs_dir)
 	var r: RefCounted = repo.load_run(9101)
 	_assert(r.is_error(), "corrupt v4 units -> load error")
+	_cleanup(runs_dir)
+
+
+# ---------------------------------------------------------------------------
+# Task 2 — Recovery strict gate (BLOCKER #1)
+# ---------------------------------------------------------------------------
+
+func _test_recovery_keeps_commit_old_when_target_is_corrupt_v4() -> void:
+	print("[recovery] corrupt v4 with marker+seed does NOT delete good commit-old")
+	var runs_dir: String = _isolated_runs_dir("recover_corrupt_target_keep_commit_old")
+	_cleanup(runs_dir)
+	# Reproduce the BLOCKER #1 scenario: a corrupt target on disk
+	# alongside a separate commit-old containing the good previous
+	# generation. Recovery must NOT treat the corrupt target as
+	# "valid" and must NOT delete the commit-old.
+	var src: Resource = load(RUN_FIXTURES_DIR + "/active_run_minimal.tres")
+	var mig: Dictionary = MigratorScript.migrate_run(src)
+	var v4_good: Dictionary = mig.get("data", {})
+	v4_good["seed"] = 9101
+	v4_good["run_id"] = "run_9101"
+	# Corrupt target: marker+seed+schema are all valid, but units have
+	# location=99 which is outside {0,1}.
+	var v4_corrupt: Dictionary = v4_good.duplicate(true)
+	v4_corrupt["units"] = [{"instance_id": "unit_000001",
+		"definition_id": "warrior",
+		"current_hp": 0, "max_hp": 100, "bonus_attack": 0,
+		"dead": false, "location": 99, "order": 0,
+		"equipped_item_ids": []}]
+	v4_corrupt["next_unit_instance_seq"] = 2
+	var ops = preload("res://core/save/run_save_file_ops.gd").new()
+	var good_bytes: PackedByteArray = RunSaveRepositoryScript.serialize_canonical_bytes(v4_good)
+	var corrupt_bytes: PackedByteArray = RunSaveRepositoryScript.serialize_canonical_bytes(v4_corrupt)
+	# Write corrupt target.
+	assert(ops.write_bytes_and_flush(runs_dir + "run_9101.tres", corrupt_bytes),
+		"write corrupt target")
+	# Write good commit-old (rename target to commit-old).
+	assert(ops.rename(runs_dir + "run_9101.tres",
+		runs_dir + "run_9101.tres.commit-old"),
+		"rename target -> commit-old")
+	# Re-write corrupt target.
+	assert(ops.write_bytes_and_flush(runs_dir + "run_9101.tres", corrupt_bytes),
+		"re-write corrupt target")
+	# Verify initial state: both files exist; commit-old is good,
+	# target is corrupt.
+	assert(ops.exists(runs_dir + "run_9101.tres"),
+		"target exists before recovery")
+	assert(ops.exists(runs_dir + "run_9101.tres.commit-old"),
+		"commit-old exists before recovery")
+	var repo: RefCounted = RunSaveRepositoryScript.new(runs_dir)
+	var r: RefCounted = repo.load_run(9101)
+	# Load must reject: corrupt target is not shape-valid.
+	_assert(r.is_error(), "load with corrupt target -> error")
+	# The good commit-old must STILL exist on disk because recovery
+	# must not delete it when the target is not a real valid save.
+	var commit_old_present: bool = ops.exists(runs_dir + "run_9101.tres.commit-old")
+	_assert(commit_old_present,
+		"good commit-old preserved after recovery rejection")
+	_cleanup(runs_dir)
+
+
+func _test_recovery_legacy_seed_mismatch_is_not_recoverable() -> void:
+	print("[recovery] legacy file with mismatched seed is NOT recoverable")
+	var runs_dir: String = _isolated_runs_dir("recover_legacy_seed_mismatch")
+	_cleanup(runs_dir)
+	var ProductionFileOps = preload("res://core/save/run_save_file_ops.gd")
+	var ops = ProductionFileOps.new()
+	var src_bytes: PackedByteArray = FileAccess.get_file_as_bytes(
+		RUN_FIXTURES_DIR + "/active_run_minimal.tres")
+	assert(ops.write_bytes_and_flush(runs_dir + "run_9101.tres", src_bytes),
+		"copy legacy fixture to run_9101.tres succeeds")
+	var repo: RefCounted = RunSaveRepositoryScript.new(runs_dir)
+	var r: RefCounted = repo.load_run(9101)
+	_assert(r.is_error(),
+		"load with legacy mismatched seed -> error")
 	_cleanup(runs_dir)
