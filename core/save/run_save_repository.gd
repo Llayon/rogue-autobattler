@@ -127,7 +127,9 @@ func save_run(seed_value: int, v4_data: Dictionary) -> RefCounted:
 	var rec: Dictionary = _recover_startup_state(target, seed_value)
 	if not rec.ok:
 		return _error(rec.error_code, "unknown", rec.detail)
-	_validate_seed_consistency(seed_value, v4_data)
+	var seed_pre: RefCounted = _validate_seed_consistency(seed_value, v4_data)
+	if seed_pre.is_error():
+		return seed_pre
 	var v: Dictionary = MigratorScript.validate(v4_data)
 	if not bool(v.get("success", false)):
 		var r: RefCounted = _error(SaveLoadResultScript.ERROR_V4_VALIDATION_FAILED, "v4",
@@ -743,10 +745,30 @@ func _read_dict_text(path: String) -> Dictionary:
 # Misc helpers
 # ---------------------------------------------------------------------------
 
-func _validate_seed_consistency(seed_value: int, v4_data: Dictionary) -> void:
-	# Soft check; the validator emits the canonical diagnostic.
-	# Not used to abort here; the validator does.
-	pass
+func _validate_seed_consistency(seed_value: int, v4_data: Dictionary) -> RefCounted:
+	# Pre-save consistency check: the requested seed must match the
+	# DTO seed, and the run_id must be the canonical "run_<seed>"
+	# derived from that seed. A mismatch is rejected BEFORE any
+	# filesystem mutation. Returning a SaveLoadResult lets the
+	# caller short-circuit the save_run() without touching disk.
+	var sv: int = int(v4_data.get("seed", -1))
+	if sv != seed_value:
+		var r: RefCounted = SaveLoadResultScript.error_with(
+			SaveLoadResultScript.ERROR_V4_VALIDATION_FAILED,
+			"v4",
+			"v4 seed %d does not match requested seed %d" % [sv, seed_value])
+		r.context = "seed_consistency"
+		return r
+	var expected_run_id: String = "run_%d" % seed_value
+	var actual_run_id: String = String(v4_data.get("run_id", ""))
+	if actual_run_id != expected_run_id:
+		var r2: RefCounted = SaveLoadResultScript.error_with(
+			SaveLoadResultScript.ERROR_V4_VALIDATION_FAILED,
+			"v4",
+			"v4 run_id %s does not match expected %s" % [actual_run_id, expected_run_id])
+		r2.context = "run_id_consistency"
+		return r2
+	return SaveLoadResultScript.ok()
 
 
 func _error(code: int, source_format: String, detail: String) -> RefCounted:

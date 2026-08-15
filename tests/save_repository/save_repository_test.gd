@@ -63,6 +63,8 @@ func _initialize() -> void:
 	_test_strict_validity_rejects_corrupt_v4_units()
 	_test_recovery_keeps_commit_old_when_target_is_corrupt_v4()
 	_test_recovery_legacy_seed_mismatch_is_not_recoverable()
+	_test_save_seed_mismatch_rejected_before_filesystem_mutation()
+	_test_save_run_id_mismatch_rejected_before_filesystem_mutation()
 	print("\n=== production save repository: %d passed, %d failed ===\n" % [_passed, _failed])
 	if _failed > 0:
 		quit(1)
@@ -1195,3 +1197,68 @@ func _test_recovery_legacy_seed_mismatch_is_not_recoverable() -> void:
 	_assert(r.is_error(),
 		"load with legacy mismatched seed -> error")
 	_cleanup(runs_dir)
+
+
+# ---------------------------------------------------------------------------
+# Task 4 — Pre-save seed/run_id check (BLOCKER #3)
+# ---------------------------------------------------------------------------
+
+func _test_save_seed_mismatch_rejected_before_filesystem_mutation() -> void:
+	print("[save] seed mismatch rejected BEFORE filesystem mutation")
+	var runs_dir: String = _isolated_runs_dir("save_seed_mismatch_pre_fs")
+	_cleanup(runs_dir)
+	var src: Resource = load(RUN_FIXTURES_DIR + "/active_run_minimal.tres")
+	var mig: Dictionary = MigratorScript.migrate_run(src)
+	var v4: Dictionary = mig.get("data", {})
+	v4["seed"] = 9101
+	v4["run_id"] = "run_9101"
+	var repo: RefCounted = RunSaveRepositoryScript.new(runs_dir)
+	var save_ok: RefCounted = repo.save_run(9101, v4)
+	_assert(save_ok != null and save_ok.is_ok(),
+		"first save with matching seed succeeds")
+	# Now attempt to save with mismatched seed.
+	var v4_bad: Dictionary = v4.duplicate(true)
+	v4_bad["seed"] = 9999
+	v4_bad["run_id"] = "run_9999"
+	var save_bad: RefCounted = repo.save_run(9101, v4_bad)
+	_assert(save_bad.is_error(),
+		"save with mismatched seed -> error BEFORE filesystem mutation")
+	_assert(save_bad.status == SaveLoadResultScript.ERROR_V4_VALIDATION_FAILED,
+		"status == ERROR_V4_VALIDATION_FAILED")
+	# On-disk target must remain the good original (unchanged).
+	var ops = preload("res://core/save/run_save_file_ops.gd").new()
+	var bytes: PackedByteArray = ops.read_bytes(runs_dir + "run_9101.tres")
+	_assert(not bytes.is_empty(),
+		"target file untouched after rejected save")
+	var s2: String = bytes.get_string_from_utf8()
+	var parsed: Variant = JSON.parse_string(s2.substr("# v4 save\n".length()))
+	_assert(int((parsed as Dictionary).get("seed", -2)) == 9101,
+		"on-disk target seed unchanged")
+	# No .commit-old file should exist (no commit attempted).
+	_assert(not ops.exists(runs_dir + "run_9101.tres.commit-old"),
+		"no commit-old created from rejected save")
+	_cleanup(runs_dir)
+
+
+func _test_save_run_id_mismatch_rejected_before_filesystem_mutation() -> void:
+	print("[save] run_id mismatch rejected BEFORE filesystem mutation")
+	var runs_dir: String = _isolated_runs_dir("save_run_id_mismatch_pre_fs")
+	_cleanup(runs_dir)
+	var src: Resource = load(RUN_FIXTURES_DIR + "/active_run_minimal.tres")
+	var mig: Dictionary = MigratorScript.migrate_run(src)
+	var v4: Dictionary = mig.get("data", {})
+	v4["seed"] = 9101
+	v4["run_id"] = "run_9101"
+	var repo: RefCounted = RunSaveRepositoryScript.new(runs_dir)
+	var save_bad: RefCounted = repo.save_run(9101, v4.duplicate(true))
+	# Now use a DTO whose run_id is mismatched.
+	var v4_bad: Dictionary = v4.duplicate(true)
+	v4_bad["seed"] = 9101
+	v4_bad["run_id"] = "run_9999"
+	var wr: RefCounted = repo.save_run(9101, v4_bad)
+	_assert(wr.is_error(),
+		"save with run_id mismatch -> error BEFORE filesystem mutation")
+	_assert(wr.status == SaveLoadResultScript.ERROR_V4_VALIDATION_FAILED,
+		"status == ERROR_V4_VALIDATION_FAILED")
+	_cleanup(runs_dir)
+
