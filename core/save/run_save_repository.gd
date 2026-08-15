@@ -674,26 +674,27 @@ func _commit_verified_temp(temp: String, target: String, seed_value: int) -> boo
 	return true
 
 
-func _post_commit_validate(target: String, seed_value: int) -> bool:
+func _post_commit_validate(target: String, expected_seed: int) -> bool:
 	# Re-read target and verify it is a valid v4 file with the
-	# expected seed. Avoids reporting success when something on
-	# disk post-rename does not parse.
+	# expected seed. The full strict gate is used (wire normalisation
+	# + validate_shape + Migrator.validate + seed/run_id). Anything
+	# weaker than this lets a syntactically valid but semantically
+	# broken JSON destroy the previous generation.
 	var bytes: PackedByteArray = _ops.read_bytes(target)
 	if bytes.is_empty():
 		return false
 	var s: String = bytes.get_string_from_utf8()
 	if not s.begins_with(SCHEMA_MARKER):
 		return false
-	var nl: int = s.find("\n")
-	var body: String = s.substr(nl + 1, s.length() - (nl + 1))
-	var parsed: Variant = JSON.parse_string(body)
+	var parsed: Variant = JSON.parse_string(
+		s.substr(SCHEMA_MARKER.length() + 1))
 	if not (parsed is Dictionary):
 		return false
-	if int(parsed.get("seed", -2)) != seed_value:
+	var gate: Dictionary = _strictly_valid_v4(parsed)
+	if not bool(gate.get("valid", false)):
 		return false
-	if int(parsed.get("schema_version", -2)) != SCHEMA_V4:
-		return false
-	return true
+	var sv: int = int((gate.data as Dictionary).get("seed", -2))
+	return sv == expected_seed
 
 
 func _verify_temp(temp: String, expected_bytes: PackedByteArray) -> bool:
