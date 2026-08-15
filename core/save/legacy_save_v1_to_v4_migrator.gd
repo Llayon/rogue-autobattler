@@ -239,7 +239,11 @@ static func validate(data: Dictionary) -> Dictionary:
 					str(i)))
 				continue
 			var u: Dictionary = u_value
-			var instance_id: String = _safe_str(u.get("instance_id", ""))
+			var instance_id_v: Variant = _strict_str(u.get("instance_id", ""), "instance_id", str(i), result["diagnostics"])
+			if instance_id_v == null:
+				result["success"] = false
+				instance_id_v = ""
+			var instance_id: String = String(instance_id_v)
 			if instance_id == "":
 				result["success"] = false
 				result["diagnostics"].append(MigrationDiagnostic.error(
@@ -253,24 +257,67 @@ static func validate(data: Dictionary) -> Dictionary:
 					"duplicate unit instance_id %s" % instance_id,
 					instance_id))
 			unit_instance_to_idx[instance_id] = i
-			var definition_id: String = _safe_str(u.get("definition_id", ""))
+			var definition_id_v: Variant = _strict_str(u.get("definition_id", ""), "definition_id", instance_id, result["diagnostics"])
+			if definition_id_v == null:
+				result["success"] = false
+				definition_id_v = ""
+			var definition_id: String = String(definition_id_v)
 			if definition_id == "":
 				result["success"] = false
 				result["diagnostics"].append(MigrationDiagnostic.error(
 					"empty_unit_definition_id",
 					"unit[%d] (%s) has empty definition_id" % [i, instance_id],
 					instance_id))
-			var current_hp: int = _safe_int(u.get("current_hp", 0))
-			var max_hp: int = _safe_int(u.get("max_hp", 0))
-			var bonus_attack: int = _safe_int(u.get("bonus_attack", 0))
-			var location: int = _safe_int(u.get("location", -1))
-			var order: int = _safe_int(u.get("order", -1))
-			var dead_v: Variant = u.get("dead", false)
-			var dead: bool = (dead_v is bool) and (dead_v as bool)
-			var equipped: Array = []
-			var equipped_value: Variant = u.get("equipped_item_ids", [])
-			if equipped_value is Array:
-				equipped = equipped_value
+			var current_hp_value: Variant = _strict_int(
+				u.get("current_hp", 0), "current_hp", instance_id,
+				result["diagnostics"])
+			if current_hp_value == null:
+				result["success"] = false
+				current_hp_value = 0
+			var current_hp: int = int(current_hp_value)
+			var max_hp_value: Variant = _strict_int(
+				u.get("max_hp", 0), "max_hp", instance_id,
+				result["diagnostics"])
+			if max_hp_value == null:
+				result["success"] = false
+				max_hp_value = 0
+			var max_hp: int = int(max_hp_value)
+			var bonus_attack_value: Variant = _strict_int(
+				u.get("bonus_attack", 0), "bonus_attack", instance_id,
+				result["diagnostics"])
+			if bonus_attack_value == null:
+				result["success"] = false
+				bonus_attack_value = 0
+			var bonus_attack: int = int(bonus_attack_value)
+			var location_value: Variant = _strict_int(
+				u.get("location", -1), "location", instance_id,
+				result["diagnostics"])
+			if location_value == null:
+				result["success"] = false
+				location_value = 0
+			var location: int = int(location_value)
+			var order_value: Variant = _strict_int(
+				u.get("order", -1), "order", instance_id,
+				result["diagnostics"])
+			if order_value == null:
+				result["success"] = false
+				order_value = 0
+			var order: int = int(order_value)
+			var dead_value: Variant = _strict_bool(
+				u.get("dead", false), "dead", instance_id,
+				result["diagnostics"])
+			if dead_value == null:
+				result["success"] = false
+				dead_value = false
+			var dead: bool = bool(dead_value)
+			var equipped_value: Variant = _strict_array(
+				u.get("equipped_item_ids", []),
+				"equipped_item_ids", instance_id,
+				result["diagnostics"])
+			if equipped_value == null:
+				result["success"] = false
+				equipped_value = [] as Array
+			var equipped: Array = equipped_value
 			# Location must be 0 or 1.
 			if location != 0 and location != 1:
 				result["success"] = false
@@ -311,7 +358,11 @@ static func validate(data: Dictionary) -> Dictionary:
 			# Duplicate equipped_item_id entries inside one unit.
 			var seen_equipped: Dictionary = {}
 			for itm in equipped:
-				var itm_str: String = _safe_str(itm)
+				var itm_str_v: Variant = _strict_str(itm, "equipped_item_ids_entry", instance_id, result["diagnostics"])
+				if itm_str_v == null:
+					result["success"] = false
+					itm_str_v = ""
+				var itm_str: String = String(itm_str_v)
 				if seen_equipped.has(itm_str):
 					result["success"] = false
 					result["diagnostics"].append(MigrationDiagnostic.error(
@@ -340,7 +391,11 @@ static func validate(data: Dictionary) -> Dictionary:
 					str(i)))
 				continue
 			var it: Dictionary = it_value
-			var instance_id: String = _safe_str(it.get("instance_id", ""))
+			var instance_id_v: Variant = _strict_str(it.get("instance_id", ""), "instance_id", str(i), result["diagnostics"])
+			if instance_id_v == null:
+				result["success"] = false
+				instance_id_v = ""
+			var instance_id: String = String(instance_id_v)
 			if instance_id == "":
 				result["success"] = false
 				result["diagnostics"].append(MigrationDiagnostic.error(
@@ -354,14 +409,25 @@ static func validate(data: Dictionary) -> Dictionary:
 					"duplicate item instance_id %s" % instance_id,
 					instance_id))
 			item_instance_to_idx[instance_id] = i
-			var definition_id: String = _safe_str(it.get("definition_id", ""))
+			var definition_id_v: Variant = _strict_str(it.get("definition_id", ""), "definition_id", instance_id, result["diagnostics"])
+			if definition_id_v == null:
+				result["success"] = false
+				definition_id_v = ""
+			var definition_id: String = String(definition_id_v)
 			if definition_id == "":
 				result["success"] = false
 				result["diagnostics"].append(MigrationDiagnostic.error(
 					"empty_item_definition_id",
 					"item[%d] (%s) has empty definition_id" % [i, instance_id],
 					instance_id))
-			var owner: String = _safe_str(it.get("owner_unit_id", ""))
+			var owner: Variant = _strict_str(
+				it.get("owner_unit_id", ""),
+				"owner_unit_id", instance_id,
+				result["diagnostics"])
+			if owner == null:
+				result["success"] = false
+				owner = ""
+			var owner_s: String = String(owner)
 			if owner != "" and not unit_instance_to_idx.has(owner):
 				result["success"] = false
 				result["diagnostics"].append(MigrationDiagnostic.error(
@@ -375,7 +441,7 @@ static func validate(data: Dictionary) -> Dictionary:
 	# Bidirectional equipment consistency (H5 A-E).
 	for instance_id in item_instance_to_idx.keys():
 		var it2: Dictionary = items_value[item_instance_to_idx[instance_id]] as Dictionary
-		var owner2: String = _safe_str(it2.get("owner_unit_id", ""))
+		var owner2: String = String(it2.get("owner_unit_id", ""))
 		# Invariant A: item.owner set but unit does not list it.
 		if owner2 != "" and unit_instance_to_idx.has(owner2):
 			var unit_equipped: Array = unit_owner_listings.get(owner2, [])
@@ -402,7 +468,7 @@ static func validate(data: Dictionary) -> Dictionary:
 	for unit_id in unit_owner_listings.keys():
 		var listed2: Array = unit_owner_listings[unit_id]
 		for itm2 in listed2:
-			var itm_str2: String = _safe_str(itm2)
+			var itm_str2: String = String(itm2)
 			if not item_instance_to_idx.has(itm_str2):
 				result["success"] = false
 				result["diagnostics"].append(MigrationDiagnostic.error(
@@ -410,7 +476,7 @@ static func validate(data: Dictionary) -> Dictionary:
 					"unit %s lists unknown item id %s" % [unit_id, itm_str2],
 					unit_id))
 				continue
-			var owner3: String = _safe_str((items_value[item_instance_to_idx[itm_str2]] as Dictionary).get("owner_unit_id", ""))
+			var owner3: String = String((items_value[item_instance_to_idx[itm_str2]] as Dictionary).get("owner_unit_id", ""))
 			if owner3 == "":
 				result["success"] = false
 				result["diagnostics"].append(MigrationDiagnostic.error(
@@ -438,28 +504,59 @@ static func validate(data: Dictionary) -> Dictionary:
 ## Safe coercion helpers used by validate(). Never crash; never
 ## mutate the input. Each helper returns a typed default on type
 ## mismatch.
-static func _safe_str(value: Variant) -> String:
+static func _strict_str(value: Variant, key: String,
+		instance_id: String, diags: Array) -> Variant:
 	if typeof(value) == TYPE_STRING:
 		return value
 	if typeof(value) == TYPE_STRING_NAME:
-		return String(value)
-	return ""
+		return value
+	diags.append(MigrationDiagnostic.error(
+		"unit_field_type_invalid",
+		"%s.%s has wrong type %s" % [instance_id, key, type_string(typeof(value))],
+		instance_id))
+	return null
 
 
-static func _safe_int(value: Variant) -> int:
+static func _strict_int(value: Variant, key: String,
+		instance_id: String, diags: Array) -> Variant:
 	if typeof(value) == TYPE_INT:
-		return int(value)
+		return value
 	if typeof(value) == TYPE_FLOAT:
 		var f: float = float(value)
 		if is_finite(f) and f == floor(f):
 			return int(f)
-	return 0
+		diags.append(MigrationDiagnostic.error(
+			"unit_field_type_invalid",
+			"%s.%s non-integral float %s" % [instance_id, key, str(value)],
+			instance_id))
+		return null
+	diags.append(MigrationDiagnostic.error(
+		"unit_field_type_invalid",
+		"%s.%s has wrong type %s" % [instance_id, key, type_string(typeof(value))],
+		instance_id))
+	return null
 
 
-static func _safe_bool(value: Variant) -> bool:
+static func _strict_bool(value: Variant, key: String,
+		instance_id: String, diags: Array) -> Variant:
 	if typeof(value) == TYPE_BOOL:
-		return bool(value)
-	return false
+		return value
+	diags.append(MigrationDiagnostic.error(
+		"unit_field_type_invalid",
+		"%s.%s has wrong type %s" % [instance_id, key, type_string(typeof(value))],
+		instance_id))
+	return null
+
+
+static func _strict_array(value: Variant, key: String,
+		instance_id: String, diags: Array) -> Variant:
+	if value is Array:
+		return value
+	diags.append(MigrationDiagnostic.error(
+		"unit_field_type_invalid",
+		"%s.%s has wrong type %s" % [instance_id, key, type_string(typeof(value))],
+		instance_id))
+	return null
 
 
 # ---------------------------------------------------------------------------

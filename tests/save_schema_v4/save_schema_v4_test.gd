@@ -54,6 +54,9 @@ func _initialize() -> void:
 	_test_save_seed_mismatch_rejected()
 	_test_unit_state_match_by_definition_and_occurrence()
 	_test_unrecoverable_mismatch_uses_sentinel_defaults()
+	_test_strict_validator_rejects_string_current_hp()
+	_test_strict_validator_rejects_string_dead_flag()
+	_test_strict_validator_rejects_string_equipped_item_ids()
 	print("\n=== save schema v4 + migrator: %d passed, %d failed ===\n" % [_passed, _failed])
 	if _failed > 0:
 		quit(1)
@@ -843,3 +846,87 @@ func _test_unrecoverable_mismatch_uses_sentinel_defaults() -> void:
 				found = true
 				break
 		_assert(found, "unit_states diagnostic emitted on failure path")
+
+
+# ---------------------------------------------------------------------------
+# Task 5 — Strict nested validator (HIGH #1)
+# ---------------------------------------------------------------------------
+
+func _test_strict_validator_rejects_string_current_hp() -> void:
+	print("[validator] strict: rejects string current_hp")
+	var data: Dictionary = SaveSchemaV4.empty_dto()
+	var unit: Dictionary = {
+		"instance_id": "unit_000001",
+		"definition_id": "warrior",
+		"current_hp": "garbage",
+		"max_hp": 100,
+		"bonus_attack": 0,
+		"dead": false,
+		"location": 0,
+		"order": 0,
+		"equipped_item_ids": [],
+	}
+	data["units"] = [unit]
+	data["next_unit_instance_seq"] = 2
+	var r: Dictionary = Migrator.validate(data)
+	_assert(not bool(r.get("success", false)), "string current_hp rejected")
+	var found: bool = false
+	for d in r.get("diagnostics", []):
+		if d is RefCounted and d.code == "unit_field_type_invalid":
+			found = true
+			break
+	_assert(found, "unit_field_type_invalid diagnostic emitted")
+
+
+func _test_strict_validator_rejects_string_dead_flag() -> void:
+	print("[validator] strict: rejects string dead flag")
+	var data: Dictionary = SaveSchemaV4.empty_dto()
+	var unit: Dictionary = {
+		"instance_id": "unit_000001",
+		"definition_id": "warrior",
+		"current_hp": -1,
+		"max_hp": 100,
+		"bonus_attack": 0,
+		"dead": "banana",
+		"location": 0,
+		"order": 0,
+		"equipped_item_ids": [],
+	}
+	data["units"] = [unit]
+	data["next_unit_instance_seq"] = 2
+	var r: Dictionary = Migrator.validate(data)
+	_assert(not bool(r.get("success", false)), "string dead flag rejected")
+	var found: bool = false
+	for d in r.get("diagnostics", []):
+		if d is RefCounted and d.code == "unit_field_type_invalid":
+			found = true
+			break
+	_assert(found, "unit_field_type_invalid diagnostic emitted")
+
+
+func _test_strict_validator_rejects_string_equipped_item_ids() -> void:
+	print("[validator] strict: rejects string equipped_item_ids")
+	var data: Dictionary = SaveSchemaV4.empty_dto()
+	var unit: Dictionary = {
+		"instance_id": "unit_000001",
+		"definition_id": "warrior",
+		"current_hp": -1,
+		"max_hp": 100,
+		"bonus_attack": 0,
+		"dead": false,
+		"location": 0,
+		"order": 0,
+		"equipped_item_ids": "banana",
+	}
+	data["units"] = [unit]
+	data["next_unit_instance_seq"] = 2
+	var r: Dictionary = Migrator.validate(data)
+	_assert(not bool(r.get("success", false)),
+		"string equipped_item_ids rejected")
+	var found: bool = false
+	for d in r.get("diagnostics", []):
+		if d is RefCounted and d.code == "unit_field_type_invalid":
+			found = true
+			break
+	_assert(found, "unit_field_type_invalid diagnostic emitted")
+
