@@ -341,11 +341,11 @@ func _test_empty_units_yields_next_one() -> void:
 	print("[migration] empty units + items yields next=1 for both")
 	# Synthetic minimal RunState with no units/items at all.
 	var src = RunStateScript.new()
-	src.player_unit_ids = []
-	src.bench_unit_ids = []
+	src.player_unit_ids = [] as Array[StringName]
+	src.bench_unit_ids = [] as Array[StringName]
 	src.unit_states = []
-	src.item_ids = []
-	src.item_equip_board_idx = []
+	src.item_ids = [] as Array[StringName]
+	src.item_equip_board_idx = [] as Array[int]
 	var r = Migrator.migrate_run(src)
 	_assert(int(r.data.next_unit_instance_seq) == 1, "empty: next_unit_instance_seq==1")
 	_assert(int(r.data.next_item_instance_seq) == 1, "empty: next_item_instance_seq==1")
@@ -778,11 +778,12 @@ func _test_unit_state_match_by_definition_and_occurrence() -> void:
 	# Build a RunState where board[0] = warrior, board[1] = warrior (two
 	# identical definition ids) and unit_states mirrors them in order.
 	var src = RunStateScript.new()
-	src.player_unit_ids = [&"warrior", &"warrior"]
-	src.bench_unit_ids = []
+	var p: Array[StringName] = [&"warrior", &"warrior"]
+	src.player_unit_ids = p
+	src.bench_unit_ids = [] as Array[StringName]
 	src.unit_states = []
-	src.item_ids = []
-	src.item_equip_board_idx = []
+	src.item_ids = [] as Array[StringName]
+	src.item_equip_board_idx = [] as Array[int]
 	# Inject unit states via the legacy load+resource path. We
 	# can't create RunUnitState directly without running the
 	# resource; instead use a fresh-migrated fixture as a base.
@@ -811,11 +812,12 @@ func _test_unrecoverable_mismatch_uses_sentinel_defaults() -> void:
 	# would be two embedded Object blocks, but we can pass an empty
 	# array: the migrator will see len mismatch and apply defaults.
 	var src = RunStateScript.new()
-	src.player_unit_ids = [&"warrior", &"archer"]
-	src.bench_unit_ids = []
+	var p: Array[StringName] = [&"warrior", &"archer"]
+	src.player_unit_ids = p
+	src.bench_unit_ids = [] as Array[StringName]
 	src.unit_states = []  # 0 states, 2 expected
-	src.item_ids = []
-	src.item_equip_board_idx = []
+	src.item_ids = [] as Array[StringName]
+	src.item_equip_board_idx = [] as Array[int]
 	src.seed = 8001
 	src.version = 1
 	var r: Dictionary = Migrator.migrate_run(src)

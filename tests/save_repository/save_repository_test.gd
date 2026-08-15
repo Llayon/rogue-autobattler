@@ -60,6 +60,7 @@ func _initialize() -> void:
 	_test_schema_version_5_rejected_as_unsupported()
 	_test_string_schema_version_5_is_corrupt_v4_not_v5()
 	_test_missing_schema_version_is_corrupt_v4()
+	_test_strict_validity_rejects_corrupt_v4_units()
 	print("\n=== production save repository: %d passed, %d failed ===\n" % [_passed, _failed])
 	if _failed > 0:
 		quit(1)
@@ -1089,4 +1090,32 @@ func _test_missing_schema_version_is_corrupt_v4() -> void:
 	_assert(r.is_error(), "missing schema -> error")
 	_assert(r.status == SaveLoadResultScript.ERROR_CORRUPT_V4,
 		"status == ERROR_CORRUPT_V4")
+	_cleanup(runs_dir)
+
+
+# ---------------------------------------------------------------------------
+# Task 1 — Strict-validity gate (T1)
+# ---------------------------------------------------------------------------
+
+func _test_strict_validity_rejects_corrupt_v4_units() -> void:
+	print("[strict] strict validity rejects corrupt v4 with marker+seed but bad units")
+	var runs_dir: String = _isolated_runs_dir("strict_corrupt_units")
+	_cleanup(runs_dir)
+	var bad: Dictionary = SaveSchemaV4Script.empty_dto()
+	bad["schema_version"] = 4
+	bad["seed"] = 9101
+	bad["run_id"] = "run_9101"
+	bad["units"] = [{"instance_id": "unit_000001", "definition_id": "warrior",
+		"current_hp": 0, "max_hp": 100, "bonus_attack": 0,
+		"dead": false, "location": 99, "order": 0, "equipped_item_ids": []}]
+	bad["items"] = []
+	bad["next_unit_instance_seq"] = 2
+	bad["next_item_instance_seq"] = 1
+	var bytes: PackedByteArray = RunSaveRepositoryScript.serialize_canonical_bytes(bad)
+	var ops = preload("res://core/save/run_save_file_ops.gd").new()
+	assert(ops.write_bytes_and_flush(runs_dir + "run_9101.tres", bytes),
+		"write corrupt v4 succeeds")
+	var repo: RefCounted = RunSaveRepositoryScript.new(runs_dir)
+	var r: RefCounted = repo.load_run(9101)
+	_assert(r.is_error(), "corrupt v4 units -> load error")
 	_cleanup(runs_dir)
