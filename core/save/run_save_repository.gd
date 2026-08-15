@@ -570,15 +570,12 @@ func _is_valid_recoverable_run(path: String, expected_seed: int) -> Dictionary:
 			s.substr(SCHEMA_MARKER.length() + 1))
 		if not (parsed_v is Dictionary):
 			return {"valid": false, "reason": "corrupt_v4"}
-		var gate: Dictionary = _strictly_valid_v4(parsed_v)
+		var gate: Dictionary = _strictly_valid_v4(parsed_v, expected_seed)
 		if not bool(gate.get("valid", false)):
 			return {"valid": false, "reason": "strict_validation_failed"}
-		var sv: int = int((gate.data as Dictionary).get("seed", -2))
-		if sv != expected_seed:
-			return {"valid": false, "reason": "seed_mismatch"}
 		return {"valid": true, "format": "v4"}
-	# legacy v1 path: bytes-only structural check. ResourceLoader is
-	# NOT invoked here because it caches ext-resources and can mutate
+		# legacy v1 path: bytes-only structural check. ResourceLoader is
+		# NOT invoked here because it caches ext-resources and can mutate
 	# unrelated loads later in the same process. The legacy loader
 	# performs the actual seed match at load time.
 	if _is_structurally_valid_legacy_v1(path):
@@ -595,25 +592,42 @@ func _is_valid_recoverable_run(path: String, expected_seed: int) -> Dictionary:
 ## validates that the parsed JSON Dictionary is a real, semantically
 ## correct v4 DTO for the slot. Returns the normalised DTO on
 ## success so callers don't have to repeat the work.
-static func _strictly_valid_v4(parsed: Dictionary) -> Dictionary:
-	# 0. Wire normalisation. JSON.parse_string returns integers as
-	# floats; without this step validate_shape rejects every
-	# integer-typed top-level key as "expected int got float".
+## Slot-aware strict gate. Validates that the parsed JSON Dictionary
+## is a real, semantically correct v4 DTO for the SPECIFIC slot
+## identified by expected_seed. Returns the normalised DTO on
+## success. Used by both recovery and post-commit validation so
+## they cannot disagree.
+##
+## A file is slot-valid iff:
+##   - shape validation passes (SaveSchemaV4.validate_shape)
+##   - semantic validation passes (Migrator.validate)
+##   - schema_version seed field == expected_seed
+##   - run_id field == "run_<expected_seed>"
+static func _strictly_valid_v4(parsed: Dictionary, expected_seed: int) -> Dictionary:
 	var normalised: Dictionary = _normalize_wire_static(parsed)
-	# 1. Shape validation (catches wrong-type top-level fields).
 	var shape: Dictionary = SaveSchemaV4Script.validate_shape(normalised)
 	if not bool(shape.get("success", false)):
 		return {"valid": false, "reason": "shape_validation_failed",
 			"diagnostics": shape.get("diagnostics", [])}
-	# 2. Semantic validation (units/items shape, equipment invariants,
-	#    next_*_seq == max_used + 1, current_hp sentinel, location/order,
-	#    duplicates). SaveSchemaV4.validate_shape already rejected
-	#    top-level type mismatches; Migrator.validate catches the
-	#    nested invariants.
 	var mig: Dictionary = MigratorScript.validate(normalised)
 	if not bool(mig.get("success", false)):
 		return {"valid": false, "reason": "semantic_validation_failed",
 			"diagnostics": mig.get("diagnostics", [])}
+	var sv: int = int(normalised.get("seed", -2))
+	if sv != expected_seed:
+		return {"valid": false, "reason": "seed_mismatch",
+			"diagnostics": [MigrationDiagnostic.error(
+				"seed_mismatch",
+				"v4 seed %d does not match slot seed %d" % [sv, expected_seed],
+				str(expected_seed))]}
+	var expected_run_id: String = "run_%d" % expected_seed
+	var actual_run_id: String = String(normalised.get("run_id", ""))
+	if actual_run_id != expected_run_id:
+		return {"valid": false, "reason": "run_id_mismatch",
+			"diagnostics": [MigrationDiagnostic.error(
+				"run_id_mismatch",
+				"v4 run_id %s does not match expected %s" % [actual_run_id, expected_run_id],
+				expected_run_id)]}
 	return {"valid": true, "data": normalised}
 
 
@@ -677,11 +691,11 @@ func _commit_verified_temp(temp: String, target: String, seed_value: int) -> boo
 
 
 func _post_commit_validate(target: String, expected_seed: int) -> bool:
-	# Re-read target and verify it is a valid v4 file with the
-	# expected seed. The full strict gate is used (wire normalisation
-	# + validate_shape + Migrator.validate + seed/run_id). Anything
-	# weaker than this lets a syntactically valid but semantically
-	# broken JSON destroy the previous generation.
+	# Re-read target and verify it is a valid v4 file for the
+	# specific slot. The slot-aware strict gate is used (wire
+	# normalisation + validate_shape + Migrator.validate + seed +
+	# run_id). Anything weaker would let a syntactically valid but
+	# semantically broken JSON destroy the previous generation.
 	var bytes: PackedByteArray = _ops.read_bytes(target)
 	if bytes.is_empty():
 		return false
@@ -692,11 +706,8 @@ func _post_commit_validate(target: String, expected_seed: int) -> bool:
 		s.substr(SCHEMA_MARKER.length() + 1))
 	if not (parsed is Dictionary):
 		return false
-	var gate: Dictionary = _strictly_valid_v4(parsed)
-	if not bool(gate.get("valid", false)):
-		return false
-	var sv: int = int((gate.data as Dictionary).get("seed", -2))
-	return sv == expected_seed
+	var gate: Dictionary = _strictly_valid_v4(parsed, expected_seed)
+	return bool(gate.get("valid", false))
 
 
 func _verify_temp(temp: String, expected_bytes: PackedByteArray) -> bool:

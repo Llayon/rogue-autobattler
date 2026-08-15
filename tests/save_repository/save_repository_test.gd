@@ -66,6 +66,7 @@ func _initialize() -> void:
 	_test_save_seed_mismatch_rejected_before_filesystem_mutation()
 	_test_save_run_id_mismatch_rejected_before_filesystem_mutation()
 	_test_save_load_result_has_typed_context_field()
+	_test_recovery_keeps_commit_old_when_run_id_mismatches()
 	print("\n=== production save repository: %d passed, %d failed ===\n" % [_passed, _failed])
 	if _failed > 0:
 		quit(1)
@@ -1275,4 +1276,39 @@ func _test_save_load_result_has_typed_context_field() -> void:
 	r.context = "seed_consistency"
 	_assert(r.context == "seed_consistency",
 		"context field is typed String and roundtrips")
+
+
+# ---------------------------------------------------------------------------
+# Task 2 — slot-aware strict gate (BLOCKER #2)
+# ---------------------------------------------------------------------------
+
+func _test_recovery_keeps_commit_old_when_run_id_mismatches() -> void:
+	print("[recovery] v4 with seed match but run_id mismatch does NOT delete commit-old")
+	var runs_dir: String = _isolated_runs_dir("recover_run_id_mismatch")
+	_cleanup(runs_dir)
+	var src: Resource = load(RUN_FIXTURES_DIR + "/active_run_minimal.tres")
+	var mig: Dictionary = MigratorScript.migrate_run(src)
+	var v4_good: Dictionary = mig.get("data", {})
+	v4_good["seed"] = 9101
+	v4_good["run_id"] = "run_9101"
+	var ops = preload("res://core/save/run_save_file_ops.gd").new()
+	# Build corrupt: seed matches slot, but run_id is wrong.
+	var v4_corrupt: Dictionary = v4_good.duplicate(true)
+	v4_corrupt["run_id"] = "run_9999"
+	var corrupt_bytes: PackedByteArray = RunSaveRepositoryScript.serialize_canonical_bytes(v4_corrupt)
+	assert(ops.write_bytes_and_flush(runs_dir + "run_9101.tres", corrupt_bytes),
+		"write run_id-mismatched target")
+	assert(ops.rename(runs_dir + "run_9101.tres",
+		runs_dir + "run_9101.tres.commit-old"),
+		"rename target -> commit-old")
+	assert(ops.write_bytes_and_flush(runs_dir + "run_9101.tres", corrupt_bytes),
+		"re-write corrupt target")
+	var repo: RefCounted = RunSaveRepositoryScript.new(runs_dir)
+	var r: RefCounted = repo.load_run(9101)
+	_assert(r.is_error(),
+		"load with run_id-mismatched target -> error")
+	var commit_old_present: bool = ops.exists(runs_dir + "run_9101.tres.commit-old")
+	_assert(commit_old_present,
+		"good commit-old preserved when target run_id mismatches")
+	_cleanup(runs_dir)
 
