@@ -724,11 +724,15 @@ func _run_path(seed_value: int) -> String:
 
 
 func _read_dict_text(path: String) -> Dictionary:
-	var f: FileAccess = FileAccess.open(path, FileAccess.READ)
-	if f == null:
+	# Bytes-only read. ResourceLoader is not invoked here because
+	# it caches ext-resources and can mutate unrelated loads later
+	# in the same process. Same file-ops seam as the rest of the
+	# repository so the fault adapter can deterministically inject
+	# failures here.
+	var bytes: PackedByteArray = _ops.read_bytes(path)
+	if bytes.is_empty():
 		return {}
-	var text: String = f.get_as_text()
-	f.close()
+	var text: String = bytes.get_string_from_utf8()
 	var nl: int = text.find("\n")
 	if nl < 0:
 		return {}
