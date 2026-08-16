@@ -144,6 +144,141 @@ func get_item(instance_id: String) -> RunItem:
 	return null
 
 
+## Returns all items whose `owner_unit_id == ""` — the inventory.
+## Order is `items[]` insertion order. No implicit reordering.
+func get_inventory_items() -> Array[RunItem]:
+	var out: Array[RunItem] = [] as Array[RunItem]
+	for it in items:
+		if String(it.owner_unit_id) == "":
+			out.append(it)
+	return out
+
+
+## Returns all items currently equipped to a specific unit,
+## ordered by `items[]` insertion order. Returns an empty list if
+## the unit is unknown — this method never returns null.
+func get_equipped_items(unit_instance_id: String) -> Array[RunItem]:
+	var out: Array[RunItem] = [] as Array[RunItem]
+	if unit_instance_id == "":
+		return out
+	for it in items:
+		if String(it.owner_unit_id) == unit_instance_id:
+			out.append(it)
+	return out
+
+
+## Equips an item to a unit. The canonical invariant
+## `item.owner_unit_id == unit.instance_id` and
+## `item.instance_id in unit.equipped_item_ids` is maintained in a
+## single mutation: when the item is already equipped to a
+## DIFFERENT unit, the link is moved atomically (the old owner's
+## `equipped_item_ids` is updated AND the new owner's
+## `equipped_item_ids` is updated AND `item.owner_unit_id` is
+## rewritten in the same call). No intermediate externally-visible
+## inconsistent state.
+##
+## Equip is only legal onto a BOARD unit. Equip onto a BENCH unit
+## is rejected without mutating state. Equip of an unknown item
+## or onto an unknown unit is rejected without mutating state.
+## Returns `true` on success, `false` otherwise (state untouched
+## on failure).
+func equip_item(item_instance_id: String,
+		unit_instance_id: String) -> bool:
+	var it: RunItem = get_item(item_instance_id)
+	if it == null:
+		return false
+	var u: RunUnit = get_unit(unit_instance_id)
+	if u == null:
+		return false
+	if int(u.location) != int(RunUnit.LOCATION_BOARD):
+		# Phase 1 keeps the legacy gameplay rule: equipping is
+		# board-only. A unit on the bench cannot accept new items
+		# here. (Existing equipment on a unit is preserved when
+		# the unit moves to the bench — see move_unit()'s
+		# contract below.)
+		return false
+	var old_owner_id: String = String(it.owner_unit_id)
+	if old_owner_id == unit_instance_id:
+		# Already equipped to this unit. Treat as success but do
+		# not duplicate the entry.
+		if not u.equipped_item_ids.has(item_instance_id):
+			u.equipped_item_ids.append(item_instance_id)
+		return true
+	# Remove from the previous owner's equipped list, if any.
+	if old_owner_id != "":
+		var old_owner: RunUnit = get_unit(old_owner_id)
+		if old_owner != null:
+			var idx: int = old_owner.equipped_item_ids.find(item_instance_id)
+			if idx >= 0:
+				old_owner.equipped_item_ids.remove_at(idx)
+	# Add to the new owner's equipped list.
+	if not u.equipped_item_ids.has(item_instance_id):
+		u.equipped_item_ids.append(item_instance_id)
+	it.owner_unit_id = unit_instance_id
+	return true
+
+
+## Unequips an item from whatever unit it is currently equipped
+## to. The canonical invariant is undone atomically: the item's
+## `owner_unit_id` becomes `""` AND the old owner's
+## `equipped_item_ids` entry is removed in the same call.
+## Returns `true` on success, `false` if the item is unknown or
+## already unequipped (state untouched on failure).
+func unequip_item(item_instance_id: String) -> bool:
+	var it: RunItem = get_item(item_instance_id)
+	if it == null:
+		return false
+	var old_owner_id: String = String(it.owner_unit_id)
+	if old_owner_id == "":
+		# Already in inventory. Treat as success but make sure
+		# no stale equipped list still references the id.
+		return _purge_equipped_references(item_instance_id)
+	it.owner_unit_id = ""
+	_purge_equipped_references(item_instance_id)
+	return true
+
+
+## Removes an item entirely. If the item is equipped, the old
+## owner's `equipped_item_ids` entry is removed too in the same
+## call. Returns `true` on success, `false` if the item is
+## unknown (state untouched on failure).
+##
+## Sequence counter does NOT decrement. The id is gone forever;
+## the allocator's next call continues past it.
+func remove_item(item_instance_id: String) -> bool:
+	var it: RunItem = get_item(item_instance_id)
+	if it == null:
+		return false
+	var old_owner_id: String = String(it.owner_unit_id)
+	if old_owner_id != "":
+		var old_owner: RunUnit = get_unit(old_owner_id)
+		if old_owner != null:
+			var idx: int = old_owner.equipped_item_ids.find(item_instance_id)
+			if idx >= 0:
+				old_owner.equipped_item_ids.remove_at(idx)
+	# Remove the item itself from the items array.
+	var pos: int = items.find(it)
+	if pos >= 0:
+		items.remove_at(pos)
+	return true
+
+
+## Removes every stale reference to `item_instance_id` from
+## every unit's `equipped_item_ids`. Called by `unequip_item` and
+## `remove_item`. Phase 1 keeps this as defensive cleanup — the
+## canonical mapper / validator is responsible for the live
+## invariant; this is best-effort cleanup if the on-disk state
+## arrived inconsistent.
+func _purge_equipped_references(item_instance_id: String) -> bool:
+	var any: bool = false
+	for u in units:
+		var idx: int = u.equipped_item_ids.find(item_instance_id)
+		if idx >= 0:
+			u.equipped_item_ids.remove_at(idx)
+			any = true
+	return any
+
+
 ## Moves a unit identified by instance id to a new location, with
 ## an optional explicit `new_order` slot.
 ##

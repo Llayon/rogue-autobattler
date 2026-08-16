@@ -43,6 +43,19 @@ func _initialize() -> void:
 	_test_move_with_invalid_location_is_no_op()
 	_test_swap_unknown_instance_id_is_no_op()
 	_test_hp_stays_with_instance_id_through_moves()
+	_test_two_potions_get_distinct_ids()
+	_test_create_item_starts_in_inventory()
+	_test_equip_item_sets_both_sides_of_link()
+	_test_unequip_item_clears_both_sides_of_link()
+	_test_two_identical_units_with_two_identical_items()
+	_test_equip_re_equip_moves_link_atomically()
+	_test_multiple_items_on_one_unit()
+	_test_move_equipped_unit_to_bench_keeps_ownership()
+	_test_equip_directly_onto_bench_unit_is_rejected()
+	_test_remove_equipped_item_clears_owner_link()
+	_test_equip_unknown_id_is_no_op()
+	_test_remove_unknown_id_is_no_op()
+	_test_remove_then_counter_continues()
 	print("\n=== run domain state: %d passed, %d failed ===\n" % [_passed, _failed])
 	if _failed > 0:
 		quit(1)
@@ -412,6 +425,266 @@ func _test_hp_stays_with_instance_id_through_moves() -> void:
 		"unit_000002 max_hp still 80 after swap")
 
 
+
+
+
+func _test_two_potions_get_distinct_ids() -> void:
+	# Same definition id, two distinct identities. Mirrors the
+	# warrior-instance test for items.
+	print("[identity] two potions get distinct ids")
+	var s = RunDomainState.new()
+	var a: RunItem = s.create_item(&"potion")
+	var b: RunItem = s.create_item(&"potion")
+	_assert(a.instance_id == "item_000001", "first potion id")
+	_assert(b.instance_id == "item_000002", "second potion id")
+	_assert(a.definition_id == &"potion" and b.definition_id == &"potion",
+		"both have definition_id = potion")
+	_assert(a != b, "two distinct RunItem instances")
+
+
+func _test_create_item_starts_in_inventory() -> void:
+	# A newly created item is in inventory; owner_unit_id == "".
+	print("[create] new item is in inventory")
+	var s = RunDomainState.new()
+	var it: RunItem = s.create_item(&"sword")
+	_assert(it.owner_unit_id == "", "owner_unit_id starts as empty")
+	var inv: Array[RunItem] = s.get_inventory_items()
+	_assert(inv.size() == 1 and inv[0] == it,
+		"get_inventory_items contains the new item")
+
+
+func _test_equip_item_sets_both_sides_of_link() -> void:
+	# After equip, item.owner_unit_id and unit.equipped_item_ids
+	# both point at each other.
+	print("[equip] both sides of the equipment link are set")
+	var s = RunDomainState.new()
+	var a: RunUnit = s.create_unit(&"warrior", 100, RunUnit.LOCATION_BOARD)
+	var sword: RunItem = s.create_item(&"sword")
+	_assert(s.equip_item(sword.instance_id, a.instance_id), "equip ok")
+	_assert(sword.owner_unit_id == a.instance_id,
+		"sword.owner_unit_id == a.instance_id")
+	_assert(a.equipped_item_ids.size() == 1
+			and a.equipped_item_ids[0] == sword.instance_id,
+		"a.equipped_item_ids contains sword")
+	# Equipped items view.
+	var equipped: Array[RunItem] = s.get_equipped_items(a.instance_id)
+	_assert(equipped.size() == 1 and equipped[0] == sword,
+		"get_equipped_items returns [sword]")
+	# Inventory no longer contains the item.
+	var inv: Array[RunItem] = s.get_inventory_items()
+	_assert(inv.is_empty(), "inventory is empty after equip")
+
+
+func _test_unequip_item_clears_both_sides_of_link() -> void:
+	# After unequip, both sides are cleared.
+	print("[unequip] both sides of the link are cleared")
+	var s = RunDomainState.new()
+	var a: RunUnit = s.create_unit(&"warrior", 100, RunUnit.LOCATION_BOARD)
+	var potion: RunItem = s.create_item(&"potion")
+	s.equip_item(potion.instance_id, a.instance_id)
+	_assert(s.unequip_item(potion.instance_id), "unequip ok")
+	_assert(potion.owner_unit_id == "",
+		"potion.owner_unit_id cleared")
+	_assert(a.equipped_item_ids.is_empty(),
+		"a.equipped_item_ids no longer contains potion")
+	# Now back in inventory.
+	var inv: Array[RunItem] = s.get_inventory_items()
+	_assert(inv.size() == 1 and inv[0] == potion,
+		"potion is back in inventory")
+
+
+func _test_two_identical_units_with_two_identical_items() -> void:
+	# Two warriors (same definition) with two potions (same
+	# definition). Each item's identity is its instance id, not
+	# its definition. Cross-equipping must not confuse them.
+	print("[two-of-each] identical units and items stay independent")
+	var s = RunDomainState.new()
+	var a: RunUnit = s.create_unit(&"warrior", 100, RunUnit.LOCATION_BOARD)
+	var b: RunUnit = s.create_unit(&"warrior", 100, RunUnit.LOCATION_BOARD)
+	var pa: RunItem = s.create_item(&"potion")
+	var pb: RunItem = s.create_item(&"potion")
+	s.equip_item(pa.instance_id, a.instance_id)
+	s.equip_item(pb.instance_id, b.instance_id)
+	_assert(pa.owner_unit_id == a.instance_id, "pa -> a")
+	_assert(pb.owner_unit_id == b.instance_id, "pb -> b")
+	_assert(a.equipped_item_ids[0] == pa.instance_id, "a holds pa")
+	_assert(b.equipped_item_ids[0] == pb.instance_id, "b holds pb")
+	# Swap ownership atomically.
+	s.equip_item(pa.instance_id, b.instance_id)
+	_assert(pa.owner_unit_id == b.instance_id, "pa now -> b")
+	_assert(pb.owner_unit_id == b.instance_id, "pb still -> b")
+	_assert(not a.equipped_item_ids.has(pa.instance_id),
+		"a no longer lists pa")
+	_assert(b.equipped_item_ids.has(pa.instance_id),
+		"b lists pa")
+	_assert(b.equipped_item_ids.has(pb.instance_id),
+		"b still lists pb")
+
+
+func _test_equip_re_equip_moves_link_atomically() -> void:
+	# Re-equip from A to B must, in a single call, leave both A
+	# and B consistent with item.owner_unit_id == B.instance_id
+	# and item.instance_id in B.equipped_item_ids.
+	print("[re-equip] moves the link atomically across two units")
+	var s = RunDomainState.new()
+	var a: RunUnit = s.create_unit(&"warrior", 100, RunUnit.LOCATION_BOARD)
+	var b: RunUnit = s.create_unit(&"warrior", 100, RunUnit.LOCATION_BOARD)
+	var ring: RunItem = s.create_item(&"ring")
+	s.equip_item(ring.instance_id, a.instance_id)
+	# Snapshot pre-reequip.
+	_assert(ring.owner_unit_id == a.instance_id,
+		"pre: ring on a")
+	_assert(a.equipped_item_ids.has(ring.instance_id),
+		"pre: a has ring")
+	_assert(not b.equipped_item_ids.has(ring.instance_id),
+		"pre: b has no ring")
+	s.equip_item(ring.instance_id, b.instance_id)
+	_assert(ring.owner_unit_id == b.instance_id,
+		"post: ring on b")
+	_assert(not a.equipped_item_ids.has(ring.instance_id),
+		"post: a no longer has ring")
+	_assert(b.equipped_item_ids.has(ring.instance_id),
+		"post: b has ring")
+	# A's other state (definition, hp) untouched.
+	_assert(a.definition_id == &"warrior", "a definition_id unchanged")
+	_assert(a.max_hp == 100, "a max_hp unchanged")
+
+
+func _test_multiple_items_on_one_unit() -> void:
+	# One unit can hold multiple items. The domain does not
+	# introduce a one-item restriction.
+	print("[multi] one unit can hold several items")
+	var s = RunDomainState.new()
+	var a: RunUnit = s.create_unit(&"warrior", 100, RunUnit.LOCATION_BOARD)
+	var it1: RunItem = s.create_item(&"sword")
+	var it2: RunItem = s.create_item(&"shield")
+	var it3: RunItem = s.create_item(&"ring")
+	s.equip_item(it1.instance_id, a.instance_id)
+	s.equip_item(it2.instance_id, a.instance_id)
+	s.equip_item(it3.instance_id, a.instance_id)
+	_assert(a.equipped_item_ids.size() == 3,
+		"a holds 3 items")
+	# Ordering follows items[] insertion order.
+	_assert(a.equipped_item_ids[0] == it1.instance_id, "first = sword")
+	_assert(a.equipped_item_ids[1] == it2.instance_id, "second = shield")
+	_assert(a.equipped_item_ids[2] == it3.instance_id, "third = ring")
+	_assert(s.get_equipped_items(a.instance_id).size() == 3,
+		"get_equipped_items returns 3")
+
+
+func _test_move_equipped_unit_to_bench_keeps_ownership() -> void:
+	# The CRITICAL Phase 1 acceptance test. When an equipped unit
+	# moves board -> bench, the item's owner_unit_id stays bound
+	# to that unit's instance id. A unit that happens to occupy
+	# the old board order must NOT inherit the item.
+	print("[bench-move] equipment stays with the unit, not the position")
+	var s = RunDomainState.new()
+	var a: RunUnit = s.create_unit(&"warrior", 100, RunUnit.LOCATION_BOARD)
+	var b: RunUnit = s.create_unit(&"warrior", 100, RunUnit.LOCATION_BOARD)
+	var ring: RunItem = s.create_item(&"ring")
+	s.equip_item(ring.instance_id, a.instance_id)
+	# Move a (order 0) to bench; b shifts up to order 0.
+	_assert(s.move_unit(a.instance_id, RunUnit.LOCATION_BENCH), "move a to bench")
+	# Item still owned by a.
+	_assert(ring.owner_unit_id == a.instance_id,
+		"ring still owned by a after bench move")
+	_assert(a.equipped_item_ids.has(ring.instance_id),
+		"a still lists ring in equipped_item_ids")
+	# b occupies order 0 on the board but does NOT have the ring.
+	_assert(b.location == RunUnit.LOCATION_BOARD and b.order == 0,
+		"b now at board order 0")
+	_assert(not b.equipped_item_ids.has(ring.instance_id),
+		"b does NOT inherit ring from position")
+	# equipped_items view: a still has it, b has nothing.
+	_assert(s.get_equipped_items(a.instance_id).size() == 1,
+		"a has 1 equipped item")
+	_assert(s.get_equipped_items(b.instance_id).is_empty(),
+		"b has 0 equipped items")
+
+
+func _test_equip_directly_onto_bench_unit_is_rejected() -> void:
+	# Phase 1 keeps the legacy gameplay rule: equipping is
+	# board-only. A bench unit cannot accept a new item.
+	print("[reject] bench unit cannot be equipped directly")
+	var s = RunDomainState.new()
+	var a: RunUnit = s.create_unit(&"warrior", 100, RunUnit.LOCATION_BENCH)
+	var potion: RunItem = s.create_item(&"potion")
+	_assert(not s.equip_item(potion.instance_id, a.instance_id),
+		"equip onto bench unit returns false")
+	_assert(potion.owner_unit_id == "",
+		"item owner_unit_id unchanged (still empty)")
+	_assert(a.equipped_item_ids.is_empty(),
+		"unit equipped_item_ids unchanged (still empty)")
+	_assert(s.get_inventory_items().size() == 1,
+		"item still in inventory")
+
+
+func _test_remove_equipped_item_clears_owner_link() -> void:
+	# remove_item on an equipped item also drops the owner link.
+	print("[remove] removing an equipped item clears the owner link")
+	var s = RunDomainState.new()
+	var a: RunUnit = s.create_unit(&"warrior", 100, RunUnit.LOCATION_BOARD)
+	var potion: RunItem = s.create_item(&"potion")
+	s.equip_item(potion.instance_id, a.instance_id)
+	_assert(s.remove_item(potion.instance_id), "remove ok")
+	_assert(s.get_item(potion.instance_id) == null,
+		"item is gone")
+	_assert(not a.equipped_item_ids.has(potion.instance_id),
+		"owner link cleared")
+	_assert(s.get_equipped_items(a.instance_id).is_empty(),
+		"a has 0 equipped items")
+	# Sequence counter does NOT decrement.
+	_assert(s.next_item_instance_seq == 2,
+		"counter is still 2 (no decrement)")
+
+
+func _test_equip_unknown_id_is_no_op() -> void:
+	# equip_item with an unknown item id or unknown unit id does
+	# not mutate state and returns false.
+	print("[no-op] equip with unknown id is no-op")
+	var s = RunDomainState.new()
+	var a: RunUnit = s.create_unit(&"warrior", 100, RunUnit.LOCATION_BOARD)
+	var potion: RunItem = s.create_item(&"potion")
+	# Snapshot.
+	var pre_seq: int = s.next_item_instance_seq
+	_assert(not s.equip_item("item_999999", a.instance_id),
+		"unknown item id -> false")
+	_assert(not s.equip_item(potion.instance_id, "unit_999999"),
+		"unknown unit id -> false")
+	_assert(potion.owner_unit_id == "", "potion owner still empty")
+	_assert(a.equipped_item_ids.is_empty(), "a still has no items")
+	_assert(s.next_item_instance_seq == pre_seq, "counter unchanged")
+
+
+func _test_remove_unknown_id_is_no_op() -> void:
+	print("[no-op] remove with unknown id is no-op")
+	var s = RunDomainState.new()
+	var a: RunUnit = s.create_unit(&"warrior", 100, RunUnit.LOCATION_BOARD)
+	var potion: RunItem = s.create_item(&"potion")
+	s.equip_item(potion.instance_id, a.instance_id)
+	var pre_items: int = s.items.size()
+	var pre_seq: int = s.next_item_instance_seq
+	_assert(not s.remove_item("item_999999"), "unknown id -> false")
+	_assert(s.items.size() == pre_items, "items count unchanged")
+	_assert(potion.owner_unit_id == a.instance_id,
+		"potion still owned by a")
+	_assert(s.next_item_instance_seq == pre_seq,
+		"sequence counter unchanged")
+	_assert(a.equipped_item_ids.has(potion.instance_id),
+		"a still lists potion")
+
+
+func _test_remove_then_counter_continues() -> void:
+	# Removing item_000001 does NOT make the allocator reuse
+	# that id. Next allocation continues from next_item_instance_seq.
+	print("[no reuse] counter continues after remove")
+	var s = RunDomainState.new()
+	var a: RunItem = s.create_item(&"potion")
+	var b: RunItem = s.create_item(&"potion")
+	s.remove_item(a.instance_id)
+	var next: RunItem = s.create_item(&"potion")
+	_assert(next.instance_id == "item_000003",
+		"next allocation is item_000003 (a is not reused)")
 	quit(0)
 
 
