@@ -36,6 +36,30 @@ var items: Array[RunItem] = []
 var next_unit_instance_seq: int = 1
 var next_item_instance_seq: int = 1
 
+## Allocates the next free unit instance id and advances the
+## counter. ID is `"unit_%06d" % counter"` with minimum width 6, no
+## maximum. IDs are unique within a single run, never derived from
+## board position, definition id, hash, time or RNG. The allocator
+## is monotonic and never reuses or wraps a consumed id.
+##
+## After 999999 the format still produces a unique id (e.g.
+## `"unit_1000000"`); overflow is not the allocator's concern — the
+## v4 mapper/validator owns the canonical invariant
+## `next_*_seq == first unused`.
+func allocate_unit_instance_id() -> String:
+	var id: String = "unit_%06d" % next_unit_instance_seq
+	next_unit_instance_seq += 1
+	return id
+
+
+## Allocates the next free item instance id and advances the
+## counter. Mirrors `allocate_unit_instance_id`. Unit and item
+## counters are independent streams.
+func allocate_item_instance_id() -> String:
+	var id: String = "item_%06d" % next_item_instance_seq
+	next_item_instance_seq += 1
+	return id
+
 ## Run stats.
 var wins: int = 0
 var losses: int = 0
