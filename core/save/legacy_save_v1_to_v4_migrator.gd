@@ -54,7 +54,7 @@ static func migrate_run(source: Variant) -> Dictionary:
 	for id in player_unit_ids:
 		ordered_definitions.append({"definition_id": id, "location": 0})
 	for id in bench_unit_ids:
-		ordered_definitions.append({"definition_id": id, "location": 1})
+			ordered_definitions.append({"definition_id": id, "location": 1})
 
 	# Validate unit_states length.
 	if unit_states.size() != ordered_definitions.size():
@@ -62,6 +62,17 @@ static func migrate_run(source: Variant) -> Dictionary:
 			CODE_UNIT_STATES_COUNT_MISMATCH,
 			"expected %d unit_states, got %d" % [ordered_definitions.size(), unit_states.size()],
 			""))
+
+	# H8 rule 5: expected non-empty + unit_states completely empty
+	# => migration failure. Early return so that nothing below can
+	# silently re-set success = true.
+	if ordered_definitions.size() > 0 and unit_states.is_empty():
+		result["success"] = false
+		_add(result, MigrationDiagnostic.error(
+			"unit_states_completely_missing",
+			"expected %d unit states, got 0" % ordered_definitions.size(),
+			""))
+		return result
 
 	var v4: Dictionary = SaveSchemaV4.empty_dto()
 	v4["run_id"] = "run_%d" % int(src.get("seed", 0))
@@ -120,70 +131,58 @@ static func migrate_run(source: Variant) -> Dictionary:
 	var matched_any: bool = false
 	var defaulted_any: bool = false
 	for i in ordered_definitions.size():
-			var definition_id: StringName = StringName(String(ordered_definitions[i]["definition_id"]))
-			var location: int = int(ordered_definitions[i]["location"])
-			var order: int = board_order if location == 0 else bench_order
-			if location == 0:
-				board_order += 1
-			else:
-				bench_order += 1
-			var instance_id: String = ID_FORMAT_UNIT % next_unit_seq
-			next_unit_seq += 1
-			# Find the next unconsumed legacy unit_state whose unit_id
-			# matches the expected definition.
-			var state: Dictionary = {}
-			var matched_index: int = -1
-			if def_to_indices.has(String(definition_id)):
-				var candidates: Array = def_to_indices[String(definition_id)]
-				for idx in candidates:
-					if not consumed.has(idx):
-						consumed[idx] = true
-						matched_index = idx
-						break
-			if matched_index >= 0:
-				state = _read_unit_state(unit_states, matched_index, result, definition_id)
-				matched_any = true
-			else:
-				# Apply sentinel defaults. Emit warning once per matched
-				# group if any unit fell through. The migrator's contract
-				# is documented in docs/LEGACY_V1_TO_V4_MAPPING.md.
-				state = {
-					"unit_id": definition_id,
-					"current_hp": -1,
-					"max_hp": -1,
-					"bonus_attack": 0,
-				}
-				_add(result, MigrationDiagnostic.warning(
-					"unit_state_defaulted_to_sentinel",
-					"no legacy unit_state matched definition %s at occurrence %d" % [String(definition_id), i],
-					String(definition_id)))
-				defaulted_any = true
-			var u: Dictionary = {
-				"instance_id": instance_id,
-				"definition_id": definition_id,
-				"current_hp": int(state.get("current_hp", -1)),
-				"max_hp": int(state.get("max_hp", -1)),
-				"bonus_attack": int(state.get("bonus_attack", 0)),
-				"dead": _is_dead(state),
-				"location": location,
-				"order": order,
-				"equipped_item_ids": [] as Array,
+		var definition_id: StringName = StringName(String(ordered_definitions[i]["definition_id"]))
+		var location: int = int(ordered_definitions[i]["location"])
+		var order: int = board_order if location == 0 else bench_order
+		if location == 0:
+			board_order += 1
+		else:
+			bench_order += 1
+		var instance_id: String = ID_FORMAT_UNIT % next_unit_seq
+		next_unit_seq += 1
+		# Find the next unconsumed legacy unit_state whose unit_id
+		# matches the expected definition.
+		var state: Dictionary = {}
+		var matched_index: int = -1
+		if def_to_indices.has(String(definition_id)):
+			var candidates: Array = def_to_indices[String(definition_id)]
+			for idx in candidates:
+				if not consumed.has(idx):
+					consumed[idx] = true
+					matched_index = idx
+					break
+		if matched_index >= 0:
+			state = _read_unit_state(unit_states, matched_index, result, definition_id)
+			matched_any = true
+		else:
+			# Apply sentinel defaults. Emit warning once per matched
+			# group if any unit fell through. The migrator's contract
+			# is documented in docs/LEGACY_V1_TO_V4_MAPPING.md.
+			state = {
+				"unit_id": definition_id,
+				"current_hp": -1,
+				"max_hp": -1,
+				"bonus_attack": 0,
 			}
-			units.append(u)
-			unit_id_to_instance[String(definition_id) + "@" + str(i)] = instance_id
-	# All unit_states absent while units were expected => failure.
-	if unit_states.size() > 0 and not matched_any:
-			result["success"] = false
-			_add(result, MigrationDiagnostic.error(
-				"unit_states_completely_missing",
-				"no legacy unit_state matched any expected unit",
-				""))
-	# Expected empty but unit_states non-empty => diagnostic only.
-	elif unit_states.size() > 0 and ordered_definitions.size() == 0:
 			_add(result, MigrationDiagnostic.warning(
-				"ignored_legacy_state",
-				"%d legacy unit_state entries ignored because no units were expected" % unit_states.size(),
-				""))
+				"unit_state_defaulted_to_sentinel",
+				"no legacy unit_state matched definition %s at occurrence %d" % [String(definition_id), i],
+				String(definition_id)))
+			defaulted_any = true
+		var u: Dictionary = {
+			"instance_id": instance_id,
+			"definition_id": definition_id,
+			"current_hp": int(state.get("current_hp", -1)),
+			"max_hp": int(state.get("max_hp", -1)),
+			"bonus_attack": int(state.get("bonus_attack", 0)),
+			"dead": _is_dead(state),
+			"location": location,
+			"order": order,
+			"equipped_item_ids": [] as Array,
+		}
+		units.append(u)
+		unit_id_to_instance[String(definition_id) + "@" + str(i)] = instance_id
+	# next_*_instance_seq is the FIRST UNUSED sequence (max_used + 1).
 	v4["units"] = units
 	# next_*_instance_seq is the FIRST UNUSED sequence (max_used + 1).
 	v4["next_unit_instance_seq"] = next_unit_seq

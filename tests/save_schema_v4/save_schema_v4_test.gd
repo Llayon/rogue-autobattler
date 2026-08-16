@@ -53,7 +53,7 @@ func _initialize() -> void:
 	_test_equipment_invariant_E_duplicate_in_unit()
 	_test_save_seed_mismatch_rejected()
 	_test_unit_state_match_by_definition_and_occurrence()
-	_test_unrecoverable_mismatch_uses_sentinel_defaults()
+	_test_unit_states_completely_missing_fails_migration()
 	_test_strict_validator_rejects_string_current_hp()
 	_test_strict_validator_rejects_string_dead_flag()
 	_test_strict_validator_rejects_string_equipped_item_ids()
@@ -806,14 +806,11 @@ func _test_unit_state_match_by_definition_and_occurrence() -> void:
 		"two warriors are independent (different hp / max_hp)")
 
 
-func _test_unrecoverable_mismatch_uses_sentinel_defaults() -> void:
-	print("[migration] unrecoverable mismatch uses sentinel defaults (H8)")
+func _test_unit_states_completely_missing_fails_migration() -> void:
+	print("[migration] all unit_states absent + units present -> failure (H8 rule 5)")
 	# Build a RunState where player_unit_ids is non-empty but
-	# unit_states is shorter. The migrator must fill the missing
-	# state slot with sentinel defaults and emit a diagnostic.
-	# We construct the source by hand. unit_states for two units
-	# would be two embedded Object blocks, but we can pass an empty
-	# array: the migrator will see len mismatch and apply defaults.
+	# unit_states is empty. The migrator MUST fail with
+	# unit_states_completely_missing.
 	var src = RunStateScript.new()
 	var p: Array[StringName] = [&"warrior", &"archer"]
 	src.player_unit_ids = p
@@ -824,28 +821,14 @@ func _test_unrecoverable_mismatch_uses_sentinel_defaults() -> void:
 	src.seed = 8001
 	src.version = 1
 	var r: Dictionary = Migrator.migrate_run(src)
-	# Migration may succeed with sentinel defaults OR fail when all
-	# states are missing. The documented policy (H8 rule 5) is to
-	# fail when all states are absent and units are expected.
-	# Validate that the migrator's response is consistent: either
-	# both units have sentinel defaults (-1) or the migration fails
-	# with a unit_states diagnostic.
-	if bool(r.get("success", false)):
-		var data: Dictionary = r.get("data", {})
-		var units: Array = data.get("units", [])
-		_assert(units.size() == 2, "two units present even with empty states")
-		for u in units:
-			_assert(int(u.get("current_hp", 0)) == -1, "sentinel current_hp = -1")
-			_assert(int(u.get("max_hp", 0)) == -1, "sentinel max_hp = -1")
-			_assert(bool(u.get("dead", true)) == false, "sentinel dead = false")
-	else:
-		var found: bool = false
-		for d in r.get("diagnostics", []):
-			if d is RefCounted and (d.code == "unit_states_count_mismatch"
-					or d.code == "unit_states_completely_missing"):
-				found = true
-				break
-		_assert(found, "unit_states diagnostic emitted on failure path")
+	_assert(not bool(r.get("success", false)),
+		"all unit_states absent while units expected -> migration fails")
+	var found: bool = false
+	for d in r.get("diagnostics", []):
+		if d is RefCounted and d.code == "unit_states_completely_missing":
+			found = true
+			break
+	_assert(found, "unit_states_completely_missing diagnostic emitted")
 
 
 # ---------------------------------------------------------------------------
