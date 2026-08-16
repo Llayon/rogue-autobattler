@@ -316,32 +316,57 @@ func _detect_format(text: PackedByteArray) -> Dictionary:
 	return {"format": "v4", "parsed": parsed}
 
 
-static func _has_legacy_v1_structural_keys(s: String) -> bool:
-	# A .tres file is a legacy v1 candidate only if it contains the
-	# required structural keys AND declares version = 1 AND has no
-	# schema_version key. A .tres-shaped file with version != 1 or
-	# with a schema_version field is NOT legacy v1: it is either a
-	# future schema or a corrupt save, and the detector must not
-	# silently migrate it.
-	for key in ["player_unit_ids", "unit_states"]:
-		if s.find(key) < 0:
-			return false
-	if not _has_legacy_v1_version_one(s):
-		return false
-	if s.find("schema_version") >= 0:
-		return false
-	return true
+## Generic tres / legacy line parser. Splits the bytes by newline
+## (with allow_empty=false so trailing CR/LF doesn't produce a
+## spurious blank line), then for each line looks for an exact
+## "key = value" pair. Returns {ok: bool, value: int} so callers
+## can compare against an expected integer without substring traps.
+## "seed = 9001" must NOT match expected_seed = 90010; the parser
+## reads the integer to the first non-digit, ignoring trailing
+## digits that follow a non-digit character.
+static func _legacy_int_field(s: String, key: String) -> Dictionary:
+	for line in s.split("\n", false):
+		var stripped: String = line.strip_edges()
+		var eq: int = stripped.find("=")
+		if eq < 0:
+			continue
+		if stripped.substr(0, eq).strip_edges() != key:
+			continue
+		var raw: String = stripped.substr(eq + 1).strip_edges()
+		if not raw.is_valid_int():
+			return {"ok": false}
+		return {"ok": true, "value": int(raw)}
+	return {"ok": false}
 
 
-## True if the tres body contains a literal "version = 1" line.
-## Detects "version = 1", "version=1", with possible whitespace
-## before the newline.
-static func _has_legacy_v1_version_one(s: String) -> bool:
-	# Look for the line in any form (space around =).
-	for sep in ["version = 1", "version=1"]:
-		if s.find(sep) >= 0:
+static func _legacy_has_field(s: String, key: String) -> bool:
+	for line in s.split("\n", false):
+		var stripped: String = line.strip_edges()
+		var eq: int = stripped.find("=")
+		if eq < 0:
+			continue
+		if stripped.substr(0, eq).strip_edges() == key:
 			return true
 	return false
+
+
+static func _has_legacy_v1_structural_keys(s: String) -> bool:
+	# A tres is a legacy v1 candidate iff:
+	#   - begins with [gd_resource
+	#   - contains required structural keys
+	#   - has exact version = 1 (TYPE_INT, not the substring "version = 10")
+	#   - has NO schema_version key
+	if not s.begins_with("[gd_resource"):
+		return false
+	for key in ["player_unit_ids", "unit_states"]:
+		if not _legacy_has_field(s, key):
+			return false
+	var v: Dictionary = _legacy_int_field(s, "version")
+	if not bool(v.get("ok", false)) or int(v.get("value", -1)) != 1:
+		return false
+	if _legacy_has_field(s, "schema_version"):
+		return false
+	return true
 
 
 # ---------------------------------------------------------------------------
@@ -499,22 +524,18 @@ func _verify_existing_backup(legacy_path: String, backup_path: String) -> int:
 	return 0  # BACKUP_OK
 
 
-## Structural validation that works on the real backup path
-## `run_<seed>.tres.legacy-v1.bak`. Inspects raw bytes; does not rely
-## on ResourceLoader accepting `.bak`.
+## Structural validation for legacy backup paths (`.bak`). Reads
+## raw bytes; does not rely on ResourceLoader accepting `.bak`. The
+## rules are exactly the detector's rules: a tres is structurally
+## valid legacy v1 iff it has [gd_resource], required keys,
+## exact version = 1, and no schema_version. One parser, three
+## callers.
 func _is_structurally_valid_legacy_v1(path: String) -> bool:
 	var bytes: PackedByteArray = _ops.read_bytes(path)
 	if bytes.is_empty():
 		return false
 	var s: String = bytes.get_string_from_utf8()
-	if not s.begins_with("[gd_resource"):
-		return false
-	for key in ["player_unit_ids", "unit_states"]:
-		if s.find(key) < 0:
-			return false
-	if s.find("version = 1") < 0 and s.find("version=1") < 0:
-		return false
-	return true
+	return _has_legacy_v1_structural_keys(s)
 
 
 # ---------------------------------------------------------------------------
@@ -650,35 +671,16 @@ static func _strictly_valid_v4(parsed: Dictionary, expected_seed: int) -> Dictio
 
 
 ## Line-aware legacy seed match. A tres file's seed line is plain
-## text and can be matched without invoking ResourceLoader.
-## Substring matching is unsafe because expected_seed = 9001 also
-## matches "seed = 90010". We tokenise by line, recognise the "seed"
-## key, parse the integer value, and compare.
+## text and can be matched without invoking ResourceLoader. The
+## parser reads the integer to the first non-digit so expected
+## 9001 does NOT match "seed = 90010".
 func _legacy_seed_matches(path: String, expected_seed: int) -> bool:
 	var bytes: PackedByteArray = _ops.read_bytes(path)
 	if bytes.is_empty():
 		return false
 	var s: String = bytes.get_string_from_utf8()
-	for line in s.split("\n", false):
-		var stripped: String = line.strip_edges()
-		# Recognise lines starting with "seed" (followed by space or
-		# "="). Skip comments and other keys.
-		if not (stripped.begins_with("seed ") or stripped.begins_with("seed=")):
-			continue
-		# Take the substring after "seed".
-		var after_seed: String = stripped.substr(4).strip_edges()
-		# Pull leading digits as an integer.
-		var digits: String = ""
-		for ch in after_seed:
-			if ch >= "0" and ch <= "9":
-				digits += ch
-			else:
-				break
-		if digits.is_empty():
-			continue
-		if int(digits) == expected_seed:
-			return true
-	return false
+	var v: Dictionary = _legacy_int_field(s, "seed")
+	return bool(v.get("ok", false)) and int(v.get("value", -1)) == expected_seed
 
 
 # ---------------------------------------------------------------------------

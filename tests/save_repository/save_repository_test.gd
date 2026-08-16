@@ -71,8 +71,10 @@ func _initialize() -> void:
 	_test_legacy_v2_tres_is_not_migrated()
 	_test_legacy_tres_with_schema_version_key_is_not_migrated()
 	_test_migrator_directly_rejects_non_v1_version()
-	_test_legacy_seed_substring_does_not_match()
-	_test_legacy_seed_exact_match_is_accepted()
+	_test_recovery_legacy_target_missing_commit_old_seed_9001()
+	_test_recovery_legacy_commit_old_seed_90010_is_rejected()
+	_test_legacy_v10_is_not_legacy_v1()
+	_test_legacy_v1_plus_schema_version_is_rejected()
 	print("\n=== production save repository: %d passed, %d failed ===\n" % [_passed, _failed])
 	if _failed > 0:
 		quit(1)
@@ -1414,57 +1416,95 @@ func _test_migrator_directly_rejects_non_v1_version() -> void:
 # Task 6 — Line-aware legacy seed parser (MEDIUM #1)
 # ---------------------------------------------------------------------------
 
-func _test_legacy_seed_substring_does_not_match() -> void:
-	print("[recovery] legacy seed=90010 does NOT match slot seed=9001")
-	var runs_dir: String = _isolated_runs_dir("legacy_seed_substring")
+func _test_recovery_legacy_target_missing_commit_old_seed_9001() -> void:
+	# Crash recovery: target missing, only commit-old exists, and
+	# commit-old is a real legacy v1 fixture with seed=9001. The
+	# recovery must read "seed = 9001" exactly and restore the
+	# commit-old to target. This is the helper that had a substring
+	# bug in T6: it read substr(4) of "seed = 9001" which gave
+	# " = 9001", so the leading "=" stopped the digit loop and the
+	# helper always returned false.
+	print("[recovery] commit-old seed=9001 IS restored for slot 9001")
+	var runs_dir: String = _isolated_runs_dir("recovery_commit_old_seed_9001")
 	_cleanup(runs_dir)
-	# Copy a real fixture (seed=9001) and rewrite its seed line to
-	# "seed = 90010" so the parser must reject it (substring match
-	# would falsely accept).
-	var bytes: PackedByteArray = FileAccess.get_file_as_bytes(
-		RUN_FIXTURES_DIR + "/active_run_minimal.tres")
-	var s: String = bytes.get_string_from_utf8()
-	s = s.replace("seed = 9001\n", "seed = 90010\n")
 	var ops = preload("res://core/save/run_save_file_ops.gd").new()
-	assert(ops.write_bytes_and_flush(runs_dir + "run_9101.tres",
-		s.to_utf8_buffer()), "write fixture with seed=90010")
-	var repo: RefCounted = RunSaveRepositoryScript.new(runs_dir)
-	var r: RefCounted = repo.load_run(9101)
-	_assert(r.is_error(),
-		"seed substring '90010' does NOT match slot seed '9101'")
-	_cleanup(runs_dir)
-
-
-func _test_legacy_seed_exact_match_is_accepted() -> void:
-	print("[recovery] legacy seed=9101 (exact) IS matched for slot 9101")
-	var runs_dir: String = _isolated_runs_dir("legacy_seed_exact")
-	_cleanup(runs_dir)
-	# Write a tres file with seed = 9101 (slot seed), no schema_version,
-	# valid version = 1. We use the real fixture's [gd_resource] header
-	# (which has the registered ext-resource id) and rewrite the body.
 	var fixture_bytes: PackedByteArray = FileAccess.get_file_as_bytes(
 		RUN_FIXTURES_DIR + "/active_run_minimal.tres")
-	var fixture_text: String = fixture_bytes.get_string_from_utf8()
-	var prefix: String = fixture_text.substr(0,
-		fixture_text.find("\n[resource]") + "\n[resource]\n".length())
-	var body: String = ('version = 1\n'
-		+ 'seed = 9101\n'
-		+ 'player_unit_ids = [' + '"warrior"' + ']\n'
-		+ 'bench_unit_ids = []\n'
-		+ 'unit_states = []\n'
-		+ 'item_ids = []\n'
-		+ 'item_equip_board_idx = []\n')
-	var joined: String = prefix + body
-	var ops = preload("res://core/save/run_save_file_ops.gd").new()
-	assert(ops.write_bytes_and_flush(runs_dir + "run_9101.tres",
-		joined.to_utf8_buffer()), "write valid v1 fixture with seed=9101")
+	var target_path: String = runs_dir + "run_9001.tres"
+	var commit_old_path: String = target_path + ".commit-old"
+	assert(ops.write_bytes_and_flush(commit_old_path,
+		fixture_bytes), "write real fixture as commit-old")
 	var repo: RefCounted = RunSaveRepositoryScript.new(runs_dir)
-	var r: RefCounted = repo.load_run(9101)
-	# We accept or error depending on whether the ext-resource loaded;
-	# the seed parser must NOT reject on substring match. The point is
-	# that load is not rejected for "seed mismatch".
-	_assert(r.status != SaveLoadResultScript.ERROR_V4_VALIDATION_FAILED
-			or r.is_ok(),
-		"load is not a seed-mismatch rejection (substr trap avoided)")
+	var r: RefCounted = repo.load_run(9001)
+	_assert(r.is_ok(),
+		"load_run(9001) restores legacy commit-old with seed=9001")
+	var target_now: bool = ops.exists(target_path)
+	var commit_old_now: bool = ops.exists(commit_old_path)
+	_assert(target_now, "target restored after recovery")
+	_assert(not commit_old_now,
+		"commit-old renamed to target (no leftover)")
 	_cleanup(runs_dir)
 
+
+func _test_recovery_legacy_commit_old_seed_90010_is_rejected() -> void:
+	# The parser must NOT accept a commit-old whose seed line is
+	# "seed = 90010" when the requested slot is 9001 (substring trap).
+	print("[recovery] commit-old seed=90010 is NOT restored for slot 9001")
+	var runs_dir: String = _isolated_runs_dir("recovery_commit_old_seed_90010")
+	_cleanup(runs_dir)
+	var ops = preload("res://core/save/run_save_file_ops.gd").new()
+	var fixture_bytes: PackedByteArray = FileAccess.get_file_as_bytes(
+		RUN_FIXTURES_DIR + "/active_run_minimal.tres")
+	var s: String = fixture_bytes.get_string_from_utf8()
+	s = s.replace("seed = 9001\n", "seed = 90010\n")
+	var target_path: String = runs_dir + "run_9001.tres"
+	var commit_old_path: String = target_path + ".commit-old"
+	assert(ops.write_bytes_and_flush(commit_old_path,
+		s.to_utf8_buffer()), "write fixture with seed=90010")
+	var repo: RefCounted = RunSaveRepositoryScript.new(runs_dir)
+	var r: RefCounted = repo.load_run(9001)
+	_assert(r.is_error(),
+		"load_run(9001) rejects commit-old with seed=90010")
+	var commit_old_preserved: bool = ops.exists(commit_old_path)
+	_assert(commit_old_preserved,
+		"commit-old preserved when seed mismatches")
+	_cleanup(runs_dir)
+
+
+func _test_legacy_v10_is_not_legacy_v1() -> void:
+	# Detector must reject version = 10 even though "version = 1"
+	# appears as a substring.
+	print("[detect] legacy tres with version = 10 is NOT legacy v1")
+	var runs_dir: String = _isolated_runs_dir("legacy_v10_not_v1")
+	_cleanup(runs_dir)
+	var ops = preload("res://core/save/run_save_file_ops.gd").new()
+	var fixture_bytes: PackedByteArray = FileAccess.get_file_as_bytes(
+		RUN_FIXTURES_DIR + "/active_run_minimal.tres")
+	var s: String = fixture_bytes.get_string_from_utf8()
+	s = s.replace("version = 1\n", "version = 10\n")
+	assert(ops.write_bytes_and_flush(runs_dir + "run_9001.tres",
+		s.to_utf8_buffer()), "write fixture with version=10")
+	var repo: RefCounted = RunSaveRepositoryScript.new(runs_dir)
+	var r: RefCounted = repo.load_run(9001)
+	_assert(r.is_error(),
+		"version=10 tres is rejected, not silently migrated as v1")
+	_cleanup(runs_dir)
+
+
+func _test_legacy_v1_plus_schema_version_is_rejected() -> void:
+	# Detector must reject version = 1 with schema_version present.
+	print("[detect] legacy tres with schema_version is rejected")
+	var runs_dir: String = _isolated_runs_dir("legacy_v1_plus_schema_version")
+	_cleanup(runs_dir)
+	var ops = preload("res://core/save/run_save_file_ops.gd").new()
+	var fixture_bytes: PackedByteArray = FileAccess.get_file_as_bytes(
+		RUN_FIXTURES_DIR + "/active_run_minimal.tres")
+	var s: String = fixture_bytes.get_string_from_utf8()
+	s = s.replace("\n[resource]\n", "\n[resource]\nschema_version = 4\n")
+	assert(ops.write_bytes_and_flush(runs_dir + "run_9001.tres",
+		s.to_utf8_buffer()), "write fixture with schema_version")
+	var repo: RefCounted = RunSaveRepositoryScript.new(runs_dir)
+	var r: RefCounted = repo.load_run(9001)
+	_assert(r.is_error(),
+		"version=1 + schema_version=4 is rejected, not silently migrated")
+	_cleanup(runs_dir)
