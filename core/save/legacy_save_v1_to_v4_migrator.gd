@@ -745,8 +745,8 @@ static func _zero_for(key: String) -> Variant:
 		"gold": return 0
 		"units": return [] as Array
 		"items": return [] as Array
-		"next_unit_instance_seq": return 0
-		"next_item_instance_seq": return 0
+		"next_unit_instance_seq": return 1
+		"next_item_instance_seq": return 1
 		"shop": return {}
 		"map": return {}
 		"rewards": return {}

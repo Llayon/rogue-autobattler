@@ -12,6 +12,7 @@ const RunStateScript = preload("res://core/progression/run_state.gd")
 const MetaProfileScript = preload("res://core/progression/meta_profile.gd")
 const SaveSvc = preload("res://core/utils/save_manager.gd")
 const Migrator = preload("res://core/save/legacy_save_v1_to_v4_migrator.gd")
+const MigratorScript = preload("res://core/save/legacy_save_v1_to_v4_migrator.gd")
 const RunSaveRepositoryScript = preload("res://core/save/run_save_repository.gd")
 
 const FIXTURE_DIR: String = "res://tests/legacy_save_fixtures/fixtures/version_1"
@@ -60,6 +61,8 @@ func _initialize() -> void:
 	_test_validator_rejects_unit_with_missing_required_keys()
 	_test_validator_rejects_item_with_missing_required_keys()
 	_test_validator_rejects_float_in_canonical_int_field()
+	_test_zero_for_counters_return_one()
+	_test_validate_accepts_empty_dto()
 	print("\n=== save schema v4 + migrator: %d passed, %d failed ===\n" % [_passed, _failed])
 	if _failed > 0:
 		quit(1)
@@ -987,4 +990,35 @@ func _test_validator_rejects_float_in_canonical_int_field() -> void:
 			found = true
 			break
 	_assert(found, "unit_field_type_invalid diagnostic emitted for float")
+
+
+# ---------------------------------------------------------------------------
+# Task 7 — _zero_for counters sync with empty_dto (MEDIUM #2)
+# ---------------------------------------------------------------------------
+
+func _test_zero_for_counters_return_one() -> void:
+	print("[migrator] empty_dto and per-key defaults use first unused sequence")
+	# empty_dto() must produce counters = 1 (first unused sequence,
+	# max_used + 1) so the semantic validator accepts it directly.
+	var dto: Dictionary = SaveSchemaV4.empty_dto()
+	_assert(int(dto.get("next_unit_instance_seq", 0)) == 1,
+		"empty_dto next_unit_instance_seq = 1")
+	_assert(int(dto.get("next_item_instance_seq", 0)) == 1,
+		"empty_dto next_item_instance_seq = 1")
+	# Per-key default for next_unit_instance_seq / next_item_instance_seq
+	# also returns 1 (so a missing key is filled with first unused).
+	_assert(int(MigratorScript._zero_for("next_unit_instance_seq")) == 1,
+		"_zero_for('next_unit_instance_seq') = 1")
+	_assert(int(MigratorScript._zero_for("next_item_instance_seq")) == 1,
+		"_zero_for('next_item_instance_seq') = 1")
+
+
+func _test_validate_accepts_empty_dto() -> void:
+	print("[validator] validate accepts empty_dto()")
+	# A v4 DTO produced by empty_dto() (no units, no items, counters=1)
+	# must pass semantic validation because next_* = max_used + 1 = 0 + 1.
+	var data: Dictionary = SaveSchemaV4.empty_dto()
+	var r: Dictionary = Migrator.validate(data)
+	_assert(bool(r.get("success", false)),
+		"empty_dto() passes validator: %s" % str(r.get("diagnostics", [])))
 
