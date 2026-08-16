@@ -17,6 +17,10 @@ var instance_id: String = ""
 var definition_id: StringName = &""
 var current_hp: int = 0
 var max_hp: int = 0
+## Persistent bonus_attack the v4 wire format reserves. Currently
+## the live domain does not yet mutate it, but the field is part
+## of the v4 round-trip contract.
+var bonus_attack: int = 0
 ## `true` when the unit is removed from the active run (HP=0
 ## confirmed dead, or sentinel -1 healed-to-zero).
 var dead: bool = false

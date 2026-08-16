@@ -117,6 +117,33 @@ func get_bench_units() -> Array[RunUnit]:
 	return _units_at_location_sorted(RunUnit.LOCATION_BENCH)
 
 
+## Creates a new `RunItem` with a fresh instance id and appends it
+## to `items`. Ownership defaults to `""` (inventory). Returns the
+## new item so the caller can attach it to a `RunUnit` afterwards.
+##
+## The domain does NOT look up `definition_id` in ContentDB. The
+## caller is responsible for setting `item.owner_unit_id` and
+## the corresponding `unit.equipped_item_ids` entry.
+func create_item(definition_id: StringName) -> RunItem:
+	var item: RunItem = RunItem.new()
+	item.instance_id = allocate_item_instance_id()
+	item.definition_id = definition_id
+	item.owner_unit_id = ""
+	items.append(item)
+	return item
+
+
+## Looks up an item by its instance id. Returns `null` if the id is
+## unknown.
+func get_item(instance_id: String) -> RunItem:
+	if instance_id == "":
+		return null
+	for it in items:
+		if it.instance_id == instance_id:
+			return it
+	return null
+
+
 ## Moves a unit identified by instance id to a new location, with
 ## an optional explicit `new_order` slot.
 ##
