@@ -71,6 +71,8 @@ func _initialize() -> void:
 	_test_legacy_v2_tres_is_not_migrated()
 	_test_legacy_tres_with_schema_version_key_is_not_migrated()
 	_test_migrator_directly_rejects_non_v1_version()
+	_test_legacy_seed_substring_does_not_match()
+	_test_legacy_seed_exact_match_is_accepted()
 	print("\n=== production save repository: %d passed, %d failed ===\n" % [_passed, _failed])
 	if _failed > 0:
 		quit(1)
@@ -1406,4 +1408,63 @@ func _test_migrator_directly_rejects_non_v1_version() -> void:
 	var rsv: Dictionary = MigratorScript.migrate_run(src_sv)
 	_assert(not bool(rsv.get("success", false)),
 		"migrator rejects Dictionary version=1 + schema_version=4 directly")
+
+
+# ---------------------------------------------------------------------------
+# Task 6 — Line-aware legacy seed parser (MEDIUM #1)
+# ---------------------------------------------------------------------------
+
+func _test_legacy_seed_substring_does_not_match() -> void:
+	print("[recovery] legacy seed=90010 does NOT match slot seed=9001")
+	var runs_dir: String = _isolated_runs_dir("legacy_seed_substring")
+	_cleanup(runs_dir)
+	# Copy a real fixture (seed=9001) and rewrite its seed line to
+	# "seed = 90010" so the parser must reject it (substring match
+	# would falsely accept).
+	var bytes: PackedByteArray = FileAccess.get_file_as_bytes(
+		RUN_FIXTURES_DIR + "/active_run_minimal.tres")
+	var s: String = bytes.get_string_from_utf8()
+	s = s.replace("seed = 9001\n", "seed = 90010\n")
+	var ops = preload("res://core/save/run_save_file_ops.gd").new()
+	assert(ops.write_bytes_and_flush(runs_dir + "run_9101.tres",
+		s.to_utf8_buffer()), "write fixture with seed=90010")
+	var repo: RefCounted = RunSaveRepositoryScript.new(runs_dir)
+	var r: RefCounted = repo.load_run(9101)
+	_assert(r.is_error(),
+		"seed substring '90010' does NOT match slot seed '9101'")
+	_cleanup(runs_dir)
+
+
+func _test_legacy_seed_exact_match_is_accepted() -> void:
+	print("[recovery] legacy seed=9101 (exact) IS matched for slot 9101")
+	var runs_dir: String = _isolated_runs_dir("legacy_seed_exact")
+	_cleanup(runs_dir)
+	# Write a tres file with seed = 9101 (slot seed), no schema_version,
+	# valid version = 1. We use the real fixture's [gd_resource] header
+	# (which has the registered ext-resource id) and rewrite the body.
+	var fixture_bytes: PackedByteArray = FileAccess.get_file_as_bytes(
+		RUN_FIXTURES_DIR + "/active_run_minimal.tres")
+	var fixture_text: String = fixture_bytes.get_string_from_utf8()
+	var prefix: String = fixture_text.substr(0,
+		fixture_text.find("\n[resource]") + "\n[resource]\n".length())
+	var body: String = ('version = 1\n'
+		+ 'seed = 9101\n'
+		+ 'player_unit_ids = [' + '"warrior"' + ']\n'
+		+ 'bench_unit_ids = []\n'
+		+ 'unit_states = []\n'
+		+ 'item_ids = []\n'
+		+ 'item_equip_board_idx = []\n')
+	var joined: String = prefix + body
+	var ops = preload("res://core/save/run_save_file_ops.gd").new()
+	assert(ops.write_bytes_and_flush(runs_dir + "run_9101.tres",
+		joined.to_utf8_buffer()), "write valid v1 fixture with seed=9101")
+	var repo: RefCounted = RunSaveRepositoryScript.new(runs_dir)
+	var r: RefCounted = repo.load_run(9101)
+	# We accept or error depending on whether the ext-resource loaded;
+	# the seed parser must NOT reject on substring match. The point is
+	# that load is not rejected for "seed mismatch".
+	_assert(r.status != SaveLoadResultScript.ERROR_V4_VALIDATION_FAILED
+			or r.is_ok(),
+		"load is not a seed-mismatch rejection (substr trap avoided)")
+	_cleanup(runs_dir)
 

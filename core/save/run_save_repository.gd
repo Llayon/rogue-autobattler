@@ -649,21 +649,34 @@ static func _strictly_valid_v4(parsed: Dictionary, expected_seed: int) -> Dictio
 	return {"valid": true, "data": normalised}
 
 
-## Bytes-only legacy seed match. A .tres file's seed line is plain
-## text and can be matched without invoking ResourceLoader (which
-## caches ext-resources and can mutate unrelated loads).
+## Line-aware legacy seed match. A tres file's seed line is plain
+## text and can be matched without invoking ResourceLoader.
+## Substring matching is unsafe because expected_seed = 9001 also
+## matches "seed = 90010". We tokenise by line, recognise the "seed"
+## key, parse the integer value, and compare.
 func _legacy_seed_matches(path: String, expected_seed: int) -> bool:
 	var bytes: PackedByteArray = _ops.read_bytes(path)
 	if bytes.is_empty():
 		return false
 	var s: String = bytes.get_string_from_utf8()
-	# Look for either "seed = N" or "seed=N".
-	var patterns: Array[String] = [
-		"seed = %d" % expected_seed,
-		"seed=%d" % expected_seed,
-	]
-	for pat in patterns:
-		if s.find(pat) >= 0:
+	for line in s.split("\n", false):
+		var stripped: String = line.strip_edges()
+		# Recognise lines starting with "seed" (followed by space or
+		# "="). Skip comments and other keys.
+		if not (stripped.begins_with("seed ") or stripped.begins_with("seed=")):
+			continue
+		# Take the substring after "seed".
+		var after_seed: String = stripped.substr(4).strip_edges()
+		# Pull leading digits as an integer.
+		var digits: String = ""
+		for ch in after_seed:
+			if ch >= "0" and ch <= "9":
+				digits += ch
+			else:
+				break
+		if digits.is_empty():
+			continue
+		if int(digits) == expected_seed:
 			return true
 	return false
 
