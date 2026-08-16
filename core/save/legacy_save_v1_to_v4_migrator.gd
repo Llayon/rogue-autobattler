@@ -647,6 +647,14 @@ static func _add(result: Dictionary, diagnostic: RefCounted) -> void:
 static func _read_source(source: Variant) -> Dictionary:
 	if source is Dictionary:
 		if source.has("player_unit_ids") and source.has("unit_states") and source.has("item_ids"):
+			# Reject version != 1 (the legacy v1 contract) or
+			# schema_version present (means a future schema).
+			# version must be a real TYPE_INT (not the string "1").
+			var raw_version: Variant = source.get("version", -1)
+			if typeof(raw_version) != TYPE_INT or raw_version != SOURCE_SCHEMA:
+				return {}
+			if source.has("schema_version"):
+				return {}
 			return source
 		return {}
 	if source is Resource:
@@ -660,6 +668,14 @@ static func _read_source(source: Variant) -> Dictionary:
 		]:
 			if key in source:
 				d[key] = source.get(key)
+		# Reject non-v1 versions even when called directly. This
+		# protects against repository-detector bypass. version must
+		# be a real TYPE_INT.
+		var raw_version_r: Variant = d.get("version", -1)
+		if typeof(raw_version_r) != TYPE_INT or raw_version_r != SOURCE_SCHEMA:
+			return {}
+		if d.has("schema_version"):
+			return {}
 		return d
 	return {}
 

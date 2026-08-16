@@ -9,6 +9,7 @@ const RunSaveRepositoryScript = preload("res://core/save/run_save_repository.gd"
 const SaveLoadResultScript = preload("res://core/save/save_load_result.gd")
 const MigratorScript = preload("res://core/save/legacy_save_v1_to_v4_migrator.gd")
 const SaveSchemaV4Script = preload("res://core/save/save_schema_v4.gd")
+const RunStateScript = preload("res://core/progression/run_state.gd")
 
 const FIXTURES_DIR: String = "res://tests/legacy_save_fixtures/fixtures/version_1"
 const RUN_FIXTURES_DIR: String = FIXTURES_DIR + "/runs"
@@ -67,6 +68,9 @@ func _initialize() -> void:
 	_test_save_run_id_mismatch_rejected_before_filesystem_mutation()
 	_test_save_load_result_has_typed_context_field()
 	_test_recovery_keeps_commit_old_when_run_id_mismatches()
+	_test_legacy_v2_tres_is_not_migrated()
+	_test_legacy_tres_with_schema_version_key_is_not_migrated()
+	_test_migrator_directly_rejects_non_v1_version()
 	print("\n=== production save repository: %d passed, %d failed ===\n" % [_passed, _failed])
 	if _failed > 0:
 		quit(1)
@@ -1311,4 +1315,95 @@ func _test_recovery_keeps_commit_old_when_run_id_mismatches() -> void:
 	_assert(commit_old_present,
 		"good commit-old preserved when target run_id mismatches")
 	_cleanup(runs_dir)
+
+
+# ---------------------------------------------------------------------------
+# Task 4 — Legacy v1 strict detection (HIGH #2)
+# ---------------------------------------------------------------------------
+
+func _test_legacy_v2_tres_is_not_migrated() -> void:
+	print("[detect] legacy v2 tres is rejected, not silently migrated")
+	var runs_dir: String = _isolated_runs_dir("legacy_v2_not_migrated")
+	_cleanup(runs_dir)
+	# Copy a real fixture (which has version = 1) and rewrite the
+	# version line to 2.
+	var bytes: PackedByteArray = FileAccess.get_file_as_bytes(
+		RUN_FIXTURES_DIR + "/active_run_minimal.tres")
+	var s: String = bytes.get_string_from_utf8()
+	# Replace "version = 1" with "version = 2" (preserve whitespace).
+	s = s.replace("version = 1\n", "version = 2\n")
+	var ops = preload("res://core/save/run_save_file_ops.gd").new()
+	assert(ops.write_bytes_and_flush(runs_dir + "run_9101.tres",
+		s.to_utf8_buffer()), "write v2 fixture")
+	var repo: RefCounted = RunSaveRepositoryScript.new(runs_dir)
+	var r: RefCounted = repo.load_run(9101)
+	_assert(r.is_error(), "v2 tres is rejected (not silently migrated as v1)")
+	_cleanup(runs_dir)
+
+
+func _test_legacy_tres_with_schema_version_key_is_not_migrated() -> void:
+	print("[detect] tres with schema_version key is rejected")
+	var runs_dir: String = _isolated_runs_dir("legacy_schema_version_present")
+	_cleanup(runs_dir)
+	# Copy a real fixture (which has no schema_version key) and inject
+	# a schema_version = 4 line into the body.
+	var bytes: PackedByteArray = FileAccess.get_file_as_bytes(
+		RUN_FIXTURES_DIR + "/active_run_minimal.tres")
+	var s: String = bytes.get_string_from_utf8()
+	s = s.replace("\n[resource]\n", "\n[resource]\nschema_version = 4\n")
+	var ops = preload("res://core/save/run_save_file_ops.gd").new()
+	assert(ops.write_bytes_and_flush(runs_dir + "run_9101.tres",
+		s.to_utf8_buffer()), "write fixture with schema_version")
+	var repo: RefCounted = RunSaveRepositoryScript.new(runs_dir)
+	var r: RefCounted = repo.load_run(9101)
+	_assert(r.is_error(),
+		"tres with schema_version key is rejected (not silently migrated as v1)")
+	_cleanup(runs_dir)
+
+
+func _test_migrator_directly_rejects_non_v1_version() -> void:
+	print("[migrator] direct migrate_run() rejects non-v1 version")
+	# Dictionary source with version = 2 must be rejected without
+	# being silently migrated as v1.
+	var src2: Dictionary = {
+		"version": 2,
+		"seed": 8001,
+		"player_unit_ids": [&"warrior"] as Array[StringName],
+		"bench_unit_ids": [] as Array[StringName],
+		"unit_states": [],
+		"item_ids": [] as Array[StringName],
+		"item_equip_board_idx": [] as Array[int],
+	}
+	var r2: Dictionary = MigratorScript.migrate_run(src2)
+	_assert(not bool(r2.get("success", false)),
+		"migrator rejects Dictionary version=2 directly")
+	# Dictionary source with version as STRING "1" must be rejected:
+	# version must be a real TYPE_INT.
+	var src_s: Dictionary = {
+		"version": "1",
+		"seed": 8001,
+		"player_unit_ids": [&"warrior"] as Array[StringName],
+		"bench_unit_ids": [] as Array[StringName],
+		"unit_states": [],
+		"item_ids": [] as Array[StringName],
+		"item_equip_board_idx": [] as Array[int],
+	}
+	var rs: Dictionary = MigratorScript.migrate_run(src_s)
+	_assert(not bool(rs.get("success", false)),
+		"migrator rejects Dictionary version='1' (string) directly")
+	# Dictionary source with version = 1 + schema_version = 4 must
+	# be rejected.
+	var src_sv: Dictionary = {
+		"version": 1,
+		"schema_version": 4,
+		"seed": 8001,
+		"player_unit_ids": [&"warrior"] as Array[StringName],
+		"bench_unit_ids": [] as Array[StringName],
+		"unit_states": [],
+		"item_ids": [] as Array[StringName],
+		"item_equip_board_idx": [] as Array[int],
+	}
+	var rsv: Dictionary = MigratorScript.migrate_run(src_sv)
+	_assert(not bool(rsv.get("success", false)),
+		"migrator rejects Dictionary version=1 + schema_version=4 directly")
 

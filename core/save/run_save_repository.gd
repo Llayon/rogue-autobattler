@@ -318,12 +318,30 @@ func _detect_format(text: PackedByteArray) -> Dictionary:
 
 static func _has_legacy_v1_structural_keys(s: String) -> bool:
 	# A .tres file is a legacy v1 candidate only if it contains the
-	# required structural keys. A .tres-shaped file without them is
-	# corrupt, not a legacy save.
+	# required structural keys AND declares version = 1 AND has no
+	# schema_version key. A .tres-shaped file with version != 1 or
+	# with a schema_version field is NOT legacy v1: it is either a
+	# future schema or a corrupt save, and the detector must not
+	# silently migrate it.
 	for key in ["player_unit_ids", "unit_states"]:
 		if s.find(key) < 0:
 			return false
+	if not _has_legacy_v1_version_one(s):
+		return false
+	if s.find("schema_version") >= 0:
+		return false
 	return true
+
+
+## True if the tres body contains a literal "version = 1" line.
+## Detects "version = 1", "version=1", with possible whitespace
+## before the newline.
+static func _has_legacy_v1_version_one(s: String) -> bool:
+	# Look for the line in any form (space around =).
+	for sep in ["version = 1", "version=1"]:
+		if s.find(sep) >= 0:
+			return true
+	return false
 
 
 # ---------------------------------------------------------------------------
