@@ -32,6 +32,17 @@ func _initialize() -> void:
 	_test_separate_runs_have_independent_allocators()
 	_test_allocator_returns_string_type()
 	_test_allocator_handles_more_than_six_digits()
+	_test_two_warriors_get_distinct_ids_and_hp()
+	_test_create_unit_board_bench_orders()
+	_test_get_unit_finds_only_by_instance_id()
+	_test_move_board_to_bench_normalises_both_sides()
+	_test_move_bench_to_board_insert_at_middle()
+	_test_swap_exchanges_only_order_keeps_identity()
+	_test_repeated_moves_keep_contiguous_orders()
+	_test_move_unknown_instance_id_is_no_op()
+	_test_move_with_invalid_location_is_no_op()
+	_test_swap_unknown_instance_id_is_no_op()
+	_test_hp_stays_with_instance_id_through_moves()
 	print("\n=== run domain state: %d passed, %d failed ===\n" % [_passed, _failed])
 	if _failed > 0:
 		quit(1)
@@ -166,6 +177,240 @@ func _test_allocator_handles_more_than_six_digits() -> void:
 		"counter=1000000 produces unit_1000000 (no wrap, no recycle)")
 	_assert(s.next_unit_instance_seq == 1000001,
 		"counter advances to 1000001")
+
+
+
+
+func _test_two_warriors_get_distinct_ids_and_hp() -> void:
+	# Two units with the same definition id must get distinct
+	# instance ids and their per-unit state (max_hp here) is per
+	# instance, never per definition. This is the central reason
+	# we are moving off definition+index identity.
+	print("[identity] two warriors get distinct ids and independent hp")
+	var s = RunDomainState.new()
+	var a: RunUnit = s.create_unit(&"warrior", 30, RunUnit.LOCATION_BOARD)
+	var b: RunUnit = s.create_unit(&"warrior", 80, RunUnit.LOCATION_BOARD)
+	_assert(a.instance_id == "unit_000001", "first warrior id")
+	_assert(b.instance_id == "unit_000002", "second warrior id")
+	_assert(a.definition_id == &"warrior" and b.definition_id == &"warrior",
+		"both have definition_id = warrior")
+	_assert(a.max_hp == 30 and b.max_hp == 80,
+		"max_hp is per instance (30 / 80)")
+	_assert(a != b, "two distinct RunUnit instances")
+
+
+func _test_create_unit_board_bench_orders() -> void:
+	# create_unit at LOCATION_BOARD appends in order 0..N-1.
+	# create_unit at LOCATION_BENCH does the same independently.
+	print("[create] create_unit assigns contiguous orders per location")
+	var s = RunDomainState.new()
+	var a: RunUnit = s.create_unit(&"warrior", 100, RunUnit.LOCATION_BOARD)
+	var b: RunUnit = s.create_unit(&"archer", 80, RunUnit.LOCATION_BOARD)
+	var c: RunUnit = s.create_unit(&"mage", 60, RunUnit.LOCATION_BENCH)
+	_assert(a.order == 0 and a.location == RunUnit.LOCATION_BOARD,
+		"first board unit order=0")
+	_assert(b.order == 1 and b.location == RunUnit.LOCATION_BOARD,
+		"second board unit order=1")
+	_assert(c.order == 0 and c.location == RunUnit.LOCATION_BENCH,
+		"first bench unit order=0 (independent stream)")
+	_assert(s.get_board_units().size() == 2, "2 board units")
+	_assert(s.get_bench_units().size() == 1, "1 bench unit")
+
+
+func _test_get_unit_finds_only_by_instance_id() -> void:
+	# Definition id is NOT identity; get_unit must only resolve by
+	# instance id. Two warriors created above differ only by
+	# instance id.
+	print("[get_unit] resolves by instance id only")
+	var s = RunDomainState.new()
+	var a: RunUnit = s.create_unit(&"warrior", 30, RunUnit.LOCATION_BOARD)
+	var b: RunUnit = s.create_unit(&"warrior", 80, RunUnit.LOCATION_BENCH)
+	_assert(s.get_unit(a.instance_id) == a, "find by a.instance_id")
+	_assert(s.get_unit(b.instance_id) == b, "find by b.instance_id")
+	_assert(s.get_unit("") == null, "empty id -> null")
+	_assert(s.get_unit("unit_999999") == null, "unknown id -> null")
+
+
+func _test_move_board_to_bench_normalises_both_sides() -> void:
+	# Move B from board[1] to bench. After the move:
+	#   board: A(0), C(2 -> 1) -> contiguous 0..N-1
+	#   bench: B(0)
+	print("[move board->bench] both sides normalised 0..N-1")
+	var s = RunDomainState.new()
+	var a: RunUnit = s.create_unit(&"warrior", 100, RunUnit.LOCATION_BOARD)
+	var b: RunUnit = s.create_unit(&"warrior", 100, RunUnit.LOCATION_BOARD)
+	var c: RunUnit = s.create_unit(&"warrior", 100, RunUnit.LOCATION_BOARD)
+	_assert(s.move_unit(b.instance_id, RunUnit.LOCATION_BENCH),
+		"move b to bench")
+	_assert(a.order == 0, "a stays at order 0")
+	_assert(c.order == 1, "c shifts down to order 1 (was 2)")
+	_assert(b.location == RunUnit.LOCATION_BENCH and b.order == 0,
+		"b lands at bench order 0")
+	var board: Array[RunUnit] = s.get_board_units()
+	_assert(board.size() == 2 and board[0] == a and board[1] == c,
+		"board is [A, C] in order")
+	var bench: Array[RunUnit] = s.get_bench_units()
+	_assert(bench.size() == 1 and bench[0] == b, "bench is [B]")
+
+
+func _test_move_bench_to_board_insert_at_middle() -> void:
+	# After move_board_to_bench above, take B from bench back to
+	# board at order 1. Expected board: A(0), B(1), C(2). Bench
+	# becomes empty.
+	print("[move bench->board] insertion at middle shifts orders correctly")
+	var s = RunDomainState.new()
+	var a: RunUnit = s.create_unit(&"warrior", 100, RunUnit.LOCATION_BOARD)
+	var b: RunUnit = s.create_unit(&"warrior", 100, RunUnit.LOCATION_BOARD)
+	var c: RunUnit = s.create_unit(&"warrior", 100, RunUnit.LOCATION_BOARD)
+	s.move_unit(b.instance_id, RunUnit.LOCATION_BENCH)
+	_assert(s.move_unit(b.instance_id, RunUnit.LOCATION_BOARD, 1),
+		"insert b back at board order 1")
+	_assert(a.order == 0, "a stays at 0")
+	_assert(b.order == 1, "b lands at 1")
+	_assert(c.order == 2, "c shifts up to 2")
+	_assert(s.get_bench_units().is_empty(), "bench is empty")
+	var board: Array[RunUnit] = s.get_board_units()
+	_assert(board.size() == 3 and board[0] == a and board[1] == b 			and board[2] == c, "board is [A, B, C] in order")
+
+
+func _test_swap_exchanges_only_order_keeps_identity() -> void:
+	# Swap two board units. Identity, definition, max_hp, equipment
+	# are unchanged; only `order` is exchanged.
+	print("[swap] exchanges order only, keeps identity and hp")
+	var s = RunDomainState.new()
+	var a: RunUnit = s.create_unit(&"warrior", 100, RunUnit.LOCATION_BOARD)
+	var b: RunUnit = s.create_unit(&"archer", 60, RunUnit.LOCATION_BOARD)
+	var pre_a_order: int = a.order
+	var pre_b_order: int = b.order
+	var pre_a_equip: Array = a.equipped_item_ids.duplicate()
+	_assert(s.swap_units(a.instance_id, b.instance_id), "swap ok")
+	_assert(a.instance_id == "unit_000001", "a instance_id unchanged")
+	_assert(b.instance_id == "unit_000002", "b instance_id unchanged")
+	_assert(a.definition_id == &"warrior", "a definition_id unchanged")
+	_assert(b.definition_id == &"archer", "b definition_id unchanged")
+	_assert(a.max_hp == 100 and b.max_hp == 60, "max_hp unchanged")
+	_assert(a.equipped_item_ids == pre_a_equip, "a equipment unchanged")
+	_assert(a.order == pre_b_order, "a order is now b's old order")
+	_assert(b.order == pre_a_order, "b order is now a's old order")
+
+
+func _test_repeated_moves_keep_contiguous_orders() -> void:
+	# After a series of create / move / swap / move, both board and
+	# bench must have contiguous orders 0..N-1, no holes, no
+	# duplicates.
+	print("[invariant] repeated moves preserve contiguous orders")
+	var s = RunDomainState.new()
+	var a: RunUnit = s.create_unit(&"warrior", 100, RunUnit.LOCATION_BOARD)
+	var b: RunUnit = s.create_unit(&"archer", 80, RunUnit.LOCATION_BOARD)
+	var c: RunUnit = s.create_unit(&"mage", 60, RunUnit.LOCATION_BOARD)
+	var d: RunUnit = s.create_unit(&"cleric", 50, RunUnit.LOCATION_BENCH)
+	s.move_unit(c.instance_id, RunUnit.LOCATION_BENCH)
+	s.swap_units(a.instance_id, d.instance_id)  # mixed locations -> fails
+	# d is on bench, a is on board; swap should fail without mutation.
+	var board: Array[RunUnit] = s.get_board_units()
+	var bench: Array[RunUnit] = s.get_bench_units()
+	# After c moved to bench: board [A(0), B(1)], bench [D(0), C(1)]
+	_assert(board.size() == 2, "board has 2")
+	for i in board.size():
+		_assert(board[i].order == i,
+			"board[%d].order == %d (was %d)" % [i, i, board[i].order])
+	_assert(bench.size() == 2, "bench has 2")
+	for i in bench.size():
+		_assert(bench[i].order == i,
+			"bench[%d].order == %d (was %d)" % [i, i, bench[i].order])
+	# A positive swap test that respects the same-location rule.
+	var e: RunUnit = s.create_unit(&"rogue", 70, RunUnit.LOCATION_BOARD)
+	# Now board: A(0), B(1), E(2). Swap B and E.
+	_assert(s.swap_units(b.instance_id, e.instance_id), "swap b and e on board")
+	board = s.get_board_units()
+	for i in board.size():
+		_assert(board[i].order == i, "after second swap, board contiguous")
+	# Identity untouched.
+	_assert(s.get_unit("unit_000001") == a, "unit_000001 still a")
+	_assert(s.get_unit("unit_000005") == e, "unit_000005 still e")
+
+
+func _test_move_unknown_instance_id_is_no_op() -> void:
+	print("[no-op] move with unknown instance id does not mutate state")
+	var s = RunDomainState.new()
+	var a: RunUnit = s.create_unit(&"warrior", 100, RunUnit.LOCATION_BOARD)
+	var pre_units: int = s.units.size()
+	var pre_a_order: int = a.order
+	_assert(not s.move_unit("unit_999999", RunUnit.LOCATION_BENCH),
+		"unknown id -> false")
+	_assert(s.units.size() == pre_units, "units count unchanged")
+	_assert(a.order == pre_a_order, "a.order unchanged")
+
+
+func _test_move_with_invalid_location_is_no_op() -> void:
+	print("[no-op] move with invalid location does not mutate state")
+	var s = RunDomainState.new()
+	var a: RunUnit = s.create_unit(&"warrior", 100, RunUnit.LOCATION_BOARD)
+	var pre_order: int = a.order
+	var pre_loc: int = a.location
+	_assert(not s.move_unit(a.instance_id, 7),
+		"invalid location 7 -> false")
+	_assert(not s.move_unit(a.instance_id, -1),
+		"invalid location -1 -> false")
+	_assert(a.order == pre_order, "a.order unchanged")
+	_assert(a.location == pre_loc, "a.location unchanged")
+
+
+func _test_swap_unknown_instance_id_is_no_op() -> void:
+	print("[no-op] swap with unknown id does not mutate state")
+	var s = RunDomainState.new()
+	var a: RunUnit = s.create_unit(&"warrior", 100, RunUnit.LOCATION_BOARD)
+	var b: RunUnit = s.create_unit(&"warrior", 100, RunUnit.LOCATION_BOARD)
+	var pre_a: int = a.order
+	var pre_b: int = b.order
+	_assert(not s.swap_units("unit_999999", b.instance_id),
+		"first id unknown -> false")
+	_assert(not s.swap_units(a.instance_id, "unit_999999"),
+		"second id unknown -> false")
+	_assert(not s.swap_units(a.instance_id, a.instance_id),
+		"same id -> false")
+	_assert(a.order == pre_a and b.order == pre_b, "orders unchanged")
+	# Mixed-location swap fails.
+	var c: RunUnit = s.create_unit(&"warrior", 100, RunUnit.LOCATION_BENCH)
+	_assert(not s.swap_units(a.instance_id, c.instance_id),
+		"mixed locations -> false")
+
+
+func _test_hp_stays_with_instance_id_through_moves() -> void:
+	# The very point of stable instance identity: two warriors with
+	# different max_hp must keep their hp values across moves and
+	# swaps. Under the old definition+index model, hp at a board
+	# slot would have followed the slot, not the unit.
+	print("[hp identity] hp sticks to instance id across move + swap")
+	var s = RunDomainState.new()
+	var a: RunUnit = s.create_unit(&"warrior", 30, RunUnit.LOCATION_BOARD)
+	var b: RunUnit = s.create_unit(&"warrior", 80, RunUnit.LOCATION_BOARD)
+	# Move A to bench.
+	s.move_unit(a.instance_id, RunUnit.LOCATION_BENCH)
+	# HP values follow the instance, not the location or the slot.
+	_assert(s.get_unit("unit_000001").max_hp == 30,
+		"unit_000001 max_hp still 30 after move to bench")
+	_assert(s.get_unit("unit_000002").max_hp == 80,
+		"unit_000002 max_hp still 80 (it never moved)")
+	# Bring A back to board.
+	s.move_unit(a.instance_id, RunUnit.LOCATION_BOARD, 0)
+	_assert(s.get_unit("unit_000001").max_hp == 30,
+		"unit_000001 max_hp still 30 after move back to board")
+	_assert(s.get_unit("unit_000002").max_hp == 80,
+		"unit_000002 max_hp still 80 (b never moved)")
+	# Now also test current_hp, which is the canonical sentinel
+	# right after create_unit. Both should still be -1.
+	_assert(s.get_unit("unit_000001").current_hp == -1,
+		"unit_000001 current_hp is still sentinel -1")
+	_assert(s.get_unit("unit_000002").current_hp == -1,
+		"unit_000002 current_hp is still sentinel -1")
+	# Swap A and B (both on board).
+	s.swap_units(a.instance_id, b.instance_id)
+	_assert(s.get_unit("unit_000001").max_hp == 30,
+		"unit_000001 max_hp still 30 after swap")
+	_assert(s.get_unit("unit_000002").max_hp == 80,
+		"unit_000002 max_hp still 80 after swap")
+
 
 	quit(0)
 
