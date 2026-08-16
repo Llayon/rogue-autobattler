@@ -2,6 +2,20 @@ class_name SaveService extends RefCounted
 ## Удобные обёртки над SaveManager для meta и runs.
 ##
 ## Хранит пути в одном месте — чтобы не дублировать строки в callers.
+##
+## Phase 1 / T3C adds the v4 persistence façade (`save_run_v4` /
+## `load_run_v4`) that hands a v4 DTO to the hardened
+## `RunSaveRepository`. The legacy Resource-based APIs
+## (`save_run` / `load_run`) stay in place until T3D switches
+## `RunController` over to the v4 pipeline.
+
+const RunSaveRepositoryScript = preload(
+	"res://core/save/run_save_repository.gd")
+
+
+# --------------------------------------------------------------------
+# Legacy Resource APIs (kept until T3D)
+# --------------------------------------------------------------------
 
 
 static func save_meta(profile: MetaProfile) -> bool:
@@ -33,6 +47,59 @@ static func load_run(seed_value: int) -> RunState:
 	if res is RunState:
 		return res
 	return null
+
+
+
+# --------------------------------------------------------------------
+# Phase 1 / T3C — v4 persistence façade
+# --------------------------------------------------------------------
+#
+# SaveService does NOT know about RunDomainState / RunUnit /
+# RunItem. The mapper (RunStateV4Mapper) owns the boundary
+# between the live domain and the v4 DTO; this façade owns only
+# the persistence DTO shape and the call into RunSaveRepository.
+#
+# Returned objects are SaveLoadResult RefCounted instances. They
+# preserve the typed status and diagnostics the hardened
+# repository already produces. The façade NEVER collapses the
+# result to a bool.
+
+## Produces a fresh `RunSaveRepository` pointing at the default
+## `SaveSvc.RUNS_DIR`. Used by the production `save_run_v4` /
+## `load_run_v4` paths. Tests should NOT call this; they should
+## pass their own repository into the `_with_repository` seam.
+static func _run_repository() -> RefCounted:
+	return RunSaveRepositoryScript.new(SaveSvc.RUNS_DIR)
+
+
+## Saves a v4 DTO for `seed_value` through a fresh
+## `RunSaveRepository`. The DTO shape must be valid v4; the
+## repository validates it. Returns a `SaveLoadResult`.
+static func save_run_v4(seed_value: int, dto: Dictionary) -> RefCounted:
+	return _save_run_v4_with_repository(seed_value, dto, _run_repository())
+
+
+## Loads a v4 DTO (or migrates legacy v1) for `seed_value`
+## through a fresh `RunSaveRepository`. Returns a
+## `SaveLoadResult` whose `data` is the canonical v4 DTO when the
+## status is `OK`.
+static func load_run_v4(seed_value: int) -> RefCounted:
+	return _load_run_v4_with_repository(seed_value, _run_repository())
+
+
+## Test-only seam. Production must use `save_run_v4` /
+## `load_run_v4`. Tests pass a repository pointing at an isolated
+## temp directory so they do not touch `user://saves/runs`.
+static func _save_run_v4_with_repository(
+		seed_value: int, dto: Dictionary,
+		repository: RefCounted) -> RefCounted:
+	return repository.save_run(seed_value, dto)
+
+
+static func _load_run_v4_with_repository(
+		seed_value: int,
+		repository: RefCounted) -> RefCounted:
+	return repository.load_run(seed_value)
 
 
 # === S3.3: Save/Load в середине рана ===

@@ -97,7 +97,11 @@ static func from_v4_dto(dto: Dictionary):
 	state.just_visited_merchant = bool(dto.get("just_visited_merchant", false))
 	state.next_unit_instance_seq = int(dto.get("next_unit_instance_seq", 1))
 	state.next_item_instance_seq = int(dto.get("next_item_instance_seq", 1))
-	state.encounter_visited_ids = (dto.get("encounter_visited_ids", []) as Array).duplicate()
+	var ev: Array = (dto.get("encounter_visited_ids", []) as Array).duplicate()
+	var ev_i: Array[int] = [] as Array[int]
+	for v in ev:
+		ev_i.append(int(v))
+	state.encounter_visited_ids = ev_i
 	state.meta_modifiers = (dto.get("meta_modifiers", {}) as Dictionary).duplicate()
 	var units_value: Variant = dto.get("units", [])
 	if units_value is Array:
