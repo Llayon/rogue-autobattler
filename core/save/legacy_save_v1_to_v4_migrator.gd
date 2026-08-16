@@ -16,6 +16,13 @@ class_name LegacySaveV1ToV4Migrator extends RefCounted
 ## and a predictable fallback.
 
 const ID_FORMAT_UNIT: String = "unit_%06d"
+const REQUIRED_UNIT_KEYS: Array[StringName] = [
+	&"instance_id", &"definition_id", &"current_hp", &"max_hp",
+	&"bonus_attack", &"dead", &"location", &"order", &"equipped_item_ids",
+]
+const REQUIRED_ITEM_KEYS: Array[StringName] = [
+	&"instance_id", &"definition_id", &"owner_unit_id",
+]
 const ID_FORMAT_ITEM: String = "item_%06d"
 const SOURCE_SCHEMA: int = 1
 const TARGET_SCHEMA: int = 4
@@ -305,6 +312,15 @@ static func validate(data: Dictionary) -> Dictionary:
 					str(i)))
 				continue
 			var u: Dictionary = u_value
+			# Required-key check runs BEFORE type checks. Missing keys
+			# are not silently defaulted by _strict_int/_strict_str.
+			for req_key in REQUIRED_UNIT_KEYS:
+				if not u.has(req_key):
+					result["success"] = false
+					result["diagnostics"].append(MigrationDiagnostic.error(
+						"unit_required_key_missing",
+						"unit[%d] missing required key %s" % [i, req_key],
+						str(i)))
 			var instance_id_v: Variant = _strict_str(u.get("instance_id", ""), "instance_id", str(i), result["diagnostics"])
 			if instance_id_v == null:
 				result["success"] = false
@@ -457,6 +473,13 @@ static func validate(data: Dictionary) -> Dictionary:
 					str(i)))
 				continue
 			var it: Dictionary = it_value
+			for req_key in REQUIRED_ITEM_KEYS:
+				if not it.has(req_key):
+					result["success"] = false
+					result["diagnostics"].append(MigrationDiagnostic.error(
+						"item_required_key_missing",
+						"item[%d] missing required key %s" % [i, req_key],
+						str(i)))
 			var instance_id_v: Variant = _strict_str(it.get("instance_id", ""), "instance_id", str(i), result["diagnostics"])
 			if instance_id_v == null:
 				result["success"] = false
@@ -583,22 +606,18 @@ static func _strict_str(value: Variant, key: String,
 	return null
 
 
+## Strict int check: canonical validator accepts TYPE_INT only.
+## Integral floats are rejected here; the wire layer
+## (SaveSchemaV4._wire_int) is the only place that coerces
+## integral floats to int. This keeps the wire/canonical boundary
+## strict: a canonical DTO must hold ints, not floats.
 static func _strict_int(value: Variant, key: String,
 		instance_id: String, diags: Array) -> Variant:
 	if typeof(value) == TYPE_INT:
 		return value
-	if typeof(value) == TYPE_FLOAT:
-		var f: float = float(value)
-		if is_finite(f) and f == floor(f):
-			return int(f)
-		diags.append(MigrationDiagnostic.error(
-			"unit_field_type_invalid",
-			"%s.%s non-integral float %s" % [instance_id, key, str(value)],
-			instance_id))
-		return null
 	diags.append(MigrationDiagnostic.error(
 		"unit_field_type_invalid",
-		"%s.%s has wrong type %s" % [instance_id, key, type_string(typeof(value))],
+		"%s.%s has wrong type %s (canonical validator accepts only TYPE_INT)" % [instance_id, key, type_string(typeof(value))],
 		instance_id))
 	return null
 

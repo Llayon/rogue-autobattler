@@ -57,6 +57,9 @@ func _initialize() -> void:
 	_test_strict_validator_rejects_string_current_hp()
 	_test_strict_validator_rejects_string_dead_flag()
 	_test_strict_validator_rejects_string_equipped_item_ids()
+	_test_validator_rejects_unit_with_missing_required_keys()
+	_test_validator_rejects_item_with_missing_required_keys()
+	_test_validator_rejects_float_in_canonical_int_field()
 	print("\n=== save schema v4 + migrator: %d passed, %d failed ===\n" % [_passed, _failed])
 	if _failed > 0:
 		quit(1)
@@ -912,4 +915,76 @@ func _test_strict_validator_rejects_string_equipped_item_ids() -> void:
 			found = true
 			break
 	_assert(found, "unit_field_type_invalid diagnostic emitted")
+
+
+# ---------------------------------------------------------------------------
+# Task 5 — Required-key validation in nested validator (HIGH #3)
+# ---------------------------------------------------------------------------
+
+func _test_validator_rejects_unit_with_missing_required_keys() -> void:
+	print("[validator] rejects unit missing required keys")
+	var data: Dictionary = SaveSchemaV4.empty_dto()
+	var unit: Dictionary = {
+		"instance_id": "unit_000001",
+		"definition_id": "warrior",
+		# current_hp, max_hp, bonus_attack, dead, location, order,
+		# equipped_item_ids all missing.
+	}
+	data["units"] = [unit]
+	data["next_unit_instance_seq"] = 2
+	var r: Dictionary = Migrator.validate(data)
+	_assert(not bool(r.get("success", false)), "missing required unit keys rejected")
+	var found: bool = false
+	for d in r.get("diagnostics", []):
+		if d is RefCounted and d.code == "unit_required_key_missing":
+			found = true
+			break
+	_assert(found, "unit_required_key_missing diagnostic emitted")
+
+
+func _test_validator_rejects_item_with_missing_required_keys() -> void:
+	print("[validator] rejects item missing required keys")
+	var data: Dictionary = SaveSchemaV4.empty_dto()
+	data["units"] = []
+	var item: Dictionary = {
+		"instance_id": "item_000001",
+		# definition_id, owner_unit_id missing.
+	}
+	data["items"] = [item]
+	data["next_unit_instance_seq"] = 1
+	data["next_item_instance_seq"] = 2
+	var r: Dictionary = Migrator.validate(data)
+	_assert(not bool(r.get("success", false)), "missing required item keys rejected")
+	var found: bool = false
+	for d in r.get("diagnostics", []):
+		if d is RefCounted and d.code == "item_required_key_missing":
+			found = true
+			break
+	_assert(found, "item_required_key_missing diagnostic emitted")
+
+
+func _test_validator_rejects_float_in_canonical_int_field() -> void:
+	print("[validator] canonical validator rejects float for int field")
+	var data: Dictionary = SaveSchemaV4.empty_dto()
+	var unit: Dictionary = {
+		"instance_id": "unit_000001",
+		"definition_id": "warrior",
+		"current_hp": 100.0,  # float, not int
+		"max_hp": 100,
+		"bonus_attack": 0,
+		"dead": false,
+		"location": 0,
+		"order": 0,
+		"equipped_item_ids": [],
+	}
+	data["units"] = [unit]
+	data["next_unit_instance_seq"] = 2
+	var r: Dictionary = Migrator.validate(data)
+	_assert(not bool(r.get("success", false)), "float for int field rejected")
+	var found: bool = false
+	for d in r.get("diagnostics", []):
+		if d is RefCounted and d.code == "unit_field_type_invalid":
+			found = true
+			break
+	_assert(found, "unit_field_type_invalid diagnostic emitted for float")
 
