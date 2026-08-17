@@ -33,9 +33,103 @@ func _initialize() -> void:
 	_test_round_trip_preserves_location_and_order()
 	_test_round_trip_preserves_run_scalars()
 	_test_round_trip_does_not_mint_new_ids()
+	_test_to_v4_unit_dto_carries_bonus_attack()
+	_test_round_trip_preserves_bonus_attack()
+	_test_save_service_v4_boundary_preserves_bonus_attack()
+	_test_canonical_dto_with_bonus_attack_23_round_trips()
 	print("\n=== run state v4 mapper: %d passed, %d failed ===\n" % [_passed, _failed])
 	if _failed > 0:
 		quit(1)
+
+
+
+func _test_to_v4_unit_dto_carries_bonus_attack() -> void:
+	# Regression for T3B.1: to_v4_unit_dto() must carry the live
+	# unit's bonus_attack, NOT always serialise 0.
+	print("[bonus_attack] to_v4_unit_dto carries live bonus_attack")
+	var s = RUN_DOMAIN_PRELOAD.new()
+	s.seed = 9001
+	var a: RunUnit = s.create_unit(&"warrior", 100, RunUnit.LOCATION_BOARD)
+	a.bonus_attack = 17
+	var dto: Dictionary = MAPPER.to_v4_dto(s)
+	var units: Array = dto["units"]
+	var a_dto: Dictionary = units[0]
+	_assert(int(a_dto.get("bonus_attack", -1)) == 17,
+		"dto.units[0].bonus_attack == 17 (was: %s)"
+		% str(a_dto.get("bonus_attack")))
+
+
+func _test_round_trip_preserves_bonus_attack() -> void:
+	# domain bonus_attack=17 -> dto -> domain: still 17.
+	print("[bonus_attack] mapper roundtrip preserves non-zero value")
+	var s = RUN_DOMAIN_PRELOAD.new()
+	s.seed = 9001
+	var a: RunUnit = s.create_unit(&"warrior", 100, RunUnit.LOCATION_BOARD)
+	a.bonus_attack = 17
+	var dto: Dictionary = MAPPER.to_v4_dto(s)
+	var s2 = MAPPER.from_v4_dto(dto)
+	var a2 = s2.get_unit("unit_000001")
+	_assert(a2.bonus_attack == 17,
+		"re-loaded unit.bonus_attack == 17 (was: %d)" % a2.bonus_attack)
+
+
+func _test_save_service_v4_boundary_preserves_bonus_attack() -> void:
+	# Full persistence-boundary roundtrip: domain bonus_attack=17
+	# -> mapper -> SaveService v4 -> disk -> load -> mapper -> domain.
+	print("[bonus_attack] save_service_v4 boundary preserves value")
+	# Use the same fault repository pattern as save_service_v4_test.gd.
+	var REPO_SCRIPT = preload("res://core/save/run_save_repository.gd")
+	var FILE_OPS_FAULT_SCRIPT = preload(
+		"res://tests/save_repository/support/run_save_file_ops_fault.gd")
+	var SAVE_SERVICE = preload("res://core/save/save_service.gd")
+	var base: String = "user://save_service_v4_bonus_attack_%d/" % Time.get_ticks_usec()
+	DirAccess.make_dir_recursive_absolute(
+		ProjectSettings.globalize_path(base))
+	var repo = REPO_SCRIPT.new(base, FILE_OPS_FAULT_SCRIPT.new())
+	var s = RUN_DOMAIN_PRELOAD.new()
+	s.seed = 9001
+	var a: RunUnit = s.create_unit(&"warrior", 100, RunUnit.LOCATION_BOARD)
+	a.bonus_attack = 17
+	var save_r: RefCounted = SAVE_SERVICE._save_run_v4_with_repository(
+		9001, MAPPER.to_v4_dto(s), repo)
+	_assert(save_r.is_ok(), "save ok")
+	var load_r: RefCounted = SAVE_SERVICE._load_run_v4_with_repository(9001, repo)
+	_assert(load_r.is_ok(), "load ok")
+	var dst = MAPPER.from_v4_dto(load_r.data)
+	var a2 = dst.get_unit("unit_000001")
+	_assert(a2.bonus_attack == 17,
+		"disk-roundtripped unit.bonus_attack == 17 (was: %d)"
+		% a2.bonus_attack)
+
+
+func _test_canonical_dto_with_bonus_attack_23_round_trips() -> void:
+	# Most direct regression: hand-build a v4 DTO with
+	# bonus_attack=23, round-trip via from_v4 -> to_v4, assert 23
+	# survives. Catches the exact "to_v4_unit_dto always wrote 0"
+	# bug independently of any domain state.
+	print("[bonus_attack] canonical DTO bonus_attack=23 roundtrips")
+	var dto: Dictionary = {
+		"instance_id": "unit_000007",
+		"definition_id": StringName("warrior"),
+		"current_hp": 50,
+		"max_hp": 100,
+		"bonus_attack": 23,
+		"dead": false,
+		"location": 0,
+		"order": 0,
+		"equipped_item_ids": [] as Array[String],
+	}
+	var domain = MAPPER.from_v4_dto({
+		"units": [dto], "items": [] as Array,
+		"seed": 9001, "next_unit_instance_seq": 8, "next_item_instance_seq": 1})
+	var u = domain.get_unit("unit_000007")
+	_assert(u.bonus_attack == 23,
+		"loaded unit.bonus_attack == 23 (was: %d)" % u.bonus_attack)
+	var out_dto: Dictionary = MAPPER.to_v4_dto(domain)
+	var out_unit: Dictionary = (out_dto["units"] as Array)[0]
+	_assert(int(out_unit.get("bonus_attack", -1)) == 23,
+		"to_v4_unit_dto carries 23 (was: %s)"
+		% str(out_unit.get("bonus_attack")))
 	quit(0)
 
 

@@ -117,17 +117,15 @@ static func from_v4_dto(dto: Dictionary):
 
 
 ## v4 unit DTO. Preserves `instance_id`, `definition_id`,
-## `current_hp`, `max_hp`, `bonus_attack` (kept at 0 for now —
-## the live domain does not yet track it as a primary field; the
-## v4 wire reserves it), `dead`, `location`, `order`,
-## `equipped_item_ids` (a fresh Array copy).
+## `current_hp`, `max_hp`, `bonus_attack`, `dead`, `location`,
+## `order`, `equipped_item_ids` (a fresh Array copy).
 static func to_v4_unit_dto(unit: RunUnit) -> Dictionary:
 	return {
 		"instance_id": String(unit.instance_id),
 		"definition_id": StringName(unit.definition_id),
 		"current_hp": int(unit.current_hp),
 		"max_hp": int(unit.max_hp),
-		"bonus_attack": 0,
+		"bonus_attack": int(unit.bonus_attack),
 		"dead": bool(unit.dead),
 		"location": int(unit.location),
 		"order": int(unit.order),
