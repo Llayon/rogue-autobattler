@@ -40,7 +40,8 @@ func _initialize() -> void:
 	print("\n=== run state v4 mapper: %d passed, %d failed ===\n" % [_passed, _failed])
 	if _failed > 0:
 		quit(1)
-
+	else:
+		quit(0)
 
 
 func _test_to_v4_unit_dto_carries_bonus_attack() -> void:
@@ -130,7 +131,6 @@ func _test_canonical_dto_with_bonus_attack_23_round_trips() -> void:
 	_assert(int(out_unit.get("bonus_attack", -1)) == 23,
 		"to_v4_unit_dto carries 23 (was: %s)"
 		% str(out_unit.get("bonus_attack")))
-	quit(0)
 
 
 func _assert(cond: bool, label: String) -> void:
