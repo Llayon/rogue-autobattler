@@ -94,7 +94,7 @@ func _test_A_fresh_starter_stable_ids() -> void:
 	# but identity is the instance_id, not the definition_id.
 	_assert(board[0].definition_id != board[1].definition_id,
 		"starter definitions are distinct (got two %s)" % board[0].definition_id)
-	_cleanup(ctrl)
+	await _cleanup(ctrl)
 
 
 # === T3F.8.B — duplicate definition identity survives move/swap ===
@@ -170,7 +170,7 @@ func _test_B_duplicate_definitions_survive_move_swap() -> void:
 	_assert(board[0].instance_id == b.instance_id
 			and board[1].instance_id == a.instance_id,
 		"instance_ids preserved through swap")
-	_cleanup(ctrl)
+	await _cleanup(ctrl)
 
 
 # === T3F.8.C — equipment stays with unit across board -> bench ===
@@ -214,7 +214,7 @@ func _test_C_equipment_stays_with_unit_across_board_to_bench() -> void:
 	var first_equipped: Array[RunItem] = ctrl.state.get_equipped_items(first.instance_id)
 	_assert(first_equipped.size() == 1 and first_equipped[0] == item,
 		"first still has 1 equipped item == item")
-	_cleanup(ctrl)
+	await _cleanup(ctrl)
 
 
 # === T3F.8.C — start_battle bonus does NOT jump to replacement ===
@@ -319,7 +319,7 @@ func _test_C_start_battle_bonus_does_not_jump_owner() -> void:
 	_assert(new_c.attack_base == int(ContentDBStatic.get_by_id(
 			new_board_unit.definition_id).attack),
 		"new_c.attack_base == def.attack (no bonus jump)")
-	_cleanup(ctrl)
+	await _cleanup(ctrl)
 
 
 # === T3F.8.D — duplicate item definitions get distinct instance_ids ===
@@ -370,7 +370,7 @@ func _test_D_duplicate_item_definitions_have_distinct_instance_ids() -> void:
 	_assert(ctrl.state.next_item_instance_seq == 4,
 		"counter still 4 after remove (no decrement, got %d)"
 		% ctrl.state.next_item_instance_seq)
-	_cleanup(ctrl)
+	await _cleanup(ctrl)
 
 
 # === T3F.8.E — v4 save/resume preserves identity ===
@@ -456,8 +456,8 @@ func _test_E_v4_save_resume_preserves_identity() -> void:
 	_assert(ctrl2.state.next_item_instance_seq == 3,
 		"next_item_instance_seq == 3 (got %d)"
 		% ctrl2.state.next_item_instance_seq)
-	_cleanup(ctrl)
-	_cleanup(ctrl2)
+	await _cleanup(ctrl)
+	await _cleanup(ctrl2)
 	SaveServiceScript.delete_run(8105)
 
 
@@ -487,8 +487,8 @@ func _test_E_allocator_continues_from_first_unused_after_resume() -> void:
 	var it: RunItem = ctrl2.state.create_item(&"potion_strength")
 	_assert(it.instance_id == "item_000001",
 		"new item gets item_000001 (got %s)" % it.instance_id)
-	_cleanup(ctrl)
-	_cleanup(ctrl2)
+	await _cleanup(ctrl)
+	await _cleanup(ctrl2)
 	SaveServiceScript.delete_run(8106)
 
 
@@ -548,7 +548,7 @@ func _test_F_failed_resume_leaves_existing_state_unchanged() -> void:
 	ctrl_b.queue_free()
 	await process_frame
 	SaveServiceScript.delete_run(8108)
-	_cleanup(ctrl)
+	await _cleanup(ctrl)
 	# Best-effort temp cleanup.
 	var d := DirAccess.open(temp_dir)
 	if d != null:
@@ -657,7 +657,7 @@ func _test_G_real_legacy_v1_resumes_into_live_run_domain_state() -> void:
 		var post_resume_text: String = fb_post_resume.get_string_from_utf8()
 		_assert(post_resume_text.find("100") != -1,
 			"converted v4 still contains legacy max_hp=100 marker")
-	_cleanup(ctrl)
+	await _cleanup(ctrl)
 	ctrl_drain = null
 	SaveServiceScript.delete_run(9001)
 	# Clean up isolated dir.
@@ -723,7 +723,7 @@ func _test_H_two_same_definition_rununits_get_distinct_battle_bindings() -> void
 	_assert(a_from_bridge != b_from_bridge
 			and a_from_bridge != "" and b_from_bridge != "",
 		"two different bindings for two warriors")
-	_cleanup(ctrl)
+	await _cleanup(ctrl)
 
 
 # === T3F.8.I — no new post-battle HP writeback ===
@@ -764,7 +764,7 @@ func _test_I_no_new_post_battle_hp_writeback() -> void:
 	# Battle bridge cleared.
 	_assert(ctrl._battle_participants == null,
 		"battle bridge cleared after _on_battle_ended")
-	_cleanup(ctrl)
+	await _cleanup(ctrl)
 
 
 # === T3F.8.J — HEAL/REST/SHRINE operate on exact RunUnit instances ===
@@ -838,7 +838,7 @@ func _test_J_heal_rest_shrine_operate_on_exact_rununit_instances() -> void:
 		"w1 still in state.units by instance_id")
 	_assert(ctrl.state.get_unit(w2.instance_id) == w2,
 		"w2 still in state.units by instance_id")
-	_cleanup(ctrl)
+	await _cleanup(ctrl)
 
 
 # === T3F.1.K — save_now rejects inactive state before start_run ===
@@ -881,7 +881,7 @@ func _test_K_save_now_rejects_inactive_state_before_start_run() -> void:
 	_assert(seed_after == seed_before,
 		"profile.current_run_seed unchanged after inactive save_now (was %d, now %d)"
 		% [seed_before, seed_after])
-	_cleanup(ctrl)
+	await _cleanup(ctrl)
 
 
 # === helpers ===
