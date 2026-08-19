@@ -477,7 +477,7 @@ func _end_run(won: bool) -> void:
 ## (the meta would otherwise lie about an active run that did not
 ## actually persist).
 func save_now() -> bool:
-	if state == null:
+	if state == null or state.seed == 0:
 		GameLog.warn("run", "save_now: no active state")
 		return false
 	var dto: Dictionary = RunStateV4MapperScript.to_v4_dto(state)
@@ -567,7 +567,6 @@ func resume_run(seed_value: int) -> bool:
 		profile.current_run_seed = state.seed
 		SaveService.save_meta(profile)
 	GameBus.emit_run_resumed(state.seed)
-	return true
 	GameLog.info("run", "Run resumed", {"seed": state.seed, "round": state.round_index, "encounter": state.current_encounter_id})
 	return true
 

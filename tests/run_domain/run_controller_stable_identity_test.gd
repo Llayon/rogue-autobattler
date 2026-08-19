@@ -29,18 +29,27 @@ var _failed: int = 0
 
 
 func _initialize() -> void:
-	_test_A_fresh_starter_stable_ids()
-	_test_B_duplicate_definitions_survive_move_swap()
-	_test_C_equipment_stays_with_unit_across_board_to_bench()
-	_test_C_start_battle_bonus_does_not_jump_owner()
-	_test_D_duplicate_item_definitions_have_distinct_instance_ids()
-	_test_E_v4_save_resume_preserves_identity()
-	_test_E_allocator_continues_from_first_unused_after_resume()
-	_test_F_failed_resume_leaves_existing_state_unchanged()
-	_test_G_real_legacy_v1_resumes_into_live_run_domain_state()
-	_test_H_two_same_definition_rununits_get_distinct_battle_bindings()
-	_test_I_no_new_post_battle_hp_writeback()
-	_test_J_heal_rest_shrine_operate_on_exact_rununit_instances()
+	# Each test function is a coroutine (uses `await`). Callers
+	# must `await` it to run sequentially. Without `await`, all
+	# coroutines fire concurrently, share Node lifetime boundaries,
+	# and produce overlapping saves — which is exactly the kind
+	# of contamination that earlier rounds of G's failure
+	# investigation traced back to deferred save_now writes from
+	# previous tests. Sequential `await` makes each test fully
+	# isolated in time before the next begins.
+	await _test_A_fresh_starter_stable_ids()
+	await _test_B_duplicate_definitions_survive_move_swap()
+	await _test_C_equipment_stays_with_unit_across_board_to_bench()
+	await _test_C_start_battle_bonus_does_not_jump_owner()
+	await _test_D_duplicate_item_definitions_have_distinct_instance_ids()
+	await _test_E_v4_save_resume_preserves_identity()
+	await _test_E_allocator_continues_from_first_unused_after_resume()
+	await _test_F_failed_resume_leaves_existing_state_unchanged()
+	await _test_G_real_legacy_v1_resumes_into_live_run_domain_state()
+	await _test_H_two_same_definition_rununits_get_distinct_battle_bindings()
+	await _test_I_no_new_post_battle_hp_writeback()
+	await _test_J_heal_rest_shrine_operate_on_exact_rununit_instances()
+	await _test_K_save_now_rejects_inactive_state_before_start_run()
 	print("\n=== run controller stable identity: %d passed, %d failed ===\n" % [_passed, _failed])
 	if _failed > 0:
 		quit(1)
@@ -829,6 +838,49 @@ func _test_J_heal_rest_shrine_operate_on_exact_rununit_instances() -> void:
 		"w1 still in state.units by instance_id")
 	_assert(ctrl.state.get_unit(w2.instance_id) == w2,
 		"w2 still in state.units by instance_id")
+	_cleanup(ctrl)
+
+
+# === T3F.1.K — save_now rejects inactive state before start_run ===
+
+func _test_K_save_now_rejects_inactive_state_before_start_run() -> void:
+	print("[K] save_now() returns false for inactive state (seed=0, no start_run)")
+	# Ensure no run_0.tres exists at start.
+	var run_0_path: String = "user://saves/runs/run_0.tres"
+	if FileAccess.file_exists(run_0_path):
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(run_0_path))
+	_assert(not FileAccess.file_exists(run_0_path),
+		"run_0.tres absent before save_now probe")
+	# Fresh controller; do NOT call start_run. Sequential
+	# _initialize() execution guarantees no prior controller is
+	# still writing into the saves dir.
+	var ctrl: Node = RunControllerScript.new()
+	get_root().add_child.call_deferred(ctrl)
+	await process_frame
+	_assert(ctrl.state != null, "fresh controller has non-null state")
+	_assert(ctrl.state.seed == 0,
+		"fresh controller state.seed == 0 (got %d)" % ctrl.state.seed)
+	var seed_before: int = 0
+	if ctrl.profile != null:
+		seed_before = ctrl.profile.current_run_seed
+	# The critical assertion: save_now() must NOT write v4 for seed=0.
+	var save_result: bool = ctrl.save_now()
+	_assert(save_result == false,
+		"save_now() returns false for inactive state (got %s)" % str(save_result))
+	_assert(not FileAccess.file_exists(run_0_path),
+		"run_0.tres still absent after save_now (no v4 write produced)")
+	# Also assert no transient side files were created.
+	for suffix in [".tmp", ".v4.tmp", ".commit-old", ".bak.tmp"]:
+		var sf: String = run_0_path.replace(".tres", suffix + ".tres")
+		_assert(not FileAccess.file_exists(sf),
+			"run_0 side file absent: %s" % sf)
+	# profile.current_run_seed unchanged (would otherwise lie about active run).
+	var seed_after: int = 0
+	if ctrl.profile != null:
+		seed_after = ctrl.profile.current_run_seed
+	_assert(seed_after == seed_before,
+		"profile.current_run_seed unchanged after inactive save_now (was %d, now %d)"
+		% [seed_before, seed_after])
 	_cleanup(ctrl)
 
 
