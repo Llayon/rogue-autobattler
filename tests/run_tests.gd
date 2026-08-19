@@ -59,6 +59,8 @@ const RegenComponentScript = preload("res://core/battle/regen_component.gd")
 const BalanceScript = preload("res://core/balance.gd")
 const RunControllerScript = preload("res://core/progression/run_controller.gd")
 const RunStateScript = preload("res://core/progression/run_state.gd")
+const RunDomainStateScript = preload("res://core/progression/run_domain_state.gd")
+const RunStateV4MapperScript = preload("res://core/progression/run_state_v4_mapper.gd")
 const MetaProfileScript = preload("res://core/progression/meta_profile.gd")
 const MainMenuScript = preload("res://scenes/main_menu/main_menu.gd")
 const RootSceneScript = preload("res://scenes/root/root_scene.gd")
@@ -202,12 +204,10 @@ func _initialize() -> void:
 	# S5.4 Task 1: RunUnitState default state
 	_test_run_state_unit_states_default_empty()
 	# S5.4 Task 1: start_run initializes unit_states
-	_test_run_controller_start_run_initializes_unit_states()
-	# S5.4 Task 2: HEAL actually heals unit_states.current_hp
-	_test_run_controller_heal_effect_heals_unit_states()
+	_test_run_controller_start_run_initializes_units()
+	_test_run_controller_heal_effect_heals_board_units()
+	_test_run_controller_rest_effect_heals_board_units()
 	# S5.4 Task 2: REST heals current_hp AND keeps bonus_attack for next battle
-	_test_run_controller_rest_effect_heals_unit_states()
-	# S5.4 Task 3: REST attack bonus applied via atk_mul
 	_test_run_controller_rest_attack_bonus_applies_in_start_battle()
 	# S5.4 Task 3: SHRINE attack bonus applied via atk_mul
 	_test_run_controller_shrine_attack_bonus_applies_in_start_battle()
@@ -219,7 +219,7 @@ func _initialize() -> void:
 	_test_run_controller_swap_board_units_basic()
 	_test_run_controller_board_to_bench_and_back()
 	_test_run_controller_swap_invalid_returns_false()
-	_test_run_controller_swap_keeps_unit_states_in_sync()
+	_test_run_controller_swap_keeps_per_unit_hp_in_sync()
 	# S6.2: PrepScene UI
 	_test_prep_scene_creates_board_and_bench_buttons()
 	_test_prep_scene_swap_two_board_slots()
@@ -234,7 +234,7 @@ func _initialize() -> void:
 	_test_run_controller_grant_item_respects_capacity()
 	_test_run_controller_remove_item_at_decrements()
 	_test_run_controller_inventory_get_item_def_at_returns_resolved()
-	_test_run_controller_inventory_persists_in_save()
+	_test_run_controller_inventory_persists_through_v4_save()
 	# S7.1: TREASURE grants item
 	_test_run_controller_treasure_grants_random_item()
 	# S7.1: InventoryScene UI
@@ -1693,6 +1693,27 @@ func _cleanup_ctrl(ctrl: Node) -> void:
 
 ## Загружает .tscn как PackedScene и инстанцирует.
 ## Возвращает Node или null если путь битый.
+func _state_has_unit_def(state: RunDomainState, def_id) -> bool:
+	for u in state.units:
+		if u.definition_id == def_id:
+			return true
+	return false
+
+
+func _board_index_for(state: RunDomainState, instance_id: String) -> int:
+	for i in state.get_board_units().size():
+		if state.get_board_units()[i].instance_id == instance_id:
+			return i
+	return -1
+
+
+func _unit_by_def(state: RunDomainState, def_id) -> RunUnit:
+	for u in state.units:
+		if u.definition_id == def_id:
+			return u
+	return null
+
+
 func _instantiate_scene(packed_path: String) -> Node:
 	var packed: PackedScene = load(packed_path) as PackedScene
 	if packed == null:
@@ -1789,17 +1810,20 @@ func _test_run_controller_reward_phase() -> void:
 	# Игрок берёт слот 0 — после REWARD на round 3 переходит в MAP (S5.3).
 	# S6.1.1: reward юнит auto-placed на доску если есть room (board_size < 4).
 	# Start: 2 units (warrior+archer). Pick slot 0 → 3 units on board.
-	var board_before: int = ctrl.state.player_unit_ids.size()
-	var bench_before: int = ctrl.state.bench_unit_ids.size()
+	var board_before: int = ctrl.state.get_board_units().size()
+	var bench_before: int = ctrl.state.get_bench_units().size()
 	_assert(board_before < BalanceScript.MAX_BOARD_UNITS,
 		"before choose_reward board not full (size=%d, max=%d)" % [board_before, BalanceScript.MAX_BOARD_UNITS])
 	var taken: Resource = ctrl.choose_reward(0)
 	_assert(taken != null, "choose_reward(0) вернул UnitDef (got %s)" % str(taken))
 	_assert(ctrl.phase == RunControllerScript.Phase.MAP, "phase = MAP после choose_reward (got %d)" % ctrl.phase)
-	_assert(ctrl.state.player_unit_ids.has(taken.id),
-		"юнит %s auto-placed на доску (board %d -> %d)" % [taken.id, board_before, ctrl.state.player_unit_ids.size()])
-	_assert(ctrl.state.bench_unit_ids.size() == bench_before,
-		"bench не изменился (was %d, now %d)" % [bench_before, ctrl.state.bench_unit_ids.size()])
+	var board_after_ids: Array[String] = []
+	for u in ctrl.state.get_board_units():
+		board_after_ids.append(String(u.definition_id))
+	_assert(board_after_ids.has(String(taken.id)),
+		"юнит %s auto-placed на доску (board %d -> %d)" % [taken.id, board_before, board_after_ids.size()])
+	_assert(ctrl.state.get_bench_units().size() == bench_before,
+		"bench не изменился (was %d, now %d)" % [bench_before, ctrl.state.get_bench_units().size()])
 	_cleanup_ctrl(ctrl)
 
 
@@ -1826,12 +1850,12 @@ func _test_run_controller_skip_reward() -> void:
 	ctrl.runner.state.winner_team = 0
 	ctrl.tick_battle(0.1)
 	_assert(ctrl.phase == RunControllerScript.Phase.REWARD, "phase = REWARD (got %d)" % ctrl.phase)
-	var bench_before: int = ctrl.state.bench_unit_ids.size()
+	var bench_before: int = ctrl.state.get_bench_units().size()
 	var ok: bool = ctrl.skip_reward()
 	_assert(ok == true, "skip_reward = true (got %s)" % str(ok))
 	_assert(ctrl.phase == RunControllerScript.Phase.MAP,
 		"round 2 skip_reward -> MAP (got %d)" % ctrl.phase)
-	_assert(ctrl.state.bench_unit_ids.size() == bench_before, "bench не изменился (was %d, now %d)" % [bench_before, ctrl.state.bench_unit_ids.size()])
+	_assert(ctrl.state.get_bench_units().size() == bench_before, "bench не изменился (was %d, now %d)" % [bench_before, ctrl.state.get_bench_units().size()])
 	_cleanup_ctrl(ctrl)
 
 
@@ -2036,7 +2060,9 @@ func _test_run_controller_save_now() -> void:
 	_assert(ok, "save_now() = true")
 	_assert(ctrl.profile.current_run_seed == 123, "current_run_seed = 123 (got %d)" % ctrl.profile.current_run_seed)
 	_assert(SaveService.has_run(123), "file run_123.tres exists")
-	var loaded: RunState = SaveService.load_run(123)
+	var _load_r: RefCounted = SaveService.load_run_v4(123)
+	_assert(_load_r != null and _load_r.is_ok(), "load_run_v4(123) ok")
+	var loaded: RunDomainState = RunStateV4MapperScript.from_v4_dto(_load_r.data)
 	_assert(loaded != null, "load_run(123) not null")
 	_assert(loaded.gold == 50, "gold сохранён (got %d)" % loaded.gold)
 	SaveService.delete_run(123)
@@ -2089,7 +2115,9 @@ func _test_run_controller_save_after_battle() -> void:
 	ctrl.runner.state.winner_team = 0
 	ctrl.tick_battle(0.1)
 	_assert(SaveService.has_run(888), "file run_888.tres exists after battle")
-	var loaded: RunState = SaveService.load_run(888)
+	var _load_r: RefCounted = SaveService.load_run_v4(888)
+	_assert(_load_r != null and _load_r.is_ok(), "load_run_v4(888) ok")
+	var loaded: RunDomainState = RunStateV4MapperScript.from_v4_dto(_load_r.data)
 	_assert(loaded != null, "load не null")
 	# S6.1: save обновляется на каждой phase transition (REWARD → MAP).
 	# round_index = 2 после _enter_map (бывший snapshot pre-increment
@@ -3090,66 +3118,74 @@ func _test_run_state_unit_states_default_empty() -> void:
 	_assert(s.unit_states.is_empty(), "unit_states empty (got size %d)" % s.unit_states.size())
 
 
-func _test_run_controller_start_run_initializes_unit_states() -> void:
-	print("[test] S5.4: start_run() creates unit_states for each player_unit_id")
+func _test_run_controller_start_run_initializes_units() -> void:
+	print("[test] Phase 1 / T3F: start_run() creates stable RunUnit instances for starter roster")
 	var ctrl: Node = RunControllerScript.new()
 	get_root().add_child.call_deferred(ctrl)
 	await process_frame
 	ctrl.start_run(42)
-	_assert(ctrl.state.unit_states.size() == ctrl.state.player_unit_ids.size(),
-		"unit_states size == player_unit_ids size (%d vs %d)"
-		% [ctrl.state.unit_states.size(), ctrl.state.player_unit_ids.size()])
-	for i in ctrl.state.unit_states.size():
-		var us = ctrl.state.unit_states[i]
-		var id: StringName = ctrl.state.player_unit_ids[i]
-		_assert(us.unit_id == id, "unit_id[%d] = %s" % [i, id])
+	# Phase 1 / T3F.8: starter board has unique stable instance_ids,
+	# one per starter definition, in starter order.
+	var board: Array[RunUnit] = ctrl.state.get_board_units()
+	_assert(board.size() == ctrl.state.units.size(),
+		"board has all units (board %d vs units %d)" % [board.size(), ctrl.state.units.size()])
+	var seen_ids: Dictionary = {}
+	for i in board.size():
+		var u: RunUnit = board[i]
+		_assert(u.instance_id != "", "instance_id non-empty at %d" % i)
+		_assert(not seen_ids.has(u.instance_id), "instance_id unique at %d (got %s)" % [i, u.instance_id])
+		seen_ids[u.instance_id] = true
 	_cleanup_ctrl(ctrl)
 
 
-func _test_run_controller_heal_effect_heals_unit_states() -> void:
-	print("[test] S5.4: HEAL adds hp_ratio * max_hp additively to current_hp")
+func _test_run_controller_heal_effect_heals_board_units() -> void:
+	print("[test] Phase 1 / T3F: HEAL adds hp_ratio * max_hp additively to per-RunUnit.current_hp on board")
 	var ctrl: Node = RunControllerScript.new()
 	get_root().add_child.call_deferred(ctrl)
 	await process_frame
 	ctrl.start_run(42)
 	ctrl._enter_map()
 	# Set current_hp = 1 (minimal) so delta is unambiguous.
-	for us in ctrl.state.unit_states:
-		us.current_hp = 1
+	var board: Array[RunUnit] = ctrl.state.get_board_units()
+	for u in board:
+		u.current_hp = 1
 	var before: Array = []
-	for us in ctrl.state.unit_states:
-		before.append(us.current_hp)
+	for u in board:
+		before.append(u.current_hp)
 	var heal_node = EncounterNodeScript.new(110, EncounterTypeScript.Kind.HEAL, 1)
 	ctrl._apply_service_effect(heal_node)
-	for i in ctrl.state.unit_states.size():
-		var us = ctrl.state.unit_states[i]
-		var expected_delta: int = int(round(float(us.max_hp) * BalanceScript.MAP_HEAL_HP_RATIO))
-		var actual_delta: int = us.current_hp - before[i]
+	board = ctrl.state.get_board_units()
+	for i in board.size():
+		var u: RunUnit = board[i]
+		var expected_delta: int = int(round(float(u.max_hp) * BalanceScript.MAP_HEAL_HP_RATIO))
+		var actual_delta: int = u.current_hp - before[i]
 		_assert(actual_delta == expected_delta,
-			"HEAL delta = max_hp * 0.4 = %d (got %d, max_hp=%d)" % [expected_delta, actual_delta, us.max_hp])
+			"HEAL delta = max_hp * 0.4 = %d (got %d, max_hp=%d)" % [expected_delta, actual_delta, u.max_hp])
 	_assert(ctrl.state.lives == BalanceScript.STARTING_LIVES + 1,
 		"lives +1 (got %d)" % ctrl.state.lives)
 	_cleanup_ctrl(ctrl)
 
 
-func _test_run_controller_rest_effect_heals_unit_states() -> void:
-	print("[test] S5.4: REST adds 50% of max_hp (more than HEAL's 40%)")
+func _test_run_controller_rest_effect_heals_board_units() -> void:
+	print("[test] Phase 1 / T3F: REST adds 50% of max_hp (more than HEAL's 40%) to per-RunUnit.current_hp on board")
 	var ctrl: Node = RunControllerScript.new()
 	get_root().add_child.call_deferred(ctrl)
 	await process_frame
 	ctrl.start_run(42)
 	ctrl._enter_map()
-	for us in ctrl.state.unit_states:
-		us.current_hp = 1
+	var board: Array[RunUnit] = ctrl.state.get_board_units()
+	for u in board:
+		u.current_hp = 1
 	var before: Array = []
-	for us in ctrl.state.unit_states:
-		before.append(us.current_hp)
+	for u in board:
+		before.append(u.current_hp)
 	var rest_node = EncounterNodeScript.new(111, EncounterTypeScript.Kind.REST, 1)
 	ctrl._apply_service_effect(rest_node)
-	for i in ctrl.state.unit_states.size():
-		var us = ctrl.state.unit_states[i]
-		var expected_delta: int = int(round(float(us.max_hp) * BalanceScript.MAP_REST_HP_RATIO))
-		var actual_delta: int = us.current_hp - before[i]
+	board = ctrl.state.get_board_units()
+	for i in board.size():
+		var u: RunUnit = board[i]
+		var expected_delta: int = int(round(float(u.max_hp) * BalanceScript.MAP_REST_HP_RATIO))
+		var actual_delta: int = u.current_hp - before[i]
 		_assert(actual_delta == expected_delta,
 			"REST delta = max_hp * 0.5 = %d (got %d)" % [expected_delta, actual_delta])
 	_cleanup_ctrl(ctrl)
@@ -3241,7 +3277,9 @@ func _test_save_contains_post_effect_state_after_rest() -> void:
 	var expected_bonus: int = save_ctrl.state.meta_modifiers.get("rest_attack_bonus", 0)
 	_assert(expected_bonus > 0, "rest_attack_bonus > 0 after REST (got %d)" % expected_bonus)
 	# Load and verify.
-	var loaded: RunState = SaveService.load_run(42)
+	var _load_r: RefCounted = SaveService.load_run_v4(42)
+	_assert(_load_r != null and _load_r.is_ok(), "load_run_v4(42) ok")
+	var loaded: RunDomainState = RunStateV4MapperScript.from_v4_dto(_load_r.data)
 	_assert(loaded != null, "save loaded")
 	_assert(loaded.meta_modifiers.get("rest_attack_bonus", 0) == expected_bonus,
 		"loaded rest_attack_bonus = %d (got %d)"
@@ -3284,19 +3322,25 @@ func _test_run_controller_resume_run_restores_encounter_position() -> void:
 			% [saved_encounter_id, resume_ctrl.encounter_map.get_current_node_id()])
 	_cleanup_ctrl(resume_ctrl)
 func _test_run_controller_swap_board_units_basic() -> void:
-	print("[test] S6.2: swap_board_units меняет двух юнитов на доске")
+	print("[test] Phase 1 / T3F: swap_board_units swaps two board units, instance_ids preserved")
 	var ctrl: Node = RunControllerScript.new()
 	get_root().add_child.call_deferred(ctrl)
 	await process_frame
 	ctrl.start_run(42)
-	var ids: Array = ctrl.state.player_unit_ids.duplicate()
-	_assert(ids.size() == 2, "start with 2 board units (got %d)" % ids.size())
+	var board: Array[RunUnit] = ctrl.state.get_board_units()
+	_assert(board.size() == 2, "start with 2 board units (got %d)" % board.size())
+	var a_id: String = board[0].instance_id
+	var b_id: String = board[1].instance_id
 	var ok: bool = ctrl.swap_board_units(0, 1)
 	_assert(ok, "swap_board_units returned true")
-	var new_ids: Array = ctrl.state.player_unit_ids.duplicate()
-	_assert(new_ids[0] == ids[1] and new_ids[1] == ids[0],
+	board = ctrl.state.get_board_units()
+	_assert(board[0].instance_id == b_id and board[1].instance_id == a_id,
 		"board[0]<->board[1] swapped (got %s vs %s)"
-		% [new_ids[0], new_ids[1]])
+		% [board[0].instance_id, board[1].instance_id])
+	# Other fields (definition_id, hp, equipped items) unchanged.
+	_assert(board[0].definition_id == &"archer"
+			or board[0].definition_id == &"warrior",
+		"board[0] definition_id is one of the starters (got %s)" % board[0].definition_id)
 	_cleanup_ctrl(ctrl)
 
 
@@ -3306,16 +3350,16 @@ func _test_run_controller_board_to_bench_and_back() -> void:
 	get_root().add_child.call_deferred(ctrl)
 	await process_frame
 	ctrl.start_run(42)
-	var id: StringName = ctrl.state.player_unit_ids[0]
+	var id: StringName = ctrl.state.get_board_units()[0].definition_id
 	var ok: bool = ctrl.board_to_bench(0)
 	_assert(ok, "board_to_bench(0) returned true")
-	_assert(ctrl.state.player_unit_ids.size() == 1, "board size 2->1")
-	_assert(ctrl.state.bench_unit_ids.size() == 1, "bench size 0->1")
-	_assert(ctrl.state.bench_unit_ids[0] == id, "moved id at bench[0]")
+	_assert(ctrl.state.get_board_units().size() == 1, "board size 2->1")
+	_assert(ctrl.state.get_bench_units().size() == 1, "bench size 0->1")
+	_assert(ctrl.state.get_bench_units()[0].definition_id == id, "moved id at bench[0]")
 	var ok2: bool = ctrl.bench_to_board(0, 0)
 	_assert(ok2, "bench_to_board returned true")
-	_assert(ctrl.state.player_unit_ids[0] == id, "back to board[0]")
-	_assert(ctrl.state.bench_unit_ids.size() == 0, "bench emptied")
+	_assert(ctrl.state.get_board_units()[0].definition_id == id, "back to board[0]")
+	_assert(ctrl.state.get_bench_units().size() == 0, "bench emptied")
 	_cleanup_ctrl(ctrl)
 
 
@@ -3332,39 +3376,32 @@ func _test_run_controller_swap_invalid_returns_false() -> void:
 	_assert(not ctrl.bench_to_board(0, 0), "bench_to_board from empty bench rejected")
 	_cleanup_ctrl(ctrl)
 
-func _test_run_controller_swap_keeps_unit_states_in_sync() -> void:
-	print("[test] S6.2: swap не теряет unit_states (HP persistency)")
+func _test_run_controller_swap_keeps_per_unit_hp_in_sync() -> void:
+	print("[test] Phase 1 / T3F: swap сохраняет per-RunUnit.current_hp по instance_id (HP follows the unit, не the position)")
 	var ctrl: Node = RunControllerScript.new()
 	get_root().add_child.call_deferred(ctrl)
 	await process_frame
 	ctrl.start_run(42)
-	var id0: StringName = ctrl.state.player_unit_ids[0]
-	var id1: StringName = ctrl.state.player_unit_ids[1]
-	var us0_idx: int = -1
-	var us1_idx: int = -1
-	for i in ctrl.state.unit_states.size():
-		var us = ctrl.state.unit_states[i]
-		if us.unit_id == id0:
-			us0_idx = i
-		elif us.unit_id == id1:
-			us1_idx = i
-	_assert(us0_idx >= 0 and us1_idx >= 0, "both ids in unit_states")
-	var us0 = ctrl.state.unit_states[us0_idx]
-	var us1 = ctrl.state.unit_states[us1_idx]
-	us0.current_hp = 50
-	us1.current_hp = 30
+	# Capture the EXACT RunUnit references. After T3F identity model,
+	# each RunUnit owns its own current_hp; the swap mutates board
+	# order, not the units themselves.
+	var board: Array[RunUnit] = ctrl.state.get_board_units()
+	var a: RunUnit = board[0]
+	var b: RunUnit = board[1]
+	a.current_hp = 50
+	b.current_hp = 30
 	ctrl.swap_board_units(0, 1)
-	# После swap player_unit_ids[0] == id1, player_unit_ids[1] == id0.
-	_assert(ctrl.state.player_unit_ids[0] == id1, "board[0] is now id1")
-	_assert(ctrl.state.player_unit_ids[1] == id0, "board[1] is now id0")
-	# unit_states должны быть в том же индексе — мы НЕ перетасовываем массив,
-	# только переставляем ID в player_unit_ids. unit_states[id_idx] все ещё принадлежит id.
-	var us0_after = ctrl.state.unit_states[us0_idx]
-	var us1_after = ctrl.state.unit_states[us1_idx]
-	_assert(us0_after.unit_id == id0 and us0_after.current_hp == 50,
-		"us0 still tracks id0 with HP=50")
-	_assert(us1_after.unit_id == id1 and us1_after.current_hp == 30,
-		"us1 still tracks id1 with HP=30")
+	# board[0] is now the unit that was at board[1] (the b reference),
+	# board[1] is now a.
+	board = ctrl.state.get_board_units()
+	_assert(board[0] == b, "board[0] now points at b (got different ref)")
+	_assert(board[1] == a, "board[1] now points at a (got different ref)")
+	# HP follows the unit. Identity is preserved by reference.
+	_assert(board[0].current_hp == 30, "b still has HP=30 after swap (got %d)" % board[0].current_hp)
+	_assert(board[1].current_hp == 50, "a still has HP=50 after swap (got %d)" % board[1].current_hp)
+	# And the instance_ids did not change.
+	_assert(board[0].instance_id == b.instance_id, "b instance_id preserved")
+	_assert(board[1].instance_id == a.instance_id, "a instance_id preserved")
 	_cleanup_ctrl(ctrl)
 
 
@@ -3388,22 +3425,23 @@ func _test_prep_scene_creates_board_and_bench_buttons() -> void:
 	for i in 3: await process_frame
 	var btns: Array = []
 	_recursive_find_buttons(scene, btns)
-	var expected: int = ctrl.state.player_unit_ids.size() + ctrl.state.bench_unit_ids.size() + 1
+	var expected: int = ctrl.state.get_board_units().size() + ctrl.state.get_bench_units().size() + 1
 	_assert(btns.size() == expected,
 		"PrepScene buttons count = %d (got %d, expected board %d + bench %d + 1 Ready)"
-		% [expected, btns.size(), ctrl.state.player_unit_ids.size(), ctrl.state.bench_unit_ids.size()])
+		% [expected, btns.size(), ctrl.state.get_board_units().size(), ctrl.state.get_bench_units().size()])
 	_cleanup_ctrl(ctrl)
 	scene.queue_free()
 	await process_frame
 
 
 func _test_prep_scene_swap_two_board_slots() -> void:
-	print("[test] S6.2: click 2 board slots -> swap")
+	print("[test] Phase 1 / T3F: click 2 board slots -> swap via prep scene")
 	var ctrl: Node = RunControllerScript.new()
 	get_root().add_child.call_deferred(ctrl)
 	await process_frame
 	ctrl.start_run(42)
-	var ids: Array = ctrl.state.player_unit_ids.duplicate()
+	var a: RunUnit = ctrl.state.get_board_units()[0]
+	var b: RunUnit = ctrl.state.get_board_units()[1]
 	var scene: Control = PrepSceneScript.new()
 	scene.set_run_controller(ctrl)
 	root.add_child.call_deferred(scene)
@@ -3413,22 +3451,24 @@ func _test_prep_scene_swap_two_board_slots() -> void:
 	board_btns[0].emit_signal("pressed")
 	board_btns[1].emit_signal("pressed")
 	await process_frame
-	var new_ids: Array = ctrl.state.player_unit_ids.duplicate()
-	_assert(new_ids[0] == ids[1] and new_ids[1] == ids[0],
-		"board swapped (got %s vs %s)" % [new_ids[0], new_ids[1]])
+	# Verify the swap happened at the canonical state level.
+	var board_after: Array[RunUnit] = ctrl.state.get_board_units()
+	_assert(board_after[0] == b, "board[0] now = b (got different)")
+	_assert(board_after[1] == a, "board[1] now = a (got different)")
 	_cleanup_ctrl(ctrl)
 	scene.queue_free()
 	await process_frame
 
 
 func _test_prep_scene_board_to_bench_workflow() -> void:
-	print("[test] S6.2: click board -> click bench slot -> move")
+	print("[test] Phase 1 / T3F: click board -> click bench slot -> move via prep scene")
 	var ctrl: Node = RunControllerScript.new()
 	get_root().add_child.call_deferred(ctrl)
 	await process_frame
 	ctrl.start_run(42)
-	ctrl.state.bench_unit_ids.append(&"warrior")
-	var id0: StringName = ctrl.state.player_unit_ids[0]
+	# Add a third unit on bench so the bench has a target slot.
+	ctrl.state.create_unit(&"warrior", 100, RunUnit.LOCATION_BENCH)
+	var a: RunUnit = ctrl.state.get_board_units()[0]
 	var scene: Control = PrepSceneScript.new()
 	scene.set_run_controller(ctrl)
 	root.add_child.call_deferred(scene)
@@ -3440,12 +3480,18 @@ func _test_prep_scene_board_to_bench_workflow() -> void:
 	board_btns[0].emit_signal("pressed")
 	bench_btns[0].emit_signal("pressed")
 	await process_frame
-	var board_size: int = ctrl.state.player_unit_ids.size()
-	var bench_size: int = ctrl.state.bench_unit_ids.size()
+	var board_size: int = ctrl.state.get_board_units().size()
+	var bench_size: int = ctrl.state.get_bench_units().size()
 	_assert(board_size == 1, "board 2->1 (got %d)" % board_size)
 	_assert(bench_size == 2, "bench 1->2 (got %d)" % bench_size)
-	_assert(ctrl.state.bench_unit_ids[0] == id0,
-		"moved id at bench[0] (got %s)" % ctrl.state.bench_unit_ids[0])
+	# The originally-board unit (a) is now at one of the bench positions
+	# with the same instance_id.
+	var a_in_bench: bool = false
+	for u in ctrl.state.get_bench_units():
+		if u.instance_id == a.instance_id:
+			a_in_bench = true
+			break
+	_assert(a_in_bench, "moved unit a found in bench by instance_id")
 	_cleanup_ctrl(ctrl)
 	scene.queue_free()
 	await process_frame
@@ -3494,13 +3540,16 @@ func _test_combatant_hp_override_minus_one_uses_max() -> void:
 
 
 func _test_run_controller_start_battle_persists_unit_hp() -> void:
-	print("[test] S6.3: start_battle передаёт unit_states[].current_hp в Combatant")
+	print("[test] Phase 1 / T3F: start_battle reads per-RunUnit.current_hp into Combatant via participant bridge")
 	var ctrl: Node = RunControllerScript.new()
 	get_root().add_child.call_deferred(ctrl)
 	await process_frame
 	ctrl.start_run(42)
-	# Damage first unit to 30 HP.
-	ctrl.state.unit_states[0].current_hp = 30
+	# Damage first board unit to 30 HP. The legacy bridge identified
+	# units by board index. The new bridge identifies them by
+	# RunUnit.instance_id. Both must arrive at 30 in the Combatant.
+	var first: RunUnit = ctrl.state.get_board_units()[0]
+	first.current_hp = 30
 	# Trigger battle via _on_node_selected for combat.
 	ctrl._enter_map()
 	for i in 2: await process_frame
@@ -3513,16 +3562,16 @@ func _test_run_controller_start_battle_persists_unit_hp() -> void:
 	ctrl._on_node_selected(combat_id)
 	# Now in PREP, set phase=PREP then start_battle.
 	ctrl.start_battle()
-	# Find player Combatant in ctx.
+	# Find player Combatant in ctx by def_id (board order matches).
 	var found: Combatant = null
 	for c in ctrl.ctx.all_combatants():
-		if c.team == 0 and c.def_id == ctrl.state.unit_states[0].unit_id:
+		if c.team == 0 and c.def_id == first.definition_id:
 			found = c
 			break
 	_assert(found != null, "player unit found in ctx")
 	if found != null:
 		_assert(found.health.current_hp == 30,
-			"Combatant start_hp = 30 (persisted from unit_states, got %d)" % found.health.current_hp)
+			"Combatant start_hp = 30 (persisted from RunUnit.current_hp, got %d)" % found.health.current_hp)
 	_cleanup_ctrl(ctrl)
 
 
@@ -3532,12 +3581,12 @@ func _test_run_controller_grant_item_appends_to_state() -> void:
 	get_root().add_child.call_deferred(ctrl)
 	await process_frame
 	ctrl.start_run(42)
-	var initial_count: int = ctrl.state.item_ids.size()
+	var initial_count: int = ctrl.state.items.size()
 	_assert(ctrl.inventory_count() == initial_count, "start empty (got count=%d)" % initial_count)
 	var ok: bool = ctrl.grant_item(&"potion_strength")
 	_assert(ok, "grant_item returns true")
 	_assert(ctrl.inventory_count() == initial_count + 1, "count 0->1 (got %d)" % ctrl.inventory_count())
-	_assert(ctrl.state.item_ids[-1] == &"potion_strength", "last id = potion_strength (got %s)" % ctrl.state.item_ids[-1])
+	_assert(ctrl.state.items[-1].definition_id == &"potion_strength", "last id = potion_strength (got %s)" % ctrl.state.items[-1].definition_id)
 	_cleanup_ctrl(ctrl)
 
 
@@ -3571,7 +3620,7 @@ func _test_run_controller_remove_item_at_decrements() -> void:
 	var ok: bool = ctrl.remove_item_at(1)  # remove scroll_ward
 	_assert(ok, "remove idx=1 returns true")
 	_assert(ctrl.inventory_count() == 2, "count 3->2 (got %d)" % ctrl.inventory_count())
-	_assert(ctrl.state.item_ids[0] == &"potion_strength" and ctrl.state.item_ids[1] == &"amulet_vigor",
+	_assert(ctrl.state.items[0].definition_id == &"potion_strength" and ctrl.state.items[1].definition_id == &"amulet_vigor",
 		"removed middle slot")
 	# Out of range rejection
 	_assert(not ctrl.remove_item_at(-1), "negative idx rejected")
@@ -3594,8 +3643,8 @@ func _test_run_controller_inventory_get_item_def_at_returns_resolved() -> void:
 	_cleanup_ctrl(ctrl)
 
 
-func _test_run_controller_inventory_persists_in_save() -> void:
-	print("[test] S7.1: item_ids persists через save/load")
+func _test_run_controller_inventory_persists_through_v4_save() -> void:
+	print("[test] Phase 1 / T3F: items persist через v4 save/load (instance_ids + definition_ids)")
 	var ctrl: Node = RunControllerScript.new()
 	get_root().add_child.call_deferred(ctrl)
 	await process_frame
@@ -3603,14 +3652,22 @@ func _test_run_controller_inventory_persists_in_save() -> void:
 	ctrl.grant_item(&"potion_strength")
 	ctrl.grant_item(&"amulet_vigor")
 	ctrl.save_now()
-	var save_path: String = "user://test_inv_save.tres"
-	SaveSvcScript.save_resource(ctrl.state, save_path)
-	var loaded: Resource = SaveSvcScript.load_resource(save_path)
-	_assert(loaded != null and loaded.item_ids.size() == 2,
-		"loaded item_ids size = 2 (got %s)" % str(loaded))
-	if loaded != null:
-		_assert(loaded.item_ids[0] == &"potion_strength", "loaded[0] = potion_strength")
-		_assert(loaded.item_ids[1] == &"amulet_vigor", "loaded[1] = amulet_vigor")
+	# Phase 1 / T3F.6: save goes through the v4 DTO. Load it back via
+	# the v4 facade and reconstruct the RunDomainState.
+	var load_r: RefCounted = SaveService.load_run_v4(ctrl.state.seed)
+	_assert(load_r != null and load_r.is_ok(),
+		"load_run_v4 ok (status %s)" % str(load_r.status if load_r != null else "null"))
+	var loaded: RunDomainState = RunStateV4MapperScript.from_v4_dto(load_r.data)
+	_assert(loaded != null, "mapper returned RunDomainState")
+	_assert(loaded.items.size() == 2, "loaded items.size() == 2 (got %d)" % loaded.items.size())
+	if loaded.items.size() == 2:
+		_assert(loaded.items[0].definition_id == &"potion_strength",
+			"items[0] = potion_strength (got %s)" % loaded.items[0].definition_id)
+		_assert(loaded.items[1].definition_id == &"amulet_vigor",
+			"items[1] = amulet_vigor (got %s)" % loaded.items[1].definition_id)
+		_assert(loaded.items[0].instance_id != loaded.items[1].instance_id,
+			"items have distinct instance_ids")
+	SaveService.delete_run(ctrl.state.seed)
 	_cleanup_ctrl(ctrl)
 
 
@@ -3834,18 +3891,26 @@ func _test_run_controller_get_unit_bonus_stats() -> void:
 
 
 func _test_run_controller_equip_state_initialized_in_start_run() -> void:
-	print("[test] S7.2: equip_board_idx parallel to item_ids on start_run")
+	print("[test] Phase 1 / T3F: new items are unequipped (owner_unit_id is empty) after start_run")
 	var ctrl: Node = RunControllerScript.new()
 	get_root().add_child.call_deferred(ctrl)
 	await process_frame
 	ctrl.start_run(42)
-	_assert(ctrl.state.item_equip_board_idx.size() == 0, "starts empty")
+	_assert(ctrl.state.items.size() == 0, "starts empty")
 	ctrl.grant_item(&"potion_strength")
 	ctrl.grant_item(&"amulet_vigor")
-	_assert(ctrl.state.item_equip_board_idx.size() == 2,
-		"parallel array same size (got %d)" % ctrl.state.item_equip_board_idx.size())
-	_assert(ctrl.state.item_equip_board_idx[0] == -1 and ctrl.state.item_equip_board_idx[1] == -1,
-		"both default -1")
+	_assert(ctrl.state.items.size() == 2,
+		"two items added (got %d)" % ctrl.state.items.size())
+	# Both new items are in inventory, owner_unit_id == "".
+	for i in ctrl.state.items.size():
+		var it: RunItem = ctrl.state.items[i]
+		_assert(it.owner_unit_id == "",
+			"items[%d] owner_unit_id empty (got '%s')" % [i, it.owner_unit_id])
+	# Canonical projection: get_equipped_board_idx returns -1
+	# for unequipped items.
+	for i in ctrl.state.items.size():
+		_assert(ctrl.get_equipped_board_idx(i) == -1,
+			"get_equipped_board_idx(%d) == -1" % i)
 	_cleanup_ctrl(ctrl)
 
 func _test_combatant_bonus_stats_applied() -> void:
@@ -4308,10 +4373,12 @@ func _test_main_menu_routes_run_request_without_tree_replacement() -> void:
 
 
 func _test_reward_phase_populates_and_handles_actions_without_event_bus() -> void:
-	print("[test] Web UI: reward phase owns data and actions without EventBus delivery")
+	print("[test] Phase 1 / T3F: reward phase owns data and actions without EventBus delivery (RunDomainState)")
 	var ctrl: Node = RunControllerScript.new()
 	ctrl.profile = MetaProfileScript.new()
-	ctrl.state = RunStateScript.new()
+	# Phase 1 / T3F: live state is RunDomainState. We do not need to
+	# start a full run; we only need REWARD phase + reward modal flow.
+	ctrl.state = RunDomainStateScript.new()
 	ctrl.state.seed = 13579
 	ctrl.state.gold = BalanceScript.STARTING_GOLD
 	ctrl.phase = RunControllerScript.Phase.REWARD
@@ -4326,16 +4393,19 @@ func _test_reward_phase_populates_and_handles_actions_without_event_bus() -> voi
 	_assert(modal._run_controller == ctrl, "reward modal receives RunController directly")
 	_assert(not modal._buttons.is_empty() and modal._buttons[0].text != "",
 		"reward choice contains unit information")
-	var board_before: int = ctrl.state.player_unit_ids.size()
+	# Phase 1 / T3F: board counts are computed from RunUnit.location,
+	# not from a separate array. board_before is the canonical count.
+	var board_before: int = ctrl.state.get_board_units().size()
 	modal._buttons[0].emit_signal("pressed")
-	_assert(ctrl.state.player_unit_ids.size() == board_before + 1,
-		"reward choice adds selected unit")
+	_assert(ctrl.state.get_board_units().size() == board_before + 1,
+		"reward choice adds selected unit (board %d -> %d)"
+		% [board_before, ctrl.state.get_board_units().size()])
 	_assert(ctrl.phase != RunControllerScript.Phase.REWARD,
 		"reward choice leaves REWARD phase")
 
 	var skip_ctrl: Node = RunControllerScript.new()
 	skip_ctrl.profile = MetaProfileScript.new()
-	skip_ctrl.state = RunStateScript.new()
+	skip_ctrl.state = RunDomainStateScript.new()
 	skip_ctrl.state.seed = 97531
 	skip_ctrl.phase = RunControllerScript.Phase.REWARD
 	var skip_modal: Control = RewardModalScript.new()

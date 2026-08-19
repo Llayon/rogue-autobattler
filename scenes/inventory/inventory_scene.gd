@@ -219,7 +219,7 @@ func _make_item_button(idx: int, def: Resource) -> Button:
 		var line1: String = "%s  [tier %d, cost %d]%s%s" % [def.display_name, def.tier, def.cost, equipped_marker, picked_marker]
 		btn.text = line1 + "\n" + bonus_str + " — click to discard/equip"
 	else:
-		var id_str: String = str(run_controller.state.item_ids[idx])
+		var id_str: String = str(run_controller.state.items[idx].definition_id)
 		btn.text = "(" + id_str + ") — click to discard/equip"
 	btn.add_theme_font_size_override("font_size", 14)
 	btn.pressed.connect(_on_item_pressed.bind(idx))

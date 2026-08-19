@@ -178,9 +178,9 @@ func _build_board_buttons() -> void:
 	var row: HBoxContainer = get_node_or_null("Center/Panel/VBox/BoardRow")
 	if row == null:
 		return
-	var ids: Array = run_controller.state.player_unit_ids
-	for i in ids.size():
-		var def: Resource = ContentDBStatic.get_by_id(ids[i])
+	var board: Array[RunUnit] = run_controller.state.get_board_units()
+	for i in board.size():
+		var def: Resource = ContentDBStatic.get_by_id(board[i].definition_id)
 		var btn: Button = _make_unit_button("board", i, def)
 		row.add_child(btn)
 		_board_buttons.append(btn)
@@ -191,15 +191,15 @@ func _build_bench_buttons() -> void:
 	var label: Label = get_node_or_null("Center/Panel/VBox/BenchLabel")
 	if row == null:
 		return
-	var ids: Array = run_controller.state.bench_unit_ids
-	if ids.is_empty():
+	var bench: Array[RunUnit] = run_controller.state.get_bench_units()
+	if bench.is_empty():
 		if label != null:
 			label.text = "Bench (empty)"
 		return
 	if label != null:
 		label.text = "Bench"
-	for i in ids.size():
-		var def: Resource = ContentDBStatic.get_by_id(ids[i])
+	for i in bench.size():
+		var def: Resource = ContentDBStatic.get_by_id(bench[i].definition_id)
 		var btn: Button = _make_unit_button("bench", i, def)
 		row.add_child(btn)
 		_bench_buttons.append(btn)

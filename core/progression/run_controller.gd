@@ -1,5 +1,20 @@
 class_name RunController extends Node
-## Главный контроллер рана: связывает RunState, BattleRunner, Shop, Economy.
+## Главный контроллер рана: связывает RunDomainState, BattleRunner, Shop, Economy.
+##
+## Phase 1 / T3F: live state is `RunDomainState` (canonical instance-id
+## domain). All identity is bound to `RunUnit.instance_id` and
+## `RunItem.instance_id`. Board / bench come from
+## `RunUnit.location` + `RunUnit.order`. Equipment ownership is
+## owned by `RunItem.owner_unit_id` and mirrored in
+## `RunUnit.equipped_item_ids`. Persistence goes
+## RunDomainState -> RunStateV4Mapper -> v4 DTO -> SaveService v4
+## facade -> hardened RunSaveRepository.
+##
+## The legacy `RunState` Resource is FROZEN legacy wire-format only
+## (it is the format the v1->v4 migrator and the v4 mapper's
+## `from_v4_dto` reconstruct from, but it is NOT a mutable live
+## state anymore). `RunUnitState` is similarly legacy and is no
+## longer read or written by the live controller.
 ##
 ## v1 — тонкая обёртка без UI. UI подписывается на сигналы EventBus и
 ## дёргает методы контроллера для покупки/расстановки/старта боя.
@@ -17,10 +32,11 @@ const BalanceScript = preload("res://core/balance.gd")
 const EncounterMapScript = preload("res://core/encounter/encounter_map.gd")
 const EncounterTypeScript = preload("res://core/encounter/encounter_type.gd")
 const ShopScreenScript = preload("res://core/progression/shop_screen.gd")
-# S5.4: RunUnitState имеет class_name — ссылаемся напрямую, без const.
-# const RunUnitStateScript = preload("res://core/progression/run_unit_state.gd")
+const RunDomainStateScript = preload("res://core/progression/run_domain_state.gd")
+const RunStateV4MapperScript = preload("res://core/progression/run_state_v4_mapper.gd")
+const LegacyBattleParticipantMapScript = preload("res://core/battle/legacy_battle_participant_map.gd")
 
-var state: RunState = RunState.new()
+var state: RunDomainState = RunDomainStateScript.new()
 var shop: Shop = Shop.new()
 var merchant_shop = ShopScreenScript.new()
 var reward: RewardScreen = RewardScreen.new()
@@ -31,6 +47,11 @@ var profile: MetaProfile = null
 # S5.3: encounter map owned by RunController после первого перехода в MAP phase.
 # Scene получает его через get_encounter_map() и передаёт в EncounterMapScene.set_encounter_map().
 var encounter_map: EncounterMap = null
+# Phase 1 / T3F.5: per-battle identity bridge. Fresh for every
+# start_battle. Maps each player Combatant Object to the
+# RunUnit.instance_id it was built from. Cleared in
+# `_on_battle_ended`. Enemies are NOT mapped.
+var _battle_participants: LegacyBattleParticipantMap = null
 
 
 func _ready() -> void:
@@ -45,29 +66,31 @@ func start_run(seed_value: int = 0) -> void:
 	if seed_value == 0:
 		seed_value = Rng.randi_range(1, 999999)
 	Rng.seed_run(seed_value)
-	state = RunState.new()
+	# Fresh canonical live state. Sequence counters start at 1.
+	state = RunDomainStateScript.new()
 	state.seed = seed_value
 	state.gold = BalanceScript.STARTING_GOLD
 	state.round_index = 1
 	state.lives = BalanceScript.STARTING_LIVES
-	# Стартовый набор юнитов сразу на доску.
-	state.player_unit_ids.clear()
+	# Стартовый набор юнитов сразу на доску. Each starter unit gets
+	# a stable, freshly allocated instance_id (unit_000001,
+	# unit_000002, ...). Duplicate starter definitions (e.g. two
+	# warriors) would still get distinct instance_ids, but
+	# BalanceScript.STARTING_UNIT_IDS today is [&"warrior", &"archer"]
+	# which is distinct definitions.
 	for id in BalanceScript.STARTING_UNIT_IDS:
-		if ContentDB_static.get_by_id(id) != null:
-			state.player_unit_ids.append(id)
-	# S5.4: инициализируем per-unit state (HP, max_hp, bonus_attack=0).
-	state.unit_states.clear()
-	for id in state.player_unit_ids:
+		if ContentDB_static.get_by_id(id) == null:
+			continue
 		var def: Resource = ContentDB_static.get_by_id(id)
 		var max_hp: int = def.max_hp if def != null else 100
-		state.unit_states.append(RunUnitState.new(id, max_hp, -1))
+		state.create_unit(id, max_hp, RunUnit.LOCATION_BOARD)
 	_set_phase(Phase.PREP)
 	_refresh_shop()
 	run_started.emit()
 	GameBus.emit_round_started(state.round_index)
 	# S3.3: auto-save после создания state (если игрок сразу выйдет).
 	save_now()
-	GameLog.info("run", "Run started", {"seed": seed_value, "starting": state.player_unit_ids.size()})
+	GameLog.info("run", "Run started", {"seed": seed_value, "starting": state.units.size()})
 
 
 ## Покупает юнита из слота магазина и ставит на скамейку (bench).
@@ -82,7 +105,8 @@ func buy_unit(slot: int) -> Resource:
 		GameLog.debug("run", "Not enough gold", {"need": def.cost, "have": state.gold})
 		return null
 	state.gold -= def.cost
-	state.bench_unit_ids.append(def.id)
+	# Stable instance_id is allocated by RunDomainState.create_unit.
+	state.create_unit(def.id, def.max_hp if def != null else 100, RunUnit.LOCATION_BENCH)
 	shop.take_at(slot)
 	GameBus.emit_gold_changed(state.gold)
 	GameLog.info("run", "Bought unit", {"id": def.id, "gold_left": state.gold})
@@ -91,56 +115,43 @@ func buy_unit(slot: int) -> Resource:
 
 ## S6.2: перемещает юнита в bench по позиции (board_index). Возвращает true если успешно.
 func board_to_bench(board_index: int) -> bool:
-	if board_index < 0 or board_index >= state.player_unit_ids.size():
+	var board := state.get_board_units()
+	if board_index < 0 or board_index >= board.size():
 		return false
-	if state.bench_unit_ids.size() >= BalanceScript.MAX_BENCH_UNITS:
-		GameLog.warn("run", "board_to_bench: bench full", {"size": state.bench_unit_ids.size()})
+	if state.get_bench_units().size() >= BalanceScript.MAX_BENCH_UNITS:
+		GameLog.warn("run", "board_to_bench: bench full", {"size": state.get_bench_units().size()})
 		return false
-	var id: StringName = state.player_unit_ids[board_index]
-	state.player_unit_ids.remove_at(board_index)
-	state.bench_unit_ids.append(id)
-	GameLog.info("run", "board->bench", {"id": id, "from": board_index})
-	return true
+	var u: RunUnit = board[board_index]
+	return state.move_unit(u.instance_id, RunUnit.LOCATION_BENCH, -1)
 
 
 ## S6.2: перемещает юнита из bench на доску в указанную позицию. Возвращает true если успешно.
-## Если board_index == -1, ищет первую свободную позицию.
+## Если board_index == -1, ищет первую свободную позицию (append).
 func bench_to_board(bench_index: int, board_index: int = -1) -> bool:
-	if bench_index < 0 or bench_index >= state.bench_unit_ids.size():
+	var bench := state.get_bench_units()
+	if bench_index < 0 or bench_index >= bench.size():
 		return false
-	if state.player_unit_ids.size() >= BalanceScript.MAX_BOARD_UNITS:
-		GameLog.warn("run", "bench_to_board: board full", {"size": state.player_unit_ids.size()})
+	if state.get_board_units().size() >= BalanceScript.MAX_BOARD_UNITS:
+		GameLog.warn("run", "bench_to_board: board full", {"size": state.get_board_units().size()})
 		return false
-	if board_index < 0:
-		board_index = state.player_unit_ids.size()  # append
-	elif board_index > state.player_unit_ids.size():
-		board_index = state.player_unit_ids.size()  # clamp
-	var id: StringName = state.bench_unit_ids[bench_index]
-	state.bench_unit_ids.remove_at(bench_index)
-	state.player_unit_ids.insert(board_index, id)
-	GameLog.info("run", "bench->board", {"id": id, "to": board_index})
-	return true
+	var u: RunUnit = bench[bench_index]
+	return state.move_unit(u.instance_id, RunUnit.LOCATION_BOARD, board_index)
 
 
 ## S6.2: меняет местами двух юнитов на доске по позициям (0..MAX_BOARD_UNITS-1).
 ## Если b == -1, перемещает board[a] в bench.
 func swap_board_units(a: int, b: int) -> bool:
-	var board_size: int = state.player_unit_ids.size()
+	var board := state.get_board_units()
+	var board_size: int = board.size()
 	if a < 0 or a >= board_size:
 		return false
 	if b < 0 or b >= board_size:
 		return false
 	if a == b:
 		return false
-	var id_a: StringName = state.player_unit_ids[a]
-	var id_b: StringName = state.player_unit_ids[b]
-	state.player_unit_ids[a] = id_b
-	state.player_unit_ids[b] = id_a
-	# unit_states не перетасовываем — каждый unit_state принадлежит своему id,
-	# который живёт в player_unit_ids под тем же индексом (после move_to_board).
-	GameLog.info("run", "board swap",
-		{"slot_a": a, "id_a": id_a, "slot_b": b, "id_b": id_b})
-	return true
+	var ua: RunUnit = board[a]
+	var ub: RunUnit = board[b]
+	return state.swap_units(ua.instance_id, ub.instance_id)
 
 
 ## Перемещает юнита со скамейки на доску (cell).
@@ -151,48 +162,49 @@ func move_to_board(bench_index: int, _cell: Vector2i) -> bool:
 
 # === S7.1: Inventory ===
 
-## Добавляет предмет в инвентарь (state.item_ids). Возвращает true если успешно.
-## Если уже MAX_INVENTORY предметов, returns false и логирует warning.
+## Добавляет предмет в инвентарь. Создаёт новый RunItem с
+## stable instance_id. Capacity rule is total item count
+## (inventory + equipped), matching legacy semantics.
+## Возвращает true если успешно. Если уже MAX_INVENTORY предметов, returns false.
 func grant_item(item_id: StringName) -> bool:
 	if item_id == &"":
 		GameLog.warn("inventory", "grant_item: empty id")
 		return false
-	if state.item_ids.size() >= BalanceScript.MAX_INVENTORY:
+	if state.items.size() >= BalanceScript.MAX_INVENTORY:
 		GameLog.warn("inventory", "grant_item: inventory full",
-			{"size": state.item_ids.size(), "max": BalanceScript.MAX_INVENTORY})
+			{"size": state.items.size(), "max": BalanceScript.MAX_INVENTORY})
 		return false
-	state.item_ids.append(item_id)
-	# S7.2: parallel equip slot (-1 = в инвентаре).
-	state.item_equip_board_idx.append(-1)
+	state.create_item(item_id)
 	GameLog.info("inventory", "item granted",
-		{"id": item_id, "size": state.item_ids.size()})
+		{"id": item_id, "size": state.items.size()})
 	return true
 
 
-## Удаляет предмет из инвентаря по индексу. Возвращает true если успешно.
+## Удаляет предмет по индексу (compatibility coordinate).
+## index 0..state.items.size()-1 covers BOTH inventory and
+## equipped items, matching legacy item_ids.
+## Возвращает true если успешно.
 func remove_item_at(idx: int) -> bool:
-	if idx < 0 or idx >= state.item_ids.size():
+	if idx < 0 or idx >= state.items.size():
 		return false
-	var removed: StringName = state.item_ids[idx]
-	state.item_ids.remove_at(idx)
-	# S7.2: keep item_equip_board_idx параллельно к item_ids.
-	if idx < state.item_equip_board_idx.size():
-		state.item_equip_board_idx.remove_at(idx)
-	GameLog.info("inventory", "item removed",
-		{"id": removed, "idx": idx, "size": state.item_ids.size()})
-	return true
+	var removed_id: String = state.items[idx].instance_id
+	var ok: bool = state.remove_item(removed_id)
+	if ok:
+		GameLog.info("inventory", "item removed",
+			{"id": removed_id, "idx": idx, "size": state.items.size()})
+	return ok
 
 
-## Кол-во предметов в инвентаре.
+## Кол-во предметов в инвентаре + equipped (legacy semantics).
 func inventory_count() -> int:
-	return state.item_ids.size()
+	return state.items.size()
 
 
 ## Возвращает ItemDef для предмета по индексу или null.
 func get_item_def_at(idx: int) -> Resource:
-	if idx < 0 or idx >= state.item_ids.size():
+	if idx < 0 or idx >= state.items.size():
 		return null
-	return ContentDB_static.get_by_id(state.item_ids[idx])
+	return ContentDB_static.get_by_id(state.items[idx].definition_id)
 
 
 # === S7.2: Equip ===
@@ -201,57 +213,78 @@ func get_item_def_at(idx: int) -> Resource:
 ## Если board_idx невалиден (нет такого юнита), returns false.
 ## Допускается эипить несколько предметов на одного юнита.
 func equip_item_at(item_idx: int, board_idx: int) -> bool:
-	if item_idx < 0 or item_idx >= state.item_ids.size():
+	if item_idx < 0 or item_idx >= state.items.size():
 		return false
-	var board_size: int = state.player_unit_ids.size()
-	if board_idx < 0 or board_idx >= board_size:
+	var board := state.get_board_units()
+	if board_idx < 0 or board_idx >= board.size():
 		return false
-	# Resize equip array if needed (defensive — should match item_ids).
-	if item_idx >= state.item_equip_board_idx.size():
-		while state.item_equip_board_idx.size() < state.item_ids.size():
-			state.item_equip_board_idx.append(-1)
-	state.item_equip_board_idx[item_idx] = board_idx
-	GameLog.info("inventory", "item equipped",
-		{"item_idx": item_idx, "id": state.item_ids[item_idx], "board_idx": board_idx})
-	return true
+	var item: RunItem = state.items[item_idx]
+	var target: RunUnit = board[board_idx]
+	return state.equip_item(item.instance_id, target.instance_id)
 
 
-## Снимает предмет с юнита (возвращает в инвентарь). item_equip = -1.
+## Снимает предмет с юнита (возвращает в инвентарь).
 func unequip_item_at(item_idx: int) -> bool:
-	if item_idx < 0 or item_idx >= state.item_ids.size():
+	if item_idx < 0 or item_idx >= state.items.size():
 		return false
-	state.item_equip_board_idx[item_idx] = -1
-	GameLog.info("inventory", "item unequipped", {"item_idx": item_idx})
-	return true
+	var item: RunItem = state.items[item_idx]
+	return state.unequip_item(item.instance_id)
 
 
 ## Возвращает board_idx куда эипится item, или -1 если в инвентаре.
+## Если владелец сейчас на bench — возвращает -1 (наследует
+## legacy semantics: equip state was tracked per board index).
 func get_equipped_board_idx(item_idx: int) -> int:
-	if item_idx < 0 or item_idx >= state.item_equip_board_idx.size():
+	if item_idx < 0 or item_idx >= state.items.size():
 		return -1
-	return state.item_equip_board_idx[item_idx]
+	var item: RunItem = state.items[item_idx]
+	var owner_id: String = String(item.owner_unit_id)
+	if owner_id == "":
+		return -1
+	var owner: RunUnit = state.get_unit(owner_id)
+	if owner == null:
+		return -1
+	if int(owner.location) != int(RunUnit.LOCATION_BOARD):
+		return -1
+	var board := state.get_board_units()
+	for i in board.size():
+		if board[i].instance_id == owner_id:
+			return i
+	return -1
 
 
 ## Возвращает array of item indices эипленных на board_idx.
 func get_items_equipped_to_board(board_idx: int) -> Array:
 	var result: Array = []
-	for i in state.item_equip_board_idx.size():
-		if state.item_equip_board_idx[i] == board_idx:
+	var board := state.get_board_units()
+	if board_idx < 0 or board_idx >= board.size():
+		return result
+	var target: RunUnit = board[board_idx]
+	var equipped_items: Array[RunItem] = state.get_equipped_items(target.instance_id)
+	# Translate to item indices for legacy caller compatibility.
+	for it in equipped_items:
+		var i: int = state.items.find(it)
+		if i >= 0:
 			result.append(i)
 	return result
 
 
-## Возвращает Dictionary {attack, defense, max_hp} — сумма bonus_* всех
+## Возвращает Dictionary {attack, defense, max_hp} — сумма bonus_*
 ## предметов эипленных на board_idx. Используется Combatant creation.
 func get_unit_bonus_stats(board_idx: int) -> Dictionary:
 	var stats: Dictionary = {"attack": 0, "defense": 0, "max_hp": 0}
-	for i in state.item_equip_board_idx.size():
-		if state.item_equip_board_idx[i] == board_idx:
-			var def: Resource = ContentDB_static.get_by_id(state.item_ids[i])
-			if def != null:
-				stats["attack"] = int(stats.get("attack", 0)) + int(def.bonus_attack)
-				stats["defense"] = int(stats.get("defense", 0)) + int(def.bonus_defense)
-				stats["max_hp"] = int(stats.get("max_hp", 0)) + int(def.bonus_max_hp)
+	var board := state.get_board_units()
+	if board_idx < 0 or board_idx >= board.size():
+		return stats
+	var u: RunUnit = board[board_idx]
+	var equipped: Array[RunItem] = state.get_equipped_items(u.instance_id)
+	for it in equipped:
+		var def: Resource = ContentDB_static.get_by_id(it.definition_id)
+		if def == null:
+			continue
+		stats["attack"] = int(stats.get("attack", 0)) + int(def.bonus_attack)
+		stats["defense"] = int(stats.get("defense", 0)) + int(def.bonus_defense)
+		stats["max_hp"] = int(stats.get("max_hp", 0)) + int(def.bonus_max_hp)
 	return stats
 
 
@@ -291,30 +324,36 @@ func exit_shop_to_map() -> void:
 func start_battle() -> bool:
 	if phase != Phase.PREP and phase != Phase.MAP:
 		return false
-	if state.player_unit_ids.is_empty():
+	if state.get_board_units().is_empty():
 		GameLog.warn("run", "No units on board")
 		return false
+	# Phase 1 / T3F.5: deterministic board snapshot used for the
+	# entire start_battle call. Any mutation of state.units during
+	# battle setup is reflected in state, but the participants
+	# list is captured at THIS moment.
+	var board_units: Array[RunUnit] = state.get_board_units()
 	# S5.4: суммарный attack bonus от REST/SHRINE (для всех юнитов игрока).
 	var total_attack_bonus: int = int(state.meta_modifiers.get("rest_attack_bonus", 0)) + \
 		int(state.meta_modifiers.get("shrine_attack_bonus", 0))
 	var atk_mul: float = 1.0 + float(total_attack_bonus) / 100.0
 	ctx = BattleContext.new()
+	# Fresh participant bridge for THIS battle.
+	_battle_participants = LegacyBattleParticipantMapScript.new()
 	# Расставляем игроков.
-	for i in state.player_unit_ids.size():
-		var def: Resource = ContentDB_static.get_by_id(state.player_unit_ids[i])
+	for i in board_units.size():
+		var u: RunUnit = board_units[i]
+		var def: Resource = ContentDB_static.get_by_id(u.definition_id)
 		if def == null:
 			continue
-		# S5.4: мёртвые юниты не появляются на доске.
-		# S5.4: мёртвые юниты не появляются на доске.
-		var us = _find_unit_state(state.player_unit_ids[i])
-		if us != null and us.is_dead():
+		# Skip dead units.
+		if not u.is_alive():
 			continue
 		var hp_override: int = -1
-		if us != null and us.current_hp > 0:
-			hp_override = us.current_hp
-		# S7.2: apply bonuses from equipped items.
+		if u.current_hp > 0:
+			hp_override = u.current_hp
+		# Apply per-unit persistent bonus_attack and equipped items.
 		var bonuses: Dictionary = get_unit_bonus_stats(i)
-		var bonus_atk: int = int(bonuses.get("attack", 0))
+		var bonus_atk: int = int(bonuses.get("attack", 0)) + int(u.bonus_attack)
 		var bonus_def: int = int(bonuses.get("defense", 0))
 		var bonus_hp: int = int(bonuses.get("max_hp", 0))
 		var c = CombatantScript.new(def, 1.0, atk_mul, 1.0, hp_override, bonus_atk, bonus_def, bonus_hp)
@@ -322,6 +361,14 @@ func start_battle() -> bool:
 		if not ctx.register(c, cell):
 			GameLog.warn("run", "Cannot place player unit", {"i": i})
 			continue
+		# Bind Combatant Object -> RunUnit.instance_id.
+		var bind_ok: bool = _battle_participants.bind(c, u.instance_id)
+		if not bind_ok:
+			# Invariant error: bridge already has this combatant or this id.
+			# This should never happen for a fresh bridge in start_battle.
+			GameLog.error("run", "participant bind failed",
+				{"combatant": str(c), "instance_id": u.instance_id,
+					"last_error": _battle_participants.get_last_error()})
 		# Shield Block для paladin и guardian.
 		if def.id in [&"paladin", &"guardian"]:
 			var sb: Resource = ContentDB_static.get_by_id(&"shield_block")
@@ -358,10 +405,17 @@ func tick_battle(dt: float) -> void:
 
 
 func _on_battle_ended() -> void:
+	# Phase 1 / T3F.5: do NOT introduce new post-battle HP writeback.
+	# Legacy semantics did not persist combat runtime HP back into
+	# run state, and that contract is preserved.
 	var winner: int = runner.state.winner_team
 	# S3.3: auto-save ПОСЛЕ боя, ДО перехода в PREP/REWARD/GAMEOVER.
 	# Это гарантирует, что state на диске = последний завершённый бой.
 	save_now()
+	# Clear battle lifetime bridge AFTER save.
+	if _battle_participants != null:
+		_battle_participants.clear()
+		_battle_participants = null
 	if winner == 0:
 		state.wins += 1
 		state.gold += BalanceScript.WIN_BONUS_GOLD + state.round_index
@@ -415,19 +469,40 @@ func _end_run(won: bool) -> void:
 # === S3.3: Save/Load в середине рана ===
 
 ## Сохраняет текущий state + обновляет profile.current_run_seed.
-## Вызывай вручную (кнопка "Save") или из auto-save хуков.
-## Возвращает true если сохранено успешно.
+## Phase 1 / T3F.6: live state is RunDomainState. We map to a
+## canonical v4 DTO via RunStateV4Mapper, hand it to
+## SaveService.save_run_v4 (which routes through the hardened
+## RunSaveRepository + file ops seam), and inspect the returned
+## SaveLoadResult. On failure: do not update profile.current_run_seed
+## (the meta would otherwise lie about an active run that did not
+## actually persist).
 func save_now() -> bool:
-	if state == null or state.seed == 0:
+	if state == null:
 		GameLog.warn("run", "save_now: no active state")
 		return false
-	var ok: bool = SaveService.save_run(state)
-	if ok and profile != null:
+	var dto: Dictionary = RunStateV4MapperScript.to_v4_dto(state)
+	var result: RefCounted = SaveService.save_run_v4(state.seed, dto)
+	if result == null or not result.is_ok():
+		var err: String = "unknown"
+		var ctx_msg: String = ""
+		if result != null:
+			err = str(result.status)
+			ctx_msg = str(result.context)
+			if result.diagnostics != null:
+				for d in result.diagnostics:
+					GameLog.error("save", "save_now diagnostic",
+						{"code": str(d.code),
+						"detail": str(d.detail),
+						"context": str(d.context)})
+		GameLog.error("run", "save_now failed",
+			{"seed": state.seed, "status": err, "context": ctx_msg})
+		return false
+	if profile != null:
 		profile.current_run_seed = state.seed
 		SaveService.save_meta(profile)
 		GameBus.emit_run_saved(state.seed)
 		GameLog.info("run", "Run saved", {"seed": state.seed, "round": state.round_index})
-	return ok
+	return true
 
 
 ## S3.3: сбрасывает active run marker. Вызывается при _end_run.
@@ -437,18 +512,36 @@ func _clear_active_run() -> void:
 		# meta save уже вызывается в _end_run — здесь не дублируем.
 
 
-## S3.3: загружает RunState из диска по seed и продолжает ран с PREP фазы.
-## Возвращает true если state загружен успешно.
-## НЕ пересоздаёт state — заменяет self.state на загруженный.
-## Если файла нет — возвращает false, state остаётся прежним.
+## S3.3: загружает RunDomainState из диска по seed и продолжает ран.
+## Phase 1 / T3F.7: live state is RunDomainState. We load the
+## canonical v4 DTO through SaveService.load_run_v4 (which goes
+## through the hardened RunSaveRepository and migrates legacy v1
+## transparently), then run the DTO through RunStateV4Mapper.
+## Transactional: if ANY step fails, self.state is left unchanged
+## (the previous live state is preserved exactly as it was).
 func resume_run(seed_value: int) -> bool:
 	if seed_value == 0:
 		GameLog.warn("run", "resume_run: seed == 0")
 		return false
-	var loaded: RunState = SaveService.load_run(seed_value)
-	if loaded == null:
-		GameLog.warn("run", "resume_run: no save for seed", {"seed": seed_value})
+	# Save current state reference. If the load fails for any
+	# reason, we DO NOT touch self.state.
+	var previous: RunDomainState = state
+	var result: RefCounted = SaveService.load_run_v4(seed_value)
+	if result == null or not result.is_ok():
+		var err: String = "unknown"
+		if result != null:
+			err = str(result.status)
+			if result.diagnostics != null:
+				for d in result.diagnostics:
+					GameLog.error("save", "resume_run diagnostic", {"diag": str(d)})
+		GameLog.warn("run", "resume_run: load failed", {"seed": seed_value, "status": err})
 		return false
+	var dto: Dictionary = result.data
+	var loaded: RunDomainState = RunStateV4MapperScript.from_v4_dto(dto)
+	if loaded == null:
+		GameLog.error("run", "resume_run: mapper returned null", {"seed": seed_value})
+		return false
+	# All steps succeeded. Commit the new state.
 	state = loaded
 	# Rng восстанавливаем из seed для детерминизма (на случай если seed_run не звался).
 	Rng.seed_run(state.seed)
@@ -469,10 +562,12 @@ func resume_run(seed_value: int) -> bool:
 			_set_phase(Phase.MAP)
 	else:
 		_set_phase(Phase.PREP)
+
 	if profile != null:
 		profile.current_run_seed = state.seed
 		SaveService.save_meta(profile)
 	GameBus.emit_run_resumed(state.seed)
+	return true
 	GameLog.info("run", "Run resumed", {"seed": state.seed, "round": state.round_index, "encounter": state.current_encounter_id})
 	return true
 
@@ -502,7 +597,7 @@ func _enter_prep_or_map_after_reward() -> void:
 
 ## Игрок выбирает юнита из reward. Возвращает UnitDef или null.
 ## Авто-размещение: если на доске меньше MAX_BOARD_UNITS, юнит сразу идёт
-## в player_unit_ids (рядом с другими). Иначе — в bench для будущего UI drag-drop.
+## на board. Иначе — на bench для будущего UI drag-drop.
 ## Переводит в MAP или PREP после выбора (S5.3).
 func choose_reward(slot: int) -> Resource:
 	if phase != Phase.REWARD:
@@ -511,22 +606,19 @@ func choose_reward(slot: int) -> Resource:
 	if def == null:
 		return null
 	# S6.1.1: auto-place reward unit onto board if there's room.
-	if state.player_unit_ids.size() < BalanceScript.MAX_BOARD_UNITS:
-		state.player_unit_ids.append(def.id)
-		# S5.4: register per-unit state so HP persists between battles.
-		var max_hp: int = def.max_hp if def != null else 100
-		state.unit_states.append(RunUnitState.new(def.id, max_hp, -1))
+	if state.get_board_units().size() < BalanceScript.MAX_BOARD_UNITS:
+		state.create_unit(def.id, def.max_hp if def != null else 100, RunUnit.LOCATION_BOARD)
 		GameLog.info("run", "Reward chosen (auto-placed on board)",
-			{"id": def.id, "round": state.round_index, "board_size": state.player_unit_ids.size()})
+			{"id": def.id, "round": state.round_index, "board_size": state.get_board_units().size()})
 	else:
 		# Board full — bench. Будет виден в future bench UI.
-		if state.bench_unit_ids.size() >= BalanceScript.MAX_BENCH_UNITS:
+		if state.get_bench_units().size() >= BalanceScript.MAX_BENCH_UNITS:
 			GameLog.warn("run", "Reward chosen but bench full",
-				{"id": def.id, "bench": state.bench_unit_ids.size()})
+				{"id": def.id, "bench": state.get_bench_units().size()})
 			return null
-		state.bench_unit_ids.append(def.id)
+		state.create_unit(def.id, def.max_hp if def != null else 100, RunUnit.LOCATION_BENCH)
 		GameLog.info("run", "Reward chosen (sent to bench)",
-			{"id": def.id, "round": state.round_index, "bench_size": state.bench_unit_ids.size()})
+			{"id": def.id, "round": state.round_index, "bench_size": state.get_bench_units().size()})
 	GameBus.emit_reward_chosen(def.id, slot)
 	_enter_prep_or_map_after_reward()
 	return def
@@ -629,16 +721,23 @@ func _apply_service_effect(node) -> void:
 
 
 # === S5.3: service effect implementations ===
+# Phase 1 / T3F.4: each effect iterates the BOARD units (matching
+# legacy semantics: "player_unit_ids" was the board list) and
+# mutates each RunUnit by instance_id. No definition_id lookups,
+# no board-index ownership.
 
-## HEAL: восстанавливает HP-ratio всем юнитам + 1 жизнь (cap).
+## HEAL: восстанавливает HP-ratio всем board юнитам + 1 жизнь (cap).
 func _apply_heal_effect() -> void:
 	# HEAL: hp + 40% от max_hp, additive поверх current_hp.
-	for id in state.player_unit_ids:
-		var def: Resource = ContentDB_static.get_by_id(id)
+	# Operates on a snapshot because healing mutates board
+	# (no — healing does not move units; snapshot is just defensive
+	# against future schema changes that could).
+	for u in state.get_board_units():
+		var def: Resource = ContentDB_static.get_by_id(u.definition_id)
 		if def == null:
 			continue
-		var heal_amount: int = int(round(float(def.max_hp) * BalanceScript.MAP_HEAL_HP_RATIO))
-		_heal_unit_state(id, heal_amount)
+		var heal_amount: int = int(round(float(u.max_hp) * BalanceScript.MAP_HEAL_HP_RATIO))
+		_heal_run_unit(u, heal_amount)
 	# +1 жизнь cap = STARTING_LIVES * 2 (можно перенести в Balance).
 	state.lives = mini(state.lives + 1, BalanceScript.STARTING_LIVES * 2)
 	GameBus.emit_lives_changed(state.lives)
@@ -699,15 +798,17 @@ func _apply_merchant_effect() -> void:
 	_set_phase(Phase.PREP)
 
 
-## REST: heal all + +1 attack всем юнитам игрока (permanent на ран).
+## REST: heal all board units + +1 attack всем юнитам игрока (permanent на ран).
 func _apply_rest_effect() -> void:
-	for id in state.player_unit_ids:
-		var def: Resource = ContentDB_static.get_by_id(id)
+	for u in state.get_board_units():
+		var def: Resource = ContentDB_static.get_by_id(u.definition_id)
 		if def == null:
 			continue
-		var heal_amount: int = int(round(float(def.max_hp) * BalanceScript.MAP_REST_HP_RATIO))
-		_heal_unit_state(id, heal_amount)
-	# +attack bonus — модифицируем State (для трекинга), не Resource.
+		var heal_amount: int = int(round(float(u.max_hp) * BalanceScript.MAP_REST_HP_RATIO))
+		_heal_run_unit(u, heal_amount)
+	# +attack bonus — модифицируем meta_modifiers (transient, applied in start_battle).
+	# Per-unit RunUnit.bonus_attack is a separate persistent field
+	# that survives save/load independently of meta_modifiers.
 	state.meta_modifiers["rest_attack_bonus"] = int(state.meta_modifiers.get("rest_attack_bonus", 0)) + BalanceScript.MAP_REST_ATTACK_BONUS
 	GameLog.info("run", "REST",
 		{"hp_restore_pct": BalanceScript.MAP_REST_HP_RATIO,
@@ -727,13 +828,13 @@ func _apply_shrine_effect() -> void:
 			GameBus.emit_lives_changed(state.lives)
 			GameLog.info("run", "SHRINE: lives +1 (now %d)" % state.lives)
 		2:
-			# +HP всем юнитам (cap = max_hp * 1.5)
-			for id in state.player_unit_ids:
-				var def: Resource = ContentDB_static.get_by_id(id)
+			# +HP всем board units (cap = max_hp * 1.5)
+			for u in state.get_board_units():
+				var def: Resource = ContentDB_static.get_by_id(u.definition_id)
 				if def == null:
 					continue
-				var heal_amount: int = maxi(1, int(round(float(def.max_hp) * BalanceScript.MAP_SHRINE_HP_BONUS / 100.0)))
-				_heal_unit_state(id, heal_amount)
+				var heal_amount: int = maxi(1, int(round(float(u.max_hp) * BalanceScript.MAP_SHRINE_HP_BONUS / 100.0)))
+				_heal_run_unit(u, heal_amount)
 			GameLog.info("run", "SHRINE: HP +%d" % BalanceScript.MAP_SHRINE_HP_BONUS)
 		_:
 			# +attack (мультик) — увеличиваем meta_modifiers
@@ -741,48 +842,24 @@ func _apply_shrine_effect() -> void:
 			GameLog.info("run", "SHRINE: attack +%d" % BalanceScript.MAP_SHRINE_ATTACK_BONUS)
 
 
-## S5.4: получить HP игрока из unit_states. -1 sentinel (not yet initialized) → max_hp.
-func _get_player_unit_hp(id: StringName) -> int:
-	var us = _find_unit_state(id)
-	if us == null:
-		var def: Resource = ContentDB_static.get_by_id(id)
-		return def.max_hp if def != null else 100
-	return us.effective_hp()
-
-
-## S5.4: установить HP игрока в unit_states. current_hp = -1 (sentinel) → используем max_hp как fallback.
-func _set_player_unit_hp(id: StringName, new_hp: int) -> void:
-	var us = _find_unit_state(id)
-	if us == null:
-		# Юнит не в unit_states (например, добавлен после start_run). Создаём entry.
-		var def: Resource = ContentDB_static.get_by_id(id)
-		var max_hp: int = def.max_hp if def != null else 100
-		us = RunUnitState.new(id, max_hp, new_hp)
-		state.unit_states.append(us)
-	else:
-		us.current_hp = new_hp
-
-
-## S5.4: helper — найти RunUnitState по unit_id, или null если не найден.
-func _find_unit_state(id: StringName) -> RunUnitState:
-	for us in state.unit_states:
-		if us.unit_id == id:
-			return us
-	return null
-
-
-## S5.4: применить heal к unit_state (или max_hp если current_hp == -1 sentinel).
-func _heal_unit_state(id: StringName, heal_amount: int) -> int:
-	var us = _find_unit_state(id)
-	if us == null:
+## Phase 1 / T3F.4: per-RunUnit heal, replacing the old
+## `_heal_unit_state` helper. Operates by instance_id, respects
+## the sentinel (-1 = use max_hp). Does NOT touch dead units
+## (current_hp == 0 explicitly).
+func _heal_run_unit(u: RunUnit, heal_amount: int) -> int:
+	if u == null:
 		return 0
-	if us.current_hp <= 0:
+	if not u.is_alive():
 		return 0  # мёртвые не хилируются
-	if us.max_hp <= 0:
+	if u.max_hp <= 0:
 		return 0
-	var actual_heal: int = mini(us.max_hp - us.current_hp, heal_amount)
-	us.current_hp = mini(us.max_hp, us.current_hp + heal_amount)
-	return actual_heal
+	# Sentinel: current_hp == -1 means "use max_hp".
+	var current: int = u.current_hp
+	if current < 0:
+		current = u.max_hp
+	var new_hp: int = mini(u.max_hp, current + heal_amount)
+	u.current_hp = new_hp
+	return new_hp - current
 
 
 ## S5.3: вызывается из _on_battle_ended() после REWARD.
@@ -811,6 +888,8 @@ func _refresh_shop() -> void:
 
 func _refresh_merchant_shop() -> void:
 	merchant_shop.refresh()
+
+
 
 
 func _spawn_enemy_wave(round_index: int) -> Array:

@@ -157,8 +157,8 @@ func show_offer(unit_ids: Array, run_controller: Node) -> void:
 	# Все Choice-кнопки делаем disabled + меняем Skip label.
 	var no_room: bool = false
 	if _run_controller != null:
-		var board_size: int = _run_controller.state.player_unit_ids.size()
-		var bench_size: int = _run_controller.state.bench_unit_ids.size()
+		var board_size: int = _run_controller.state.get_board_units().size()
+		var bench_size: int = _run_controller.state.get_bench_units().size()
 		no_room = (board_size >= BalanceScript.MAX_BOARD_UNITS and
 			bench_size >= BalanceScript.MAX_BENCH_UNITS)
 	if _skip_button != null:
