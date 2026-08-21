@@ -14,10 +14,39 @@ var _close_button: Button = null
 # 12-слотов помещался на любом экране.
 const WINDOW_SIZE: int = 6
 var _scroll_offset: int = 0
-# S7.2: equip UX. _picked_item_idx = -1 = nothing picked.
+# Phase 1 / T3G.1: equip UX. _picked_item_instance_id = "" = nothing picked.
 # _is_pick_for_equip = true когда first-click на item эипленный = un-equip request.
-var _picked_item_idx: int = -1
+# The picked item is identified by RunItem.instance_id, NOT by its
+# position in `state.items`. The scene must not remember an item
+# array index across events — any rebuild or removal would silently
+# shift identity onto the wrong item.
+var _picked_item_instance_id: String = ""
 var _is_pick_for_equip: bool = false
+
+
+## Phase 1 / T3G.1: public accessor for cross-scene queries
+## (prep_scene uses this to decide whether to forward a board
+## click into the equip path).
+func is_item_picked() -> bool:
+	return _picked_item_instance_id != ""
+
+
+## Resolve the currently picked item's array index. Returns -1
+## if no item is picked OR if the picked item is no longer in
+## the domain. Scene code that needs the index for a single
+## immediate operation (e.g. style label) may call this, but
+## the returned index must NOT be stored across events.
+func _current_picked_item_idx() -> int:
+	if _picked_item_instance_id == "" or run_controller == null:
+		return -1
+	var items: Array = run_controller.state.items
+	for i in items.size():
+		if items[i].instance_id == _picked_item_instance_id:
+			return i
+	# Picked item was removed from the domain. Drop the stale pick.
+	_picked_item_instance_id = ""
+	_is_pick_for_equip = false
+	return -1
 
 
 func _ready() -> void:
@@ -214,8 +243,11 @@ func _make_item_button(idx: int, def: Resource) -> Button:
 			if board_idx >= 0:
 				equipped_marker = "  [EQUIPPED: board %d]" % board_idx
 		var picked_marker: String = ""
-		if _picked_item_idx == idx:
-			picked_marker = "  [PICKED]"
+		if run_controller != null:
+			var items_arr: Array = run_controller.state.items
+			if idx >= 0 and idx < items_arr.size():
+				if items_arr[idx].instance_id == _picked_item_instance_id:
+					picked_marker = "  [PICKED]"
 		var line1: String = "%s  [tier %d, cost %d]%s%s" % [def.display_name, def.tier, def.cost, equipped_marker, picked_marker]
 		btn.text = line1 + "\n" + bonus_str + " — click to discard/equip"
 	else:
@@ -264,41 +296,53 @@ func _on_item_pressed(idx: int) -> void:
 		return
 	if idx < 0 or idx >= run_controller.inventory_count():
 		return
-	# S7.2: 3-стате click flow.
+	# Phase 1 / T3G.1: resolve idx → instance_id immediately. The idx
+	# itself is only valid for this single call.
+	var items_arr: Array = run_controller.state.items
+	if idx < 0 or idx >= items_arr.size():
+		return
+	var clicked_id: String = items_arr[idx].instance_id
+	# 3-state click flow keyed on instance_id.
 	# 1) Nothing picked: pick item.
-	if _picked_item_idx == -1:
+	if _picked_item_instance_id == "":
 		# Special case: item уже эипится → single click unequips (UX shortcut).
 		var current_board: int = run_controller.get_equipped_board_idx(idx)
 		if current_board >= 0:
-			run_controller.unequip_item_at(idx)
+			run_controller.unequip_item_by_id(clicked_id)
 			_rebuild()
 			return
-		_picked_item_idx = idx
+		_picked_item_instance_id = clicked_id
 		_is_pick_for_equip = true
 		_rebuild()
 		return
 	# 2) Click same item = cancel pick.
-	if _picked_item_idx == idx:
-		_picked_item_idx = -1
+	if _picked_item_instance_id == clicked_id:
+		_picked_item_instance_id = ""
 		_is_pick_for_equip = false
 		_rebuild()
 		return
 	# 3) Click different item = replace pick.
-	_picked_item_idx = idx
+	_picked_item_instance_id = clicked_id
 	_rebuild()
 
 
 ## S7.2: вызывается из PREP scene когда игрок нажал board unit
-## (только если в инвентаре есть _picked_item_idx).
+## (только если в инвентаре есть _picked_item_instance_id).
 ## Возвращает true если equip сработал.
 func try_equip_to_board(board_idx: int) -> bool:
 	if run_controller == null:
 		return false
-	if _picked_item_idx == -1 or not _is_pick_for_equip:
+	if _picked_item_instance_id == "" or not _is_pick_for_equip:
 		return false
-	var ok: bool = run_controller.equip_item_at(_picked_item_idx, board_idx)
+	# Translate the clicked board slot to its current RunUnit.instance_id.
+	var board: Array[RunUnit] = run_controller.state.get_board_units()
+	if board_idx < 0 or board_idx >= board.size():
+		return false
+	var target_unit_id: String = board[board_idx].instance_id
+	var ok: bool = run_controller.equip_item_by_id(
+		_picked_item_instance_id, target_unit_id)
 	if ok:
-		_picked_item_idx = -1
+		_picked_item_instance_id = ""
 		_is_pick_for_equip = false
 		_rebuild()
 	return ok

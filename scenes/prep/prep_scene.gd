@@ -17,7 +17,7 @@ var _board_buttons: Array[Button] = []
 var _bench_buttons: Array[Button] = []
 var _ready_button: Button = null
 # Click flow state: null / {kind: "board"|"bench", index: int}
-var _selected: Dictionary = {}
+var _selected: Dictionary = {"kind": "", "instance_id": ""}
 
 
 func _ready() -> void:
@@ -242,11 +242,39 @@ func _apply_button_style(btn: Button, kind: String, selected: bool) -> void:
 
 
 func _apply_selection_style() -> void:
+	# Resolve the stored instance_id against the CURRENT state.
+	# If the selected entity is no longer present, clear the
+	# selection (it must not silently stick to a different unit
+	# that happens to occupy the old index).
+	var sel_kind: String = _selected.get("kind", "")
+	var sel_id: String = _selected.get("instance_id", "")
+	var sel_unit: RunUnit = null
+	if sel_id != "" and run_controller != null:
+		sel_unit = run_controller.state.get_unit(sel_id)
+		if sel_unit == null:
+			# Selected entity was removed from the domain — drop selection.
+			_selected = {"kind": "", "instance_id": ""}
+			sel_kind = ""
+			sel_id = ""
+		else:
+			# The selected unit's current location may differ from when it
+			# was clicked. Reconcile `kind` so highlight uses the current
+			# projection.
+			sel_kind = "board" if sel_unit.location == int(RunUnit.LOCATION_BOARD) else "bench"
+			_selected = {"kind": sel_kind, "instance_id": sel_id}
+	# Highlight using current projection by instance_id.
+	var empty_board: Array[RunUnit] = []
+	var empty_bench: Array[RunUnit] = []
+	var board: Array[RunUnit] = empty_board
+	var bench: Array[RunUnit] = empty_bench
+	if run_controller != null:
+		board = run_controller.state.get_board_units()
+		bench = run_controller.state.get_bench_units()
 	for i in _board_buttons.size():
-		var sel: bool = (_selected.get("kind", "") == "board" and int(_selected.get("index", -1)) == i)
+		var sel: bool = sel_kind == "board" and i < board.size() and board[i].instance_id == sel_id
 		_apply_button_style(_board_buttons[i], "board", sel)
 	for i in _bench_buttons.size():
-		var sel2: bool = (_selected.get("kind", "") == "bench" and int(_selected.get("index", -1)) == i)
+		var sel2: bool = sel_kind == "bench" and i < bench.size() and bench[i].instance_id == sel_id
 		_apply_button_style(_bench_buttons[i], "bench", sel2)
 
 
@@ -255,39 +283,64 @@ func _on_unit_pressed(kind: String, index: int) -> void:
 	if run_controller == null:
 		return
 	# S7.2: если в InventoryScene есть picked item → equip it to board.
-	if kind == "board" and _inventory_scene != null and _inventory_scene._picked_item_idx != -1:
+	if kind == "board" and _inventory_scene != null and _inventory_scene.is_item_picked():
 		var ok: bool = _inventory_scene.try_equip_to_board(index)
 		if ok:
 			_rebuild()
-			return
-	if _selected.is_empty():
-		# Первый клик: select.
-		_selected = {"kind": kind, "index": index}
+		return
+	# Resolve the clicked (kind, index) to the CURRENT
+	# RunUnit.instance_id. This is the only time the index is
+	# allowed — it must never survive past this event.
+	var clicked_unit: RunUnit = null
+	if kind == "board":
+		var board: Array[RunUnit] = run_controller.state.get_board_units()
+		if index >= 0 and index < board.size():
+			clicked_unit = board[index]
+	elif kind == "bench":
+		var bench: Array[RunUnit] = run_controller.state.get_bench_units()
+		if index >= 0 and index < bench.size():
+			clicked_unit = bench[index]
+	if clicked_unit == null:
+		return
+	var clicked_id: String = clicked_unit.instance_id
+	# Empty selection: first click selects the clicked unit by
+	# instance_id. The index is discarded.
+	if _selected.get("instance_id", "") == "":
+		_selected = {"kind": kind, "instance_id": clicked_id}
 		_apply_selection_style()
 		return
-	# Второй клик: dispatch по комбинации.
-	var src_kind: String = _selected.get("kind", "")
-	var src_index: int = int(_selected.get("index", -1))
-	if src_kind == kind and src_index == index:
-		# Клик на ту же кнопку — clear selection.
-		_selected = {}
+	# Resolve the stored source instance_id to a CURRENT
+	# projection. If the source unit no longer exists, the
+	# selection is stale — clear and treat this click as a
+	# fresh first click.
+	var src_id: String = _selected.get("instance_id", "")
+	var src_unit: RunUnit = run_controller.state.get_unit(src_id)
+	if src_unit == null:
+		_selected = {"kind": kind, "instance_id": clicked_id}
 		_apply_selection_style()
 		return
-	# Execute.
+	var src_kind: String = "board" if src_unit.location == int(RunUnit.LOCATION_BOARD) else "bench"
+	# Click on the same unit again = clear selection.
+	if src_kind == kind and src_id == clicked_id:
+		_selected = {"kind": "", "instance_id": ""}
+		_apply_selection_style()
+		return
+	# Dispatch the operation by stable instance_id.
 	if src_kind == "board" and kind == "board":
-		run_controller.swap_board_units(src_index, index)
+		run_controller.swap_units_by_id(src_id, clicked_id)
 	elif src_kind == "board" and kind == "bench":
-		run_controller.board_to_bench(src_index)
+		run_controller.board_to_bench_by_id(src_id)
 	elif src_kind == "bench" and kind == "board":
-		run_controller.bench_to_board(src_index, index)
+		# Translate the clicked board index to a target
+		# board slot for bench_to_board_by_id.
+		run_controller.bench_to_board_by_id(src_id, index)
 	elif src_kind == "bench" and kind == "bench":
-		# Bench swap: не реализовано пока (нужно добавить в RunController если нужно).
-		# Пока пропускаем.
-		_selected = {}
+		# Bench swap: not implemented at controller level.
+		_selected = {"kind": "", "instance_id": ""}
 		_apply_selection_style()
 		return
-	# Refresh UI после успешной операции.
-	_selected = {}
+	# Refresh UI after successful operation.
+	_selected = {"kind": "", "instance_id": ""}
 	_rebuild()
 
 

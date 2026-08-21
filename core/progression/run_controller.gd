@@ -154,6 +154,69 @@ func swap_board_units(a: int, b: int) -> bool:
 	return state.swap_units(ua.instance_id, ub.instance_id)
 
 
+## Phase 1 / T3G.1: stable-identity mutations.
+## These take `instance_id` directly so the scene never has to
+## remember a board/bench index across events. The lookup
+## happens at call time, against the current state.
+
+## Swap two RunUnits by `instance_id` regardless of which side
+## (board or bench) they currently occupy.
+func swap_units_by_id(src_id: String, dst_id: String) -> bool:
+	if src_id == "" or dst_id == "" or src_id == dst_id:
+		return false
+	return state.swap_units(src_id, dst_id)
+
+
+## Move a RunUnit to the bench by `instance_id`. Returns false if
+## the unit does not exist or the bench is full.
+func board_to_bench_by_id(src_id: String) -> bool:
+	if src_id == "":
+		return false
+	var u: RunUnit = state.get_unit(src_id)
+	if u == null or u.location != RunUnit.LOCATION_BOARD:
+		return false
+	if state.get_bench_units().size() >= BalanceScript.MAX_BENCH_UNITS:
+		GameLog.warn("run", "board_to_bench_by_id: bench full",
+			{"size": state.get_bench_units().size()})
+		return false
+	return state.move_unit(src_id, RunUnit.LOCATION_BENCH, -1)
+
+
+## Move a RunUnit from the bench to the board by `instance_id`.
+## If `board_index` is -1, append to the first free slot.
+func bench_to_board_by_id(src_id: String, board_index: int = -1) -> bool:
+	if src_id == "":
+		return false
+	var u: RunUnit = state.get_unit(src_id)
+	if u == null or u.location != RunUnit.LOCATION_BENCH:
+		return false
+	if state.get_board_units().size() >= BalanceScript.MAX_BOARD_UNITS:
+		GameLog.warn("run", "bench_to_board_by_id: board full",
+			{"size": state.get_board_units().size()})
+		return false
+	return state.move_unit(src_id, RunUnit.LOCATION_BOARD, board_index)
+
+
+## Phase 1 / T3G.1: equip/unequip by RunItem.instance_id.
+## The scene must not pass an item array index across events.
+## Equips `item_instance_id` to the board unit whose
+## `RunUnit.instance_id == target_unit_instance_id`. Returns
+## false if the item or target unit does not exist.
+func equip_item_by_id(item_instance_id: String,
+		target_unit_instance_id: String) -> bool:
+	if item_instance_id == "" or target_unit_instance_id == "":
+		return false
+	return state.equip_item(item_instance_id, target_unit_instance_id)
+
+
+## Unequip a RunItem by `instance_id`. The item lands in
+## inventory (owner_unit_id becomes "").
+func unequip_item_by_id(item_instance_id: String) -> bool:
+	if item_instance_id == "":
+		return false
+	return state.unequip_item(item_instance_id)
+
+
 ## Перемещает юнита со скамейки на доску (cell).
 ## v1 — упрощённо, без валидации cell.
 func move_to_board(bench_index: int, _cell: Vector2i) -> bool:
