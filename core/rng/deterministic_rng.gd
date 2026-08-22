@@ -70,14 +70,15 @@ func randf() -> float:
 
 
 ## Coin-flip helper: true with probability `p` (clamped to [0,1]).
-## +1 draw.
+## ALWAYS consumes exactly one draw, including the boundary cases
+## `chance(0.0)` and `chance(1.0)`. This matches the legacy facade
+## `Rng.chance` topology so that compound sequences (e.g. combat
+## chance → crit chance → variance) keep their draw positions.
+## Use `self.randf()` (qualified) to avoid the @GlobalScope shadow.
+## `self.randf()` already increments draw_count, so chance does NOT
+## increment it again.
 func chance(p: float) -> bool:
-	if p <= 0.0:
-		return false
-	if p >= 1.0:
-		return true
-	draw_count += 1
-	return _rng.randf() < p
+	return self.randf() < clampf(p, 0.0, 1.0)
 
 
 ## Pick one element from `arr`. Empty array => null, no draw.
@@ -105,9 +106,22 @@ func shuffle_in_place(arr: Array) -> void:
 
 
 ## Return a new array containing `count` distinct elements drawn
-## from `arr` (or all of `arr` if count >= arr.size()). Order of
-## the result is the order each element was picked, NOT shuffled.
-## Each successful pick consumes 1 draw.
+## from `arr` (or all of `arr` if count >= arr.size()).
+##
+## Algorithm: reservoir sampling.
+##
+## ACTUAL draw semantics:
+## - empty arr or count <= 0: 0 draws
+## - count >= arr.size():      0 draws (returns full duplicate)
+## - 0 < count < arr.size():   arr.size() - count draws
+##   (reservoir sampling: the first `count` items are taken for free;
+##    each subsequent index i >= count consumes one randi_range draw
+##    to decide inclusion, replacing a reservoir slot if chosen)
+##
+## Note: the FACADE legacy `Rng.pick_unique` preserves its own
+## Fisher-Yates algorithm for legacy compatibility. The
+## `DeterministicRng` helper here is the new-owner API and uses
+## reservoir sampling; the facade adapter bridges the difference.
 func pick_unique(arr: Array, count: int) -> Array:
 	if arr.is_empty() or count <= 0:
 		return []
@@ -135,10 +149,25 @@ func snapshot() -> Dictionary:
 	return {"seed": seed_value, "draw_count": draw_count, "state": _rng.state}
 
 
-## Restore from a snapshot. The same draw sequence resumes after
-## restore. draw_count is updated to match the snapshot.
+## Restore from a snapshot.
+##
+## The same draw sequence resumes after restore ONLY if the
+## underlying `RandomNumberGenerator.state` was correctly captured
+## and reapplied. In Godot 4, setting `state` on a PCG RNG does NOT
+## fully reconstruct the draw sequence (the state property stores a
+## derived value, not the full machine state). Therefore `restore`
+## here re-seeds via `seed_with`, which is the only reliable
+## deterministic handle. Callers that need exact continuation must
+## replay the exact same call sequence after restore.
+##
+## Ordering: seed first, then apply captured state, then restore
+## draw_count. Setting `seed` re-initializes the PRNG; setting
+## `state` after that writes the captured machine state directly.
+## draw_count is restored last so it reflects the captured position.
 func restore(snap: Dictionary) -> void:
-	seed_value = int(snap.get("seed", 0))
-	draw_count = int(snap.get("draw_count", 0))
-	_rng.seed = seed_value
-	_rng.state = snap.get("state", 0)
+	var restored_seed: int = int(snap.get("seed", 0))
+	var restored_count: int = int(snap.get("draw_count", 0))
+	var restored_state: Variant = snap.get("state", 0)
+	seed_with(restored_seed)
+	_rng.state = restored_state
+	draw_count = restored_count

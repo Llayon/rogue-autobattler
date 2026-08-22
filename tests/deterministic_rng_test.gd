@@ -37,6 +37,10 @@ func _initialize() -> void:
 	await _test_pick_unique_determinism()
 	await _test_snapshot_restore_round_trip()
 	await _test_no_randomize_in_deterministic_layer()
+	await _test_chance_zero_consumes_one_draw()
+	await _test_chance_one_consumes_one_draw()
+	await _test_chance_half_consumes_one_draw()
+	await _test_pick_unique_actual_draw_contract()
 	print("\n=== deterministic rng: %d passed, %d failed ===\n" % [_passed, _failed])
 	if _failed > 0:
 		quit(1)
@@ -233,3 +237,53 @@ func _test_no_randomize_in_deterministic_layer() -> void:
 		"deterministic_rng.gd constructs the owned RNG in _init")
 	_assert(src.contains("var _rng: RandomNumberGenerator"),
 		"deterministic_rng.gd owns a single _rng field")
+
+func _test_chance_zero_consumes_one_draw() -> void:
+	print("[rng-chance-0] chance_zero_consumes_one_draw")
+	var rng: DeterministicRngScript = DeterministicRngScript.new(42)
+	var before: int = rng.draw_count
+	var result: bool = rng.chance(0.0)
+	_assert(result == false, "chance(0.0) returns false")
+	_assert(rng.draw_count == before + 1, "chance(0.0) consumed exactly +1 draw (before=%d after=%d)" % [before, rng.draw_count])
+
+
+func _test_chance_one_consumes_one_draw() -> void:
+	print("[rng-chance-1] chance_one_consumes_one_draw")
+	var rng: DeterministicRngScript = DeterministicRngScript.new(42)
+	var before: int = rng.draw_count
+	var result: bool = rng.chance(1.0)
+	_assert(result == true, "chance(1.0) returns true")
+	_assert(rng.draw_count == before + 1, "chance(1.0) consumed exactly +1 draw (before=%d after=%d)" % [before, rng.draw_count])
+
+
+func _test_chance_half_consumes_one_draw() -> void:
+	print("[rng-chance-05] chance_half_consumes_one_draw")
+	var rng: DeterministicRngScript = DeterministicRngScript.new(42)
+	var before: int = rng.draw_count
+	var ignored: bool = rng.chance(0.5)
+	_assert(rng.draw_count == before + 1, "chance(0.5) consumed exactly +1 draw (before=%d after=%d)" % [before, rng.draw_count])
+
+
+func _test_pick_unique_actual_draw_contract() -> void:
+	print("[rng-pick-unique-draws] pick_unique_actual_draw_contract")
+	# empty / count<=0: 0 draws
+	var rng: DeterministicRngScript = DeterministicRngScript.new(7)
+	var d0: int = rng.draw_count
+	rng.pick_unique([], 3)
+	_assert(rng.draw_count == d0, "pick_unique([], 3) consumed 0 draws")
+	rng.pick_unique([1, 2, 3], 0)
+	_assert(rng.draw_count == d0, "pick_unique([1,2,3], 0) consumed 0 draws")
+	# count >= size: 0 draws (returns full duplicate)
+	var d1: int = rng.draw_count
+	rng.pick_unique([1, 2, 3], 5)
+	_assert(rng.draw_count == d1, "pick_unique([1,2,3], 5) consumed 0 draws (count>=size)")
+	# 0 < count < size: size - count draws (reservoir sampling)
+	var d2: int = rng.draw_count
+	rng.pick_unique([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 3)
+	_assert(rng.draw_count - d2 == 7, "pick_unique(10 items, count=3) consumed 7 draws (got %d)" % (rng.draw_count - d2))
+	# Same seed produces same pick_unique result.
+	var a: DeterministicRngScript = DeterministicRngScript.new(2025)
+	var b: DeterministicRngScript = DeterministicRngScript.new(2025)
+	var pa: Array = a.pick_unique([10, 20, 30, 40, 50], 3)
+	var pb: Array = b.pick_unique([10, 20, 30, 40, 50], 3)
+	_assert(pa == pb, "pick_unique same seed same result (a=%s b=%s)" % [pa, pb])
