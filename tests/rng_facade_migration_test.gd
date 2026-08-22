@@ -25,6 +25,7 @@ func _initialize() -> void:
 	await _test_facade_chance_uses_owned_stream()
 	await _test_facade_chance_boundary_consumes_one_draw()
 	await _test_facade_no_direct_randomnumbergenerator_in_runtime()
+	await _test_facade_restore_does_not_mutate_current_seed()
 	print("\n=== rng facade migration: %d passed, %d failed ===\n" % [_passed, _failed])
 	if _failed > 0:
 		quit(1)
@@ -212,28 +213,32 @@ func _test_facade_snapshot_legacy_shape() -> void:
 
 func _test_facade_restore_replays_sequence() -> void:
 	print("[facade-7] facade_restore_mid_stream_continuation")
-	# Facade Rng.restore must restore the captured PRNG machine state
-	# so the next draw returns exactly the value that originally
-	# followed the snapshot. This is true mid-stream continuation,
-	# not reseed + manual replay.
+	# T13.1.1 spec: the legacy Rng.restore facade restores the
+	# captured PRNG machine state so the next draw returns exactly
+	# the value that originally followed the snapshot. This is true
+	# mid-stream continuation, NOT reseed + replay. Seed 999, burn
+	# 2 draws to advance the stream position, snapshot, record the
+	# next 3 mixed draws, burn 20 unrelated draws to perturb state,
+	# restore, and assert the next 3 draws equal the recorded
+	# sequence exactly.
 	RngScript.seed_run(999)
-	# Burn some draws.
+	# Establish a non-zero snapshot position.
 	RngScript.randf()
 	RngScript.randi_range(0, 1000)
 	# Capture mid-stream snapshot.
 	var snap: Dictionary = RngScript.snapshot()
-	# Record the 3 draws that SHOULD follow restore.
+	# Record the 3 mixed draws that SHOULD follow restore.
 	var expected_a: float = RngScript.randf()
-	var expected_b: int = RngScript.randi_range(0, 100)
-	var expected_c: float = RngScript.randf_range(-1.0, 1.0)
-	# Burn additional unrelated draws.
-	for _i in 7:
+	var expected_b: int = RngScript.randi_range(10, 50)
+	var expected_c: float = RngScript.randf_range(-5.0, 5.0)
+	# Burn unrelated draws to perturb state.
+	for _i in 20:
 		RngScript.randf()
 	# Restore and assert exact mid-stream continuation.
 	RngScript.restore(snap)
 	var actual_a: float = RngScript.randf()
-	var actual_b: int = RngScript.randi_range(0, 100)
-	var actual_c: float = RngScript.randf_range(-1.0, 1.0)
+	var actual_b: int = RngScript.randi_range(10, 50)
+	var actual_c: float = RngScript.randf_range(-5.0, 5.0)
 	_assert(actual_a == expected_a,
 		"facade mid-stream randf after restore matches (got %f vs %f)" % [actual_a, expected_a])
 	_assert(actual_b == expected_b,
@@ -245,6 +250,11 @@ func _test_facade_restore_replays_sequence() -> void:
 	_assert(post.has("seed"), "post snapshot has 'seed'")
 	_assert(post.has("state"), "post snapshot has 'state'")
 	_assert(not post.has("draw_count"), "post snapshot does NOT leak draw_count")
+	# Snapshot keys MUST be EXACTLY the legacy seed/state contract.
+	var snap_keys: Array = snap.keys()
+	_assert(snap_keys.size() == 2, "snapshot has exactly 2 legacy keys (got %d: %s)" % [snap_keys.size(), snap_keys])
+	_assert(snap_keys.has("seed"), "snapshot keys contain 'seed'")
+	_assert(snap_keys.has("state"), "snapshot keys contain 'state'")
 
 
 func _test_facade_chance_uses_owned_stream() -> void:
@@ -274,3 +284,32 @@ func _test_facade_no_direct_randomnumbergenerator_in_runtime() -> void:
 		RngScript.randf()
 	var d1: int = RngScript.get_draw_count()
 	_assert(d1 - d0 == 7, "7 facade randf() calls advanced draw_count by exactly 7 (got %d)" % (d1 - d0))
+
+
+func _test_facade_restore_does_not_mutate_current_seed() -> void:
+	print("[facade-10] facade_restore_does_not_mutate_current_seed")
+	# T13.1.1 spec: canonical pre-T13 legacy Rng.restore did NOT
+	# mutate the bookkeeping `current_seed` field. The legacy
+	# restore only wrote the underlying generator; `current_seed`
+	# reflected the value from the most recent `seed_run` call.
+	# Seeding with 111 then capturing a snapshot must leave
+	# `current_seed == 111` even after a re-seed to 222 and a
+	# subsequent restore.
+	RngScript.seed_run(111)
+	var snap_a: Dictionary = RngScript.snapshot()
+	_assert(RngScript.current_seed == 111,
+		"current_seed == 111 after seed_run(111) (got %d)" % RngScript.current_seed)
+	RngScript.seed_run(222)
+	_assert(RngScript.current_seed == 222,
+		"current_seed == 222 after seed_run(222) (got %d)" % RngScript.current_seed)
+	# Restore to the snapshot taken at seed 111. Legacy semantics:
+	# the underlying generator is rewound to position 111, but
+	# the bookkeeping `current_seed` field remains at 222 because
+	# legacy restore did not touch it.
+	RngScript.restore(snap_a)
+	_assert(RngScript.current_seed == 222,
+		"current_seed remains 222 after restore (legacy non-mutation semantics) (got %d)" % RngScript.current_seed)
+	# And is_seeded is NOT flipped off by restore (legacy restore
+	# did not change the seeded state).
+	_assert(RngScript.is_seeded() == true,
+		"is_seeded remains true after restore (legacy non-mutation semantics)")

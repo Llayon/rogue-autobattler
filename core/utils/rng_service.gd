@@ -105,11 +105,18 @@ static func snapshot() -> Dictionary:
 ## through `get_draw_count()` debug helper, not the legacy wire).
 ## Godot 4 contract: assign `seed` first (re-initializes the PRNG),
 ## then assign `state` (writes the captured machine position).
+##
+## Observable semantics preserved from canonical pre-T13 legacy:
+##   - current_seed is NOT mutated by restore (the legacy facade
+##     only updated the underlying generator; the bookkeeping
+##     `current_seed` field was last set by the most recent
+##     `seed_run` call, and stays at that value).
+##   - _is_seeded is NOT mutated by restore (legacy restore did
+##     not flip this flag; once seeded, the stream stays seeded).
 static func restore(snap: Dictionary) -> void:
 	var seed_val: int = int(snap.get("seed", 0))
 	var state_val: Variant = snap.get("state", 0)
 	_stream.restore({"seed": seed_val, "state": state_val, "draw_count": 0})
-	current_seed = seed_val
 
 
 static func is_seeded() -> bool:

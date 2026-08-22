@@ -189,35 +189,43 @@ func _test_pick_unique_determinism() -> void:
 
 func _test_snapshot_restore_round_trip() -> void:
 	print("[rng-11] snapshot_restore_round_trip_mid_stream")
-	var rng: DeterministicRngScript = DeterministicRngScript.new(123)
-	# Burn N draws to advance mid-stream.
-	var burn_n: int = 3
-	for _i in burn_n:
-		rng.randi_range(0, 100)
+	# T13.1.1 spec: exact mid-stream continuation. Drive the RNG with
+	# the documented sequence, snapshot mid-stream, record the next 3
+	# draws (mixed randf / randi_range / randf_range), burn unrelated
+	# draws, restore, and assert that the next 3 draws equal the
+	# recorded sequence exactly. This is true mid-stream continuation,
+	# not reseed + replay.
+	var rng: DeterministicRngScript = DeterministicRngScript.new(0)
+	rng.seed_with(999)
+	# Establish a non-zero snapshot position.
+	rng.randf()
+	rng.randi_range(0, 1000)
 	# Capture mid-stream snapshot.
 	var snap: Dictionary = rng.snapshot()
 	var snap_dc: int = int(snap["draw_count"])
-	# Record the 3 draws that SHOULD follow restore.
-	var expected: Array = [rng.randf(), rng.randi_range(0, 100), rng.randf_range(-1.0, 1.0)]
-	# Burn additional unrelated draws.
-	for _i in 5:
+	# Record the mixed sequence that SHOULD follow restore.
+	var expected_a: float = rng.randf()
+	var expected_b: int = rng.randi_range(10, 50)
+	var expected_c: float = rng.randf_range(-5.0, 5.0)
+	# Burn unrelated draws to perturb state.
+	for _i in 20:
 		rng.randf()
 	# Restore to the captured mid-stream position.
 	rng.restore(snap)
 	_assert(rng.draw_count == snap_dc,
 		"draw_count after restore == snap.draw_count (got %d expected %d)" % [rng.draw_count, snap_dc])
-	_assert(rng.seed_value == 123, "seed_value after restore == 123 (got %d)" % rng.seed_value)
-	# The next 3 draws MUST exactly match the pre-burn expected draws.
+	_assert(rng.seed_value == 999, "seed_value after restore == 999 (got %d)" % rng.seed_value)
+	# The next 3 draws MUST exactly match the recorded pre-burn draws.
 	var actual_a: float = rng.randf()
-	var actual_b: int = rng.randi_range(0, 100)
-	var actual_c: float = rng.randf_range(-1.0, 1.0)
-	_assert(actual_a == expected[0],
-		"mid-stream randf after restore matches original (expected=%f actual=%f)" % [expected[0], actual_a])
-	_assert(actual_b == expected[1],
-		"mid-stream randi_range after restore matches original (expected=%d actual=%d)" % [expected[1], actual_b])
-	_assert(actual_c == expected[2],
-		"mid-stream randf_range after restore matches original (expected=%f actual=%f)" % [expected[2], actual_c])
-	# draw_count advances normally after restore.
+	var actual_b: int = rng.randi_range(10, 50)
+	var actual_c: float = rng.randf_range(-5.0, 5.0)
+	_assert(actual_a == expected_a,
+		"mid-stream randf after restore matches (expected=%f actual=%f)" % [expected_a, actual_a])
+	_assert(actual_b == expected_b,
+		"mid-stream randi_range after restore matches (expected=%d actual=%d)" % [expected_b, actual_b])
+	_assert(actual_c == expected_c,
+		"mid-stream randf_range after restore matches (expected=%f actual=%f)" % [expected_c, actual_c])
+	# draw_count advances normally after restore (3 fresh draws).
 	_assert(rng.draw_count == snap_dc + 3,
 		"draw_count after 3 post-restore draws == snap.draw_count + 3 (got %d expected %d)" % [rng.draw_count, snap_dc + 3])
 
