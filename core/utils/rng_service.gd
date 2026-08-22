@@ -17,16 +17,15 @@ static var current_seed: int = 0
 static var _is_seeded: bool = false
 
 
-## Boot-time safety. Production never reaches the pre-seed draw
-## window (every meaningful draw is gated by `seed_run`), but for
-## defensiveness we give the stream a non-deterministic initial seed.
-## This is the only call site in `core/utils/` that touches
-## `RandomNumberGenerator`; all subsequent RNG goes through
-## `_stream` (a `DeterministicRng`).
+## Boot-time initialization. The stream is constructed with seed 0
+## (deterministic). Production never reaches the pre-seed draw
+## window: every meaningful draw is gated by `seed_run`, which
+## fully resets the stream via `_stream.seed_with`. No production
+## callers exist in the pre-seed window, so the initial seed 0 is
+## safe. This means rng_service.gd no longer owns a separate
+## `RandomNumberGenerator` — the owned `DeterministicRng` is the
+## sole RNG owner.
 static func _static_init() -> void:
-	var boot_rng: RandomNumberGenerator = RandomNumberGenerator.new()
-	_stream.seed_with(boot_rng.randi())
-	boot_rng = null
 	_is_seeded = false
 
 

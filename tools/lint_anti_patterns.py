@@ -89,8 +89,9 @@ RULES = [
         "severity": "error",
         "exclude_paths": [
             "tests/",
-            "core/utils/rng_service.gd",
+            "core/utils/rng_service.gd",  # the facade itself exposes randf/randi_range as API names
             "core/balance.gd",
+            "core/rng/deterministic_rng.gd",  # the RNG owner itself wraps RandomNumberGenerator
         ],
     },
 
@@ -147,8 +148,34 @@ RULES = [
         "severity": "error",
         "scope": "core/",
         "exclude_paths": [
-            "core/utils/rng_service.gd",  # сам Rng
+            "core/utils/rng_service.gd",  # the facade exposes randf/randi_range as static API names (not bare calls)
             "core/balance.gd",  # баланс может ссылаться на global
+            "core/rng/deterministic_rng.gd",  # DeterministicRng wraps RandomNumberGenerator
+        ],
+    },
+
+    # === Anti-random guard (Phase 1 / T15) ===
+    # Direct construction of RandomNumberGenerator or call to
+    # randomize() in simulation-sensitive code is forbidden.
+    # All such randomness must go through DeterministicRng.
+    {
+        "id": "no-direct-rng-construction",
+        "pattern": re.compile(r"RandomNumberGenerator\.new\s*\(\s*\)"),
+        "message": "Direct RandomNumberGenerator.new() forbidden outside the DeterministicRng owner. Use DeterministicRng or Rng facade.",
+        "severity": "error",
+        "scope": "core/",
+        "exclude_paths": [
+            "core/rng/deterministic_rng.gd",  # the sole RNG owner
+        ],
+    },
+    {
+        "id": "no-randomize-call",
+        "pattern": re.compile(r"\brandomize\s*\("),
+        "message": "randomize() forbidden outside tests. Use DeterministicRng.seed_with(seed).",
+        "severity": "error",
+        "scope": "core/",
+        "exclude_paths": [
+            "tests/",
         ],
     },
 
