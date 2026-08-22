@@ -149,21 +149,19 @@ func snapshot() -> Dictionary:
 	return {"seed": seed_value, "draw_count": draw_count, "state": _rng.state}
 
 
-## Restore from a snapshot.
+## Restore from a snapshot. After restore the stream resumes exactly
+## at the captured mid-stream position — the next draw returns the
+## same value it would have returned at snapshot time.
 ##
-## The same draw sequence resumes after restore ONLY if the
-## underlying `RandomNumberGenerator.state` was correctly captured
-## and reapplied. In Godot 4, setting `state` on a PCG RNG does NOT
-## fully reconstruct the draw sequence (the state property stores a
-## derived value, not the full machine state). Therefore `restore`
-## here re-seeds via `seed_with`, which is the only reliable
-## deterministic handle. Callers that need exact continuation must
-## replay the exact same call sequence after restore.
+## Godot 4 `RandomNumberGenerator` contract:
+##   `seed` initializes the PRNG state
+##   `state` is the current generator position
+##   save/restore `state` restores the generator to that position
+##   when restoring both, initialize seed BEFORE setting state
 ##
-## Ordering: seed first, then apply captured state, then restore
-## draw_count. Setting `seed` re-initializes the PRNG; setting
-## `state` after that writes the captured machine state directly.
-## draw_count is restored last so it reflects the captured position.
+## Ordering: seed_with first (re-initializes), then assign state
+## (writes the captured PRNG machine state directly), then restore
+## draw_count so it reflects the captured position.
 func restore(snap: Dictionary) -> void:
 	var restored_seed: int = int(snap.get("seed", 0))
 	var restored_count: int = int(snap.get("draw_count", 0))

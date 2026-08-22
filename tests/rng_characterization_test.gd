@@ -57,28 +57,36 @@ func _seq(seed: int) -> Array:
 
 
 func _test_snapshot_restore_round_trip() -> void:
-	print("[rng-1] snapshot/restore round-trip")
+	print("[rng-1] snapshot/restore round-trip (mid-stream)")
 	RngScript.seed_run(7777)
+	# Burn a few draws to advance mid-stream.
+	RngScript.randf()
+	RngScript.randi_range(0, 100)
+	# Capture mid-stream snapshot.
 	var snap: Dictionary = RngScript.snapshot()
-	# Burn some draws.
-	var _d1: float = RngScript.randf()
-	var _d2: int = RngScript.randi_range(0, 100)
-	# Restore and replay.
+	# Record the 3 draws that SHOULD follow restore.
+	var expected_a: float = RngScript.randf()
+	var expected_b: int = RngScript.randi_range(0, 100)
+	var expected_c: float = RngScript.randf_range(-1.0, 1.0)
+	# Burn additional unrelated draws to perturb state.
+	for _i in 5:
+		RngScript.randf()
+	# Restore and verify exact mid-stream continuation.
 	RngScript.restore(snap)
-	var after: float = RngScript.randf()
-	# Expected first draw right after the snapshot.
-	var _d3: int = RngScript.randi_range(0, 100)
-	# We don't have a direct "expected" because Godot's RandomNumberGenerator
-	# state is opaque; but a round-trip is meaningful: draw, restore,
-	# draw again should equal the original draw.
-	RngScript.seed_run(7777)
-	var first_after_seed: float = RngScript.randf()
-	# Compare: after restore, the next draw should equal the first draw
-	# after re-seeding with the same seed (since both start from the
-	# same internal state).
-	_assert(after == first_after_seed,
-		"after-restore first draw matches fresh-seed first draw (got %f vs %f)"
-		% [after, first_after_seed])
+	var actual_a: float = RngScript.randf()
+	var actual_b: int = RngScript.randi_range(0, 100)
+	var actual_c: float = RngScript.randf_range(-1.0, 1.0)
+	_assert(actual_a == expected_a,
+		"mid-stream randf after restore matches (got %f vs %f)" % [actual_a, expected_a])
+	_assert(actual_b == expected_b,
+		"mid-stream randi_range after restore matches (got %d vs %d)" % [actual_b, expected_b])
+	_assert(actual_c == expected_c,
+		"mid-stream randf_range after restore matches (got %f vs %f)" % [actual_c, expected_c])
+	# Snapshot wire shape MUST remain legacy-compatible (no draw_count).
+	var post: Dictionary = RngScript.snapshot()
+	_assert(post.has("seed"), "snapshot has 'seed'")
+	_assert(post.has("state"), "snapshot has 'state'")
+	_assert(not post.has("draw_count"), "legacy snapshot does NOT leak draw_count")
 
 
 func _test_same_seed_same_sequence() -> void:

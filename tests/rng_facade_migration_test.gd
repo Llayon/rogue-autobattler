@@ -211,38 +211,40 @@ func _test_facade_snapshot_legacy_shape() -> void:
 
 
 func _test_facade_restore_replays_sequence() -> void:
-	print("[facade-7] facade_restore_replays_sequence")
-	# Restore re-seeds the stream to snap.seed. Callers that need
-	# exact continuation must replay the exact same call sequence
-	# after restore. The facade's restore contract is documented as
-	# "re-seed only" because Godot 4's RandomNumberGenerator.state
-	# does not support reliable continuation.
+	print("[facade-7] facade_restore_mid_stream_continuation")
+	# Facade Rng.restore must restore the captured PRNG machine state
+	# so the next draw returns exactly the value that originally
+	# followed the snapshot. This is true mid-stream continuation,
+	# not reseed + manual replay.
 	RngScript.seed_run(999)
 	# Burn some draws.
 	RngScript.randf()
 	RngScript.randi_range(0, 1000)
-	# Snapshot the seed.
+	# Capture mid-stream snapshot.
 	var snap: Dictionary = RngScript.snapshot()
-	# Restore re-seeds.
+	# Record the 3 draws that SHOULD follow restore.
+	var expected_a: float = RngScript.randf()
+	var expected_b: int = RngScript.randi_range(0, 100)
+	var expected_c: float = RngScript.randf_range(-1.0, 1.0)
+	# Burn additional unrelated draws.
+	for _i in 7:
+		RngScript.randf()
+	# Restore and assert exact mid-stream continuation.
 	RngScript.restore(snap)
-	_assert(RngScript.get_draw_count() == 0,
-		"draw_count == 0 after restore (got %d)" % RngScript.get_draw_count())
-	# Replay: same call sequence from a fresh seed.
-	var fresh := func() -> void:
-		RngScript.seed_run(999)
-		RngScript.randf()
-		RngScript.randi_range(0, 1000)
-	var replay := func() -> void:
-		RngScript.seed_run(999)
-		RngScript.randf()
-		RngScript.randi_range(0, 1000)
-	# Both should produce the same state. Draw 1 more and compare.
-	fresh.call()
-	var fresh_next: float = RngScript.randf()
-	replay.call()
-	var replay_next: float = RngScript.randf()
-	_assert(fresh_next == replay_next,
-		"post-restore replay matches fresh-seed replay (fresh=%f replay=%f)" % [fresh_next, replay_next])
+	var actual_a: float = RngScript.randf()
+	var actual_b: int = RngScript.randi_range(0, 100)
+	var actual_c: float = RngScript.randf_range(-1.0, 1.0)
+	_assert(actual_a == expected_a,
+		"facade mid-stream randf after restore matches (got %f vs %f)" % [actual_a, expected_a])
+	_assert(actual_b == expected_b,
+		"facade mid-stream randi_range after restore matches (got %d vs %d)" % [actual_b, expected_b])
+	_assert(actual_c == expected_c,
+		"facade mid-stream randf_range after restore matches (got %f vs %f)" % [actual_c, expected_c])
+	# Legacy snapshot wire shape: seed + state only, no draw_count leak.
+	var post: Dictionary = RngScript.snapshot()
+	_assert(post.has("seed"), "post snapshot has 'seed'")
+	_assert(post.has("state"), "post snapshot has 'state'")
+	_assert(not post.has("draw_count"), "post snapshot does NOT leak draw_count")
 
 
 func _test_facade_chance_uses_owned_stream() -> void:

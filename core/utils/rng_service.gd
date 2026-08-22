@@ -96,18 +96,19 @@ static func snapshot() -> Dictionary:
 
 
 ## Restore from a legacy snapshot. The facade accepts the legacy
-## shape (`{"seed","state"}`) and re-seeds the stream to `snap.seed`.
+## shape `{"seed","state"}`. The stream's PRNG is re-initialized
+## from `snap.seed`, then the captured `snap.state` is assigned so
+## the next draw resumes exactly at the captured mid-stream position.
 ##
-## IMPORTANT — Godot 4 `RandomNumberGenerator.state` quirk:
-## assigning to `state` does NOT produce the same draw sequence as
-## the original sequence. The only reliable replay handle in Godot 4
-## is `seed`. Restore therefore re-seeds the stream. Callers that
-## need exact continuation must replay the exact same call sequence
-## after restore. (This matches the standard save/restore contract
-## for deterministic RNGs and is the contract Phase 1 commits to.)
+## Legacy snapshot does not contain `draw_count`; the facade
+## observable stream counter restarts at 0 (this is observable only
+## through `get_draw_count()` debug helper, not the legacy wire).
+## Godot 4 contract: assign `seed` first (re-initializes the PRNG),
+## then assign `state` (writes the captured machine position).
 static func restore(snap: Dictionary) -> void:
 	var seed_val: int = int(snap.get("seed", 0))
-	_stream.seed_with(seed_val)
+	var state_val: Variant = snap.get("state", 0)
+	_stream.restore({"seed": seed_val, "state": state_val, "draw_count": 0})
 	current_seed = seed_val
 
 

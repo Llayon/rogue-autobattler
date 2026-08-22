@@ -188,25 +188,38 @@ func _test_pick_unique_determinism() -> void:
 
 
 func _test_snapshot_restore_round_trip() -> void:
-	print("[rng-11] snapshot_restore_round_trip")
+	print("[rng-11] snapshot_restore_round_trip_mid_stream")
 	var rng: DeterministicRngScript = DeterministicRngScript.new(123)
-	var snap: Dictionary = rng.snapshot()
-	# Burn draws.
-	for _i in 5:
+	# Burn N draws to advance mid-stream.
+	var burn_n: int = 3
+	for _i in burn_n:
 		rng.randi_range(0, 100)
-	# Restore.
+	# Capture mid-stream snapshot.
+	var snap: Dictionary = rng.snapshot()
+	var snap_dc: int = int(snap["draw_count"])
+	# Record the 3 draws that SHOULD follow restore.
+	var expected: Array = [rng.randf(), rng.randi_range(0, 100), rng.randf_range(-1.0, 1.0)]
+	# Burn additional unrelated draws.
+	for _i in 5:
+		rng.randf()
+	# Restore to the captured mid-stream position.
 	rng.restore(snap)
-	_assert(rng.draw_count == 0, "draw_count == 0 after restore (got %d)" % rng.draw_count)
-	_assert(rng.seed_value == 123, "seed_value == 123 after restore (got %d)" % rng.seed_value)
-	# The next draws after restore should equal the first draws of a
-	# fresh instance with the same seed.
-	var fresh: DeterministicRngScript = DeterministicRngScript.new(123)
-	var a: Array = []
-	var b: Array = []
-	for i in 5:
-		a.append(rng.randi_range(0, 100))
-		b.append(fresh.randi_range(0, 100))
-	_assert(a == b, "post-restore draws match fresh-seed draws (a=%s b=%s)" % [a, b])
+	_assert(rng.draw_count == snap_dc,
+		"draw_count after restore == snap.draw_count (got %d expected %d)" % [rng.draw_count, snap_dc])
+	_assert(rng.seed_value == 123, "seed_value after restore == 123 (got %d)" % rng.seed_value)
+	# The next 3 draws MUST exactly match the pre-burn expected draws.
+	var actual_a: float = rng.randf()
+	var actual_b: int = rng.randi_range(0, 100)
+	var actual_c: float = rng.randf_range(-1.0, 1.0)
+	_assert(actual_a == expected[0],
+		"mid-stream randf after restore matches original (expected=%f actual=%f)" % [expected[0], actual_a])
+	_assert(actual_b == expected[1],
+		"mid-stream randi_range after restore matches original (expected=%d actual=%d)" % [expected[1], actual_b])
+	_assert(actual_c == expected[2],
+		"mid-stream randf_range after restore matches original (expected=%f actual=%f)" % [expected[2], actual_c])
+	# draw_count advances normally after restore.
+	_assert(rng.draw_count == snap_dc + 3,
+		"draw_count after 3 post-restore draws == snap.draw_count + 3 (got %d expected %d)" % [rng.draw_count, snap_dc + 3])
 
 
 func _test_no_randomize_in_deterministic_layer() -> void:
