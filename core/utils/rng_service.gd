@@ -46,7 +46,7 @@ static func chance(chance: float) -> bool:
 static func pick(arr: Array) -> Variant:
 	if arr.is_empty():
 		return null
-	return arr[randi_range(0, arr.size() - 1)]
+	return arr[Rng.randi_range(0, arr.size() - 1)]
 
 
 ## Возвращает массив длиной count из уникальных элементов arr (без повторов).
