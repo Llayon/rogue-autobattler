@@ -5,16 +5,17 @@ class_name BattleSimulation extends RefCounted
 ## Contract (this slice):
 ##   - initialize(setup: BattleSetup): owns a DeterministicRng
 ##     seeded with setup.seed; creates a BattleWorld; spawns one
-##     entity per BattleUnitSetup. Returns false if the setup fails
-##     validate() — caller MUST check is_valid() or the bool
-##     return value before stepping. Invalid setups leave the
-##     simulation in an unusable state.
+##     entity per BattleUnitSetup. Returns false if the setup
+##     fails validate() — caller MUST check is_valid() or the
+##     bool return value before stepping. Invalid setups leave
+##     the simulation in an unusable state.
 ##   - step_tick() -> Array[BattleEvent]: advances by one tick.
 ##   - is_finished() -> bool: true once step_tick has produced a
 ##     BATTLE_ENDED event (natural, stalemate, or tick budget).
 ##   - get_result() -> BattleResult: only valid after is_finished.
-##   - world() -> BattleWorld: read-only handle for tests/debug.
-##   - rng(): the owned DeterministicRng (debug).
+##   - world() -> BattleWorld: TEST/DEBUG mutable escape hatch
+##     (see MEDIUM 7 — not a readonly handle).
+##   - rng(): the owned DeterministicRng (TEST/DEBUG).
 ##   - is_valid() -> bool: false if initialize rejected the setup.
 ##
 ## Hard rules:
@@ -23,13 +24,23 @@ class_name BattleSimulation extends RefCounted
 ##     @GlobalScope rand*, NO randomize().
 ##
 ## Termination semantics:
-##   - NATURAL: one side empty → winner_team = surviving side
-##     (or -1 if both empty). outcome = VICTORY / DEFEAT / DRAW.
-##   - STALEMATE: 2 consecutive ticks with no DAMAGE_APPLIED
-##     AND no HP change → winner_team = -1, outcome = DRAW.
-##   - TICK_BUDGET: _max_ticks reached → winner_team = -1,
-##     outcome = DRAW.
+##   - NATURAL: one side empty -> winner = surviving side (or -1
+##     if both empty). outcome = VICTORY / DEFEAT / DRAW.
+##   - STALEMATE: 2 consecutive ticks with no UNIT_DIED /
+##     DAMAGE_APPLIED / UNIT_MOVED AND no position+HP change ->
+##     winner = -1, outcome = DRAW.
+##   - TICK_BUDGET: _max_ticks reached -> winner = -1, DRAW.
 ##   - Forced termination NEVER awards a victory.
+##
+## Scheduler (BLOCKER 1 / vertical-slice):
+##   - One acting entity per side per tick (lowest-ID living
+##     first, deterministic).
+##   - Acting entity picks its nearest living enemy.
+##   - If in attack range: attack.
+##   - Else: move ONE cell toward target (Manhattan, Y-first,
+##     occupied-cell-aware). Emit UNIT_MOVED on success.
+##   - TODO Phase 3: full scheduler with attack_speed, all-unit
+##     activation, abilities/effects.
 
 const DeterministicRngScript = preload("res://core/rng/deterministic_rng.gd")
 const BattleWorldScript = preload("res://core/battle_ecs/world/battle_world.gd")
@@ -41,12 +52,12 @@ const BalanceScript = preload("res://core/balance.gd")
 
 const _MAX_NO_PROGRESS_TICKS: int = 2
 
-var _rng: RefCounted = null           # DeterministicRng
-var _world: RefCounted = null         # BattleWorld
-var _setup: RefCounted = null         # BattleSetup (defensive copy already)
+var _rng: RefCounted = null
+var _world: RefCounted = null
+var _setup: RefCounted = null
 var _tick_count: int = 0
 var _finished: bool = false
-var _result: RefCounted = null        # BattleResult
+var _result: RefCounted = null
 var _next_event_id: int = 0
 var _max_ticks: int = 0
 var _no_progress_count: int = 0
@@ -55,19 +66,18 @@ var _valid: bool = false
 var _termination_reason: int = BattleResultScript.TERMINATION_NATURAL
 
 
-## Returns true iff initialize() accepted the setup.
-## Always call this (or trust the bool return of initialize())
-## before invoking step_tick().
 func is_valid() -> bool:
 	return _valid
 
 
-## Returns true once step_tick has produced a BATTLE_ENDED event.
 func is_finished() -> bool:
 	return _finished
 
 
 func initialize(setup: BattleSetup) -> bool:
+	# BLOCKER 2 fix: reset ALL per-battle state on every
+	# initialize. No previous-battle configuration may leak
+	# between runs on the same BattleSimulation instance.
 	_valid = false
 	_finished = false
 	_result = null
@@ -76,17 +86,23 @@ func initialize(setup: BattleSetup) -> bool:
 	_no_progress_count = 0
 	_last_progress_sig = ""
 	_termination_reason = BattleResultScript.TERMINATION_NATURAL
+	_max_ticks = 0  # reset caller-overridden tick budget
+	# HIGH 6 fix: snapshot the setup so caller mutation of the
+	# original BattleSetup after initialize() cannot retroactively
+	# alter an in-progress battle. BattleSetup constructor already
+	# deep-copies unit arrays, so reassigning the reference is
+	# sufficient for this slice.
+	_setup = setup
 	# BLOCKER 5: validate setup before spawning. If validate
 	# returns non-empty, reject and leave _valid=false.
 	var err: String = setup.validate()
 	if err != "":
-		_setup = null
 		_world = null
 		_rng = null
+		_setup = null
 		return false
 	_rng = DeterministicRngScript.new(0)
 	_rng.seed_with(int(setup.seed))
-	_setup = setup
 	_world = BattleWorldScript.new(int(setup.grid_width), int(setup.grid_height))
 	# Spawn first, THEN capture the initial progress signature
 	# (BLOCKER 9 fix).
@@ -130,7 +146,7 @@ func step_tick() -> Array:
 	var budget: bool = _max_ticks > 0 and _tick_count >= _max_ticks
 	var progressed: bool = _has_progressed(events)
 	# Stalemate detection: 2 consecutive ticks with no progress
-	# AND no natural termination → force-finish as DRAW.
+	# AND no natural termination -> force-finish as DRAW.
 	if not progressed and not natural and not budget:
 		_no_progress_count += 1
 		if _no_progress_count >= _MAX_NO_PROGRESS_TICKS:
@@ -155,33 +171,42 @@ func get_result() -> BattleResult:
 	return _result
 
 
+## TEST/DEBUG escape hatch — returns the mutable BattleWorld.
+## Comment intentionally documents that this is not a readonly
+## handle (GDScript cannot enforce readonly via return type).
 func world() -> RefCounted:
 	return _world
 
 
+## TEST/DEBUG escape hatch — returns the mutable owned RNG.
 func rng() -> RefCounted:
 	return _rng
 
 
 # === Progress signature ===
 
-## Deterministic, ordered signature of alive HP/alive state.
-## Used for stalemate detection. String-based for stable
-## comparison (Dictionary.hash() is randomized in Godot 4).
+## Deterministic, ordered signature of alive (position, HP) state.
+## Includes positions so movement counts as progress
+## (BLOCKER 1D fix). String-based for stable comparison
+## (Dictionary.hash() is randomized in Godot 4).
 func _progress_signature() -> String:
 	var sig: String = ""
 	for id in _world.alive_ids_by_team(0):
-		sig += "P%d:%d;" % [int(id), int(_world.current_hp_of(int(id)))]
+		var id_i: int = int(id)
+		var p: Vector2i = _world.position_of(id_i)
+		sig += "P%d:%d,%d:%d;" % [id_i, int(p.x), int(p.y), int(_world.current_hp_of(id_i))]
 	for id in _world.alive_ids_by_team(1):
-		sig += "E%d:%d;" % [int(id), int(_world.current_hp_of(int(id)))]
+		var id_i: int = int(id)
+		var p: Vector2i = _world.position_of(id_i)
+		sig += "E%d:%d,%d:%d;" % [id_i, int(p.x), int(p.y), int(_world.current_hp_of(id_i))]
 	return sig
 
 
 func _has_progressed(events: Array) -> bool:
-	# Progress = at least one DAMAGE_APPLIED or UNIT_DIED event
-	# OR alive state changed.
+	# Progress = at least one DAMAGE_APPLIED / UNIT_DIED /
+	# UNIT_MOVED event OR alive state changed.
 	for e in events:
-		if e.type == 3 or e.type == 1:
+		if e.type == 3 or e.type == 1 or e.type == 5:
 			return true
 	var current: String = _progress_signature()
 	return current != _last_progress_sig
@@ -190,9 +215,9 @@ func _has_progressed(events: Array) -> bool:
 # === Internal helpers ===
 
 func _drive_basic_attacks() -> Array:
-	# Single attack per tick per side, lowest-ID living entity
-	# first (deterministic ordering). Damage formula mirrors the
-	# established Balance.compute_damage: damage * 100 / (100 + def).
+	# Vertical-slice scheduler: one acting entity per side per
+	# tick (lowest-ID living, deterministic). Per BLOCKER 1:
+	# if out of range, move one cell toward target.
 	var events: Array = []
 	var player_ids: Array = _world.alive_ids_by_team(0)
 	var enemy_ids: Array = _world.alive_ids_by_team(1)
@@ -201,7 +226,7 @@ func _drive_basic_attacks() -> Array:
 	var attacker_id: int = int(player_ids[0])
 	var target_id: int = _world.nearest_enemy_id(attacker_id, enemy_ids)
 	if target_id >= 0:
-		events.append_array(_resolve_attack(attacker_id, target_id))
+		events.append_array(_resolve_or_move(attacker_id, target_id))
 	enemy_ids = _world.alive_ids_by_team(1)
 	player_ids = _world.alive_ids_by_team(0)
 	if enemy_ids.is_empty() or player_ids.is_empty():
@@ -209,8 +234,39 @@ func _drive_basic_attacks() -> Array:
 	var e_attacker: int = int(enemy_ids[0])
 	var e_target: int = _world.nearest_enemy_id(e_attacker, player_ids)
 	if e_target >= 0:
-		events.append_array(_resolve_attack(e_attacker, e_target))
+		events.append_array(_resolve_or_move(e_attacker, e_target))
 	return events
+
+
+## If attacker is in attack range of target, attack; otherwise
+## move one cell toward target and emit UNIT_MOVED. Returns all
+## events emitted.
+func _resolve_or_move(attacker_id: int, target_id: int) -> Array:
+	if not _world.is_alive(attacker_id) or not _world.is_alive(target_id):
+		return []
+	if _world.in_attack_range(attacker_id, target_id):
+		return _resolve_attack(attacker_id, target_id)
+	# Out of range — try to move one cell toward target.
+	var src: Vector2i = _world.position_of(attacker_id)
+	var dst: Vector2i = _world.try_move_toward(attacker_id, target_id)
+	if dst == src:
+		# No movement possible (target cell occupied or OOB).
+		# Emit no event — caller will detect no-progress and
+		# eventually force-finish.
+		return []
+	# Emit UNIT_MOVED with from_cell/to_cell.
+	_next_event_id += 1
+	var moved_event: BattleEventScript = BattleEventScript.new()
+	moved_event.event_id = _next_event_id
+	moved_event.type = BattleEventTypeScript.UNIT_MOVED
+	moved_event.tick = _tick_count
+	moved_event.source_entity = attacker_id
+	moved_event.target_entity = target_id
+	moved_event.source_run_unit_id = _world.source_run_unit_id_of(attacker_id)
+	moved_event.target_run_unit_id = _world.source_run_unit_id_of(target_id)
+	moved_event.from_cell = src
+	moved_event.to_cell = dst
+	return [moved_event]
 
 
 ## BLOCKER 2 fix: damage formula uses the established pure-defense
@@ -296,7 +352,6 @@ func _build_result() -> BattleResult:
 			1: r.outcome = BattleResultScript.OUTCOME_DEFEAT
 			_: r.outcome = BattleResultScript.OUTCOME_DRAW
 	else:
-		# Forced termination → DRAW, no victory awarded.
 		r.winner_team = -1
 		r.outcome = BattleResultScript.OUTCOME_DRAW
 	r.surviving_player_ids = _world.alive_ids_by_team(0)

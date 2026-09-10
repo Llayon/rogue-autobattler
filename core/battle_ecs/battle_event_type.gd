@@ -11,3 +11,4 @@ const UNIT_DIED: int = 1
 const ATTACK_RESOLVED: int = 2
 const DAMAGE_APPLIED: int = 3
 const BATTLE_ENDED: int = 4
+const UNIT_MOVED: int = 5

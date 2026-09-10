@@ -19,6 +19,16 @@ class_name BattleWorld extends RefCounted
 ## Component cleanup:
 ##   - On remove_entity(id), all component dictionaries drop the
 ##     id key (component cleanup).
+##
+## Movement (Phase 2 / BLOCKER 1):
+##   - `try_move_toward(entity, target)` moves one Manhattan
+##     cell toward the target if the candidate cell is in
+##     bounds and unoccupied. Returns the new cell on success
+##     or the source cell on failure (caller decides whether to
+##     emit a UNIT_MOVED event).
+##   - Axis priority: Y first, then X (deterministic tie-break).
+##   - The world owns the position mutation; the simulation
+##     schedules movement but never teleports.
 
 const BattleUnitSetupScript = preload("res://core/battle_ecs/battle_unit_setup.gd")
 
@@ -87,11 +97,8 @@ func _spawn_one(u: BattleUnitSetup) -> int:
 	_attack_range[id] = maxi(1, int(u.attack_range))
 	_definition_ids[id] = u.definition_id
 	_source_run_unit_ids[id] = u.source_run_unit_id
-	# BLOCKER 3 fix: an entity spawned with starting_hp <= 0 is
-	# dead at t=0. Mark it as non-alive so it never attacks and
-	# never acquires a target. validate() rejects starting_hp < 0,
-	# so we only need to guard starting_hp == 0 here (which is
-	# allowed at the validator boundary).
+	# starting_hp <= 0 spawns as not-alive so it never attacks
+	# and never acquires a target.
 	_alive[id] = int(u.starting_hp) > 0
 	if int(u.team) == 0:
 		_player_ids_ordered.append(id)
@@ -191,6 +198,65 @@ func alive_ids_by_team(team: int) -> Array:
 		if is_alive(int(id)):
 			out.append(int(id))
 	return out
+
+
+## True iff `cell` is occupied by any alive entity.
+func is_cell_occupied(cell: Vector2i) -> bool:
+	for id in _positions.keys():
+		var p: Vector2i = _positions[id]
+		if p.x == cell.x and p.y == cell.y and is_alive(int(id)):
+			return true
+	return false
+
+
+## Computes the next-step cell toward `target_cell` from
+## `attacker_cell` using Manhattan axis/tie ordering.
+## Axis priority: Y first (matches legacy "forward" = row
+## direction), then X. When |dy| >= |dx|, step along Y.
+## Deterministic — same input -> same output.
+static func step_cell_toward(attacker_cell: Vector2i, target_cell: Vector2i) -> Vector2i:
+	var dx: int = int(target_cell.x) - int(attacker_cell.x)
+	var dy: int = int(target_cell.y) - int(attacker_cell.y)
+	if dx == 0 and dy == 0:
+		return Vector2i(attacker_cell.x, attacker_cell.y)
+	if absi(dy) >= absi(dx):
+		if dy > 0:
+			return Vector2i(attacker_cell.x, attacker_cell.y + 1)
+		else:
+			return Vector2i(attacker_cell.x, attacker_cell.y - 1)
+	else:
+		if dx > 0:
+			return Vector2i(attacker_cell.x + 1, attacker_cell.y)
+		else:
+			return Vector2i(attacker_cell.x - 1, attacker_cell.y)
+
+
+## Try to move `entity_id` ONE cell toward `target_id`.
+## Returns the new cell on success, or the current cell on
+## failure (out of bounds, target cell occupied by another
+## alive entity, or entity not alive).
+## Deterministic — same world state -> same result.
+func try_move_toward(entity_id: int, target_id: int) -> Vector2i:
+	if not is_alive(entity_id) or not is_alive(target_id):
+		return position_of(entity_id)
+	var src: Vector2i = position_of(entity_id)
+	var dst: Vector2i = position_of(target_id)
+	var candidate: Vector2i = step_cell_toward(src, dst)
+	# Bounds check.
+	if candidate.x < 0 or candidate.x >= grid_width or candidate.y < 0 or candidate.y >= grid_height:
+		return src
+	# Occupied check — another alive entity at the candidate cell?
+	for id in _positions.keys():
+		if int(id) == entity_id:
+			continue
+		if not is_alive(int(id)):
+			continue
+		var p: Vector2i = _positions[id]
+		if p.x == candidate.x and p.y == candidate.y:
+			return src
+	# Move.
+	_positions[entity_id] = candidate
+	return candidate
 
 
 ## True iff one side has zero alive entities (the battle should
