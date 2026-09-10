@@ -70,11 +70,13 @@ func _run_battle(p1: Dictionary, e1: Dictionary, p_seed: int) -> Dictionary:
 
 func _test_attack_applies_expected_damage() -> void:
 	print("[k-1] attack_applies_expected_damage")
+	# BLOCKER 2 fix: damage uses Balance.compute_damage formula:
+	# damage = max(1, round(base * 100 / (100 + defense)))
+	# attack=20, defense=0 -> 20*100/100 = 20.
 	var d: Dictionary = _run_battle(
 		{"attack": 20, "defense": 0, "max_hp": 80, "range": 5, "cell": Vector2i(0, 1)},
 		{"attack": 0, "defense": 0, "max_hp": 30, "range": 5, "cell": Vector2i(0, 0)},
 		42)
-	# damage = max(1, 20 - 0/2) = 20.
 	_assert(d.ticks <= 10, "battle terminates in <= 10 ticks (got %d)" % d.ticks)
 	var first_dmg: BattleEventScript = null
 	for e in d.events:
@@ -87,18 +89,19 @@ func _test_attack_applies_expected_damage() -> void:
 
 func _test_defense_changes_damage() -> void:
 	print("[k-2] defense_changes_damage")
+	# BLOCKER 2 fix: damage = max(1, round(base * 100 / (100 + defense))).
+	# attack=20, defense=10 -> round(20*100/110) = 18.
 	var d: Dictionary = _run_battle(
 		{"attack": 20, "defense": 0, "max_hp": 80, "range": 5, "cell": Vector2i(0, 1)},
 		{"attack": 0, "defense": 10, "max_hp": 30, "range": 5, "cell": Vector2i(0, 0)},
 		42)
-	# damage = max(1, 20 - 10/2) = max(1, 15) = 15.
 	var first_dmg: BattleEventScript = null
 	for e in d.events:
 		if e.type == BattleEventTypeScript.DAMAGE_APPLIED:
 			first_dmg = e
 			break
-	_assert(first_dmg != null and first_dmg.amount == 15,
-		"damage reduced by defense (got %d expected 15)" % (first_dmg.amount if first_dmg != null else -1))
+	_assert(first_dmg != null and first_dmg.amount == 18,
+		"damage reduced by defense (got %d expected 18)" % (first_dmg.amount if first_dmg != null else -1))
 
 
 func _test_unit_dies_correctly() -> void:
