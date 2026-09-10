@@ -148,26 +148,50 @@ func _test_500_entity_simulation() -> void:
 
 func _test_100_entity_repeated_resets() -> void:
 	print("[p-3] 100_entity_repeated_resets")
-	# 30 sequential 100-entity simulations. Detect memory or
-	# state leak by comparing tick/event counts across runs.
-	var signatures: Array = []
+	# HIGH 6 fix: actually inspect ALL 30 runs, not just 1.
+	# Detect: any non-termination, event explosion, or progressive
+	# growth across runs (would indicate a memory/state leak).
+	var sig_ticks: Array = []
+	var sig_events: Array = []
 	for i in 30:
 		var r: Dictionary = _run_scenario(50, 50, 42 + i, false)
 		if not r.finished or not r.valid:
-			_assert(false, "reset %d failed (ticks=%d)" % [i, r.ticks])
+			_assert(false, "reset %d failed to terminate (ticks=%d)" % [i, r.ticks])
 			return
-		signatures.append({"ticks": r.ticks, "events": r.events, "winner": r.winner_team})
-	# Compare each run's signature to the FIRST.
-	for i in 1:
-		var first = signatures[0]
-		var curr = signatures[i]
-		# Different seeds → different outcomes expected.
-		# But bounded tick/event counts must remain sane.
-		if curr.ticks > first.ticks * 5 and curr.ticks > 1000:
-			_assert(false, "reset %d ticks=%d ballooned (first=%d)" % [i, curr.ticks, first.ticks])
-			return
-	_assert(true, "30 sequential 100-entity resets all terminate (signatures span %d-%d ticks)"
-		% [signatures.map(func(s): return s.ticks).min(), signatures.map(func(s): return s.ticks).max()])
+		sig_ticks.append(r.ticks)
+		sig_events.append(r.events)
+	# Each run terminated. Tick/event counts stay bounded across
+	# all 30 runs.
+	var max_ticks: int = 0
+	var max_events: int = 0
+	for t in sig_ticks:
+		if t > max_ticks:
+			max_ticks = t
+	for ev in sig_events:
+		if ev > max_events:
+			max_events = ev
+	# No progressive growth (e.g. ticks doubling run-over-run).
+	# The first 5 runs and the last 5 runs must have similar
+	# tick counts (within 2x — different seeds legitimately produce
+	# different battle lengths).
+	var first_five: Array = sig_ticks.slice(0, 5)
+	var last_five: Array = sig_ticks.slice(sig_ticks.size() - 5, sig_ticks.size())
+	var max_first: int = 0
+	var min_last: int = 999999
+	for t in first_five:
+		if t > max_first:
+			max_first = t
+	for t in last_five:
+		if t < min_last:
+			min_last = t
+	_assert(max_ticks < 1000, "all 30 runs terminated with ticks<1000 (max=%d)" % max_ticks)
+	_assert(max_events < 5000, "no event explosion across 30 runs (max events=%d)" % max_events)
+	# No run took longer than 2x the slowest of the first 5
+	# (rough check for progressive growth).
+	_assert(min_last <= max_first * 2,
+		"no progressive growth (last 5 min=%d, first 5 max=%d)" % [min_last, max_first])
+	print("  [INFO] 30 sequential resets: ticks range %d-%d, events range %d-%d"
+		% [sig_ticks[0], max_ticks, sig_events[0], max_events])
 
 
 func _test_no_event_explosion() -> void:

@@ -23,7 +23,7 @@ func _initialize() -> void:
 	await _test_repeated_reset_no_leak()
 	await _test_deterministic_replay_same_seed()
 	await _test_tie_ordering_deterministic()
-	await _test_no_run_domain_mutation()
+	# a-12 removed (duplicate of b-9 in builder test); see _test_no_run_domain_mutation().
 	await _test_event_references_meaningful_after_death()
 	await _test_bounded_termination_extreme()
 	await _test_no_accidental_global_state()
@@ -308,13 +308,11 @@ func _test_tie_ordering_deterministic() -> void:
 
 
 func _test_no_run_domain_mutation() -> void:
-	# Already covered in Gauntlet 3 tests, but add an explicit
-	# integration test that runs the BattleSetupBuilder through
-	# a real simulation.
-	print("[a-12] no_run_domain_mutation_via_adapter")
-	# Use the builder to construct a setup, then verify state unchanged.
-	# This is already covered by b-9; just emit a smoke assertion here.
-	_assert(true, "covered by b-9 in builder tests")
+	# Adversarial duplicate of battle_setup_builder_test.b-9 —
+	# intentionally removed; covered by the builder test.
+	# (Originally emitted a no-op _assert(true, ...) placeholder;
+	# per CRITIC TEST QUALITY, removed.)
+	pass
 
 
 func _test_event_references_meaningful_after_death() -> void:
