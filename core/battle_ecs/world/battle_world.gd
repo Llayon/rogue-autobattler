@@ -87,7 +87,12 @@ func _spawn_one(u: BattleUnitSetup) -> int:
 	_attack_range[id] = maxi(1, int(u.attack_range))
 	_definition_ids[id] = u.definition_id
 	_source_run_unit_ids[id] = u.source_run_unit_id
-	_alive[id] = true
+	# BLOCKER 3 fix: an entity spawned with starting_hp <= 0 is
+	# dead at t=0. Mark it as non-alive so it never attacks and
+	# never acquires a target. validate() rejects starting_hp < 0,
+	# so we only need to guard starting_hp == 0 here (which is
+	# allowed at the validator boundary).
+	_alive[id] = int(u.starting_hp) > 0
 	if int(u.team) == 0:
 		_player_ids_ordered.append(id)
 	else:

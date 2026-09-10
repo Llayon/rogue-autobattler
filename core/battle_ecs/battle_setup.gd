@@ -1,5 +1,5 @@
 class_name BattleSetup extends RefCounted
-## Phase 2 / BattleSimulation — IMMUTABLE battle input.
+## Phase 2 / BattleSimulation — IMMUTABLE-SEMANTICS battle input.
 ##
 ## Holds:
 ##   - seed: deterministic seed used to construct the simulation's
@@ -7,6 +7,13 @@ class_name BattleSetup extends RefCounted
 ##   - player_units: Array[BattleUnitSetup] (team = 0).
 ##   - enemy_units: Array[BattleUnitSetup] (team = 1).
 ##   - grid_width / grid_height: integer grid bounds.
+##
+## Immutability model: BattleSetup stores **defensive copies** of
+## the caller-provided arrays and unit setups. After construction,
+## later mutation of the caller's arrays / unit fields does NOT
+## change this BattleSetup. BattleSimulation.initialize() takes
+## ANOTHER snapshot of these defensive copies, so an in-progress
+## battle cannot be retroactively mutated by the caller.
 ##
 ## No Node dependencies. No global RNG. No presentation references.
 ##
@@ -16,8 +23,8 @@ class_name BattleSetup extends RefCounted
 const BattleUnitSetupScript = preload("res://core/battle_ecs/battle_unit_setup.gd")
 
 var seed: int = 0
-var player_units: Array = []  # Array[BattleUnitSetup]
-var enemy_units: Array = []   # Array[BattleUnitSetup]
+var player_units: Array = []  # Array[BattleUnitSetup] (defensive copies)
+var enemy_units: Array = []   # Array[BattleUnitSetup] (defensive copies)
 var grid_width: int = 7
 var grid_height: int = 4
 
@@ -29,17 +36,38 @@ func _init(
 		p_grid_width: int = 7,
 		p_grid_height: int = 4) -> void:
 	seed = p_seed
-	player_units = p_player_units
-	enemy_units = p_enemy_units
+	player_units = _clone_unit_array(p_player_units)
+	enemy_units = _clone_unit_array(p_enemy_units)
 	grid_width = maxi(1, p_grid_width)
 	grid_height = maxi(1, p_grid_height)
 
 
+static func _clone_unit_array(src: Array) -> Array:
+	var out: Array = []
+	for u in src:
+		if u == null:
+			out.append(null)
+			continue
+		var copy: BattleUnitSetupScript = BattleUnitSetupScript.new(
+			u.source_run_unit_id,
+			u.definition_id,
+			u.team,
+			Vector2i(int(u.cell.x), int(u.cell.y)),
+			int(u.starting_hp),
+			int(u.max_hp),
+			int(u.attack_base),
+			int(u.defense_base),
+			int(u.attack_range))
+		out.append(copy)
+	return out
+
+
 ## True iff setup is well-formed enough to attempt simulation:
-##   - both sides non-empty (otherwise no battle)
+##   - both sides non-empty
 ##   - all cells within grid bounds
-##   - all starting_hp within [0, max_hp]
-##   - no duplicate (cell, team) deployment
+##   - all max_hp > 0
+##   - all starting_hp in [0, max_hp]
+##   - GLOBAL cell occupancy: no two units (any team) share a cell
 ##
 ## Returns a human-readable error string on the first defect, or
 ## "" when valid.
@@ -69,8 +97,10 @@ func _validate_one(u: BattleUnitSetup, occupied: Dictionary) -> String:
 		return "unit %s starting_hp %d out of [0,%d]" % [String(u.definition_id), u.starting_hp, u.max_hp]
 	if u.cell.x < 0 or u.cell.x >= grid_width or u.cell.y < 0 or u.cell.y >= grid_height:
 		return "unit %s cell %s out of bounds %dx%d" % [String(u.definition_id), str(u.cell), grid_width, grid_height]
-	var key: String = "%d:%s" % [u.team, str(u.cell)]
+	# Global cell occupancy — no two units share a cell, regardless
+	# of team.
+	var key: String = str(u.cell)
 	if occupied.has(key):
-		return "duplicate deployment at team=%d cell=%s" % [u.team, str(u.cell)]
-	occupied[key] = true
+		return "cell %s already occupied by team=%d (cannot share cells across teams)" % [str(u.cell), int(occupied[key])]
+	occupied[key] = int(u.team)
 	return ""

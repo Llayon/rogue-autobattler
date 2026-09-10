@@ -96,14 +96,25 @@ func _test_battle_setup_validate_oob_cell() -> void:
 
 func _test_battle_setup_validate_duplicate_cell() -> void:
 	print("[c-5] battle_setup_validate_duplicate_cell")
-	var s: BattleSetupScript = BattleSetupScript.new(42, [
+	# BLOCKER 4 fix: cell occupancy is GLOBAL — same cell cannot
+	# be occupied by two players, two enemies, or one of each.
+	# First, test two players same cell.
+	var s1: BattleSetupScript = BattleSetupScript.new(42, [
 		BattleUnitSetupScript.new("p1", &"warrior", 0, Vector2i(0, 3), 30, 30, 5, 2, 1),
 		BattleUnitSetupScript.new("p2", &"warrior", 0, Vector2i(0, 3), 30, 30, 5, 2, 1)
 	], [
 		BattleUnitSetupScript.new("", &"orc", 1, Vector2i(0, 0), 30, 30, 5, 2, 1)
 	])
-	var msg: String = s.validate()
-	_assert(msg.find("duplicate deployment") >= 0, "rejects duplicate cell (got '%s')" % msg)
+	var msg1: String = s1.validate()
+	_assert(msg1.find("already occupied") >= 0, "rejects duplicate player cell (got '%s')" % msg1)
+	# Now test player + enemy same cell.
+	var s2: BattleSetupScript = BattleSetupScript.new(42, [
+		BattleUnitSetupScript.new("p1", &"warrior", 0, Vector2i(0, 3), 30, 30, 5, 2, 1)
+	], [
+		BattleUnitSetupScript.new("", &"orc", 1, Vector2i(0, 3), 30, 30, 5, 2, 1)
+	])
+	var msg2: String = s2.validate()
+	_assert(msg2.find("already occupied") >= 0, "rejects cross-team cell (got '%s')" % msg2)
 
 
 func _test_battle_setup_validate_bad_hp() -> void:
