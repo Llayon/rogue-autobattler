@@ -68,6 +68,13 @@ static func _clone_unit_array(src: Array) -> Array:
 ##   - all max_hp > 0
 ##   - all starting_hp in [0, max_hp]
 ##   - GLOBAL cell occupancy: no two units (any team) share a cell
+##   - player_units[i].team == 0 (BLOCKER 3)
+##   - enemy_units[i].team == 1 (BLOCKER 3)
+##   - no team value outside {0, 1}
+##   - every NON-EMPTY source_run_unit_id is unique across the
+##     entire setup (HIGH 4 — duplicate stable identity rejected).
+##     Empty source_run_unit_id (summons/enemies without a Run
+##     source) is allowed multiple times.
 ##
 ## Returns a human-readable error string on the first defect, or
 ## "" when valid.
@@ -77,30 +84,39 @@ func validate() -> String:
 	if enemy_units.is_empty():
 		return "no enemy units"
 	var occupied: Dictionary = {}
+	var seen_source_ids: Dictionary = {}  # String -> team (int)
 	for u in player_units:
-		var msg: String = _validate_one(u, occupied)
+		var msg: String = _validate_one(u, 0, occupied, seen_source_ids)
 		if msg != "":
 			return msg
 	for u in enemy_units:
-		var msg: String = _validate_one(u, occupied)
+		var msg: String = _validate_one(u, 1, occupied, seen_source_ids)
 		if msg != "":
 			return msg
 	return ""
 
 
-func _validate_one(u: BattleUnitSetup, occupied: Dictionary) -> String:
+func _validate_one(u: BattleUnitSetup, expected_team: int, occupied: Dictionary, seen_source_ids: Dictionary) -> String:
 	if u == null:
 		return "null unit setup"
+	if u.team != expected_team:
+		return "unit %s team=%d (expected %d in this array)" % [String(u.definition_id), int(u.team), expected_team]
 	if u.max_hp <= 0:
 		return "unit %s has max_hp <= 0" % String(u.definition_id)
 	if u.starting_hp < 0 or u.starting_hp > u.max_hp:
 		return "unit %s starting_hp %d out of [0,%d]" % [String(u.definition_id), u.starting_hp, u.max_hp]
 	if u.cell.x < 0 or u.cell.x >= grid_width or u.cell.y < 0 or u.cell.y >= grid_height:
 		return "unit %s cell %s out of bounds %dx%d" % [String(u.definition_id), str(u.cell), grid_width, grid_height]
-	# Global cell occupancy — no two units share a cell, regardless
-	# of team.
+	# Global cell occupancy — no two units share a cell,
+	# regardless of team.
 	var key: String = str(u.cell)
 	if occupied.has(key):
 		return "cell %s already occupied by team=%d (cannot share cells across teams)" % [str(u.cell), int(occupied[key])]
 	occupied[key] = int(u.team)
+	# HIGH 4: duplicate non-empty source_run_unit_id rejected.
+	# Stable RunUnit.instance_id must be unique within a battle.
+	if u.source_run_unit_id != "":
+		if seen_source_ids.has(u.source_run_unit_id):
+			return "duplicate source_run_unit_id '%s' (must be unique across setup)" % u.source_run_unit_id
+		seen_source_ids[u.source_run_unit_id] = int(u.team)
 	return ""
