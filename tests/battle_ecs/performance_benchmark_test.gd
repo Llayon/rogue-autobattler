@@ -18,9 +18,9 @@ var _failed: int = 0
 
 
 func _initialize() -> void:
-	# Warm-up — first Godot runs are slower due to first-time
-	# script parse. Skip the warm-up result.
-	_run_scenario(20, 0, 5, true)
+	# Warm-up with a small VALID battle (HIGH 5 fix: previous warmup
+	# used (20, 0, ...) which is invalid).
+	_run_scenario(2, 2, 0, true)
 
 	await _test_100_entity_simulation()
 	await _test_500_entity_simulation()
@@ -148,9 +148,9 @@ func _test_500_entity_simulation() -> void:
 
 func _test_100_entity_repeated_resets() -> void:
 	print("[p-3] 100_entity_repeated_resets")
-	# HIGH 6 fix: actually inspect ALL 30 runs, not just 1.
-	# Detect: any non-termination, event explosion, or progressive
-	# growth across runs (would indicate a memory/state leak).
+	# HIGH 5 fix: previous gate was `min(last_five) <= max(first_five) * 2`
+	# which missed worst-case degradation. New gate: max(last_five)
+	# MUST NOT exceed max(first_five) by more than 3x.
 	var sig_ticks: Array = []
 	var sig_events: Array = []
 	for i in 30:
@@ -160,8 +160,6 @@ func _test_100_entity_repeated_resets() -> void:
 			return
 		sig_ticks.append(r.ticks)
 		sig_events.append(r.events)
-	# Each run terminated. Tick/event counts stay bounded across
-	# all 30 runs.
 	var max_ticks: int = 0
 	var max_events: int = 0
 	for t in sig_ticks:
@@ -170,28 +168,25 @@ func _test_100_entity_repeated_resets() -> void:
 	for ev in sig_events:
 		if ev > max_events:
 			max_events = ev
-	# No progressive growth (e.g. ticks doubling run-over-run).
-	# The first 5 runs and the last 5 runs must have similar
-	# tick counts (within 2x — different seeds legitimately produce
-	# different battle lengths).
 	var first_five: Array = sig_ticks.slice(0, 5)
 	var last_five: Array = sig_ticks.slice(sig_ticks.size() - 5, sig_ticks.size())
 	var max_first: int = 0
-	var min_last: int = 999999
+	var max_last: int = 0
 	for t in first_five:
 		if t > max_first:
 			max_first = t
 	for t in last_five:
-		if t < min_last:
-			min_last = t
+		if t > max_last:
+			max_last = t
 	_assert(max_ticks < 1000, "all 30 runs terminated with ticks<1000 (max=%d)" % max_ticks)
 	_assert(max_events < 5000, "no event explosion across 30 runs (max events=%d)" % max_events)
-	# No run took longer than 2x the slowest of the first 5
-	# (rough check for progressive growth).
-	_assert(min_last <= max_first * 2,
-		"no progressive growth (last 5 min=%d, first 5 max=%d)" % [min_last, max_first])
-	print("  [INFO] 30 sequential resets: ticks range %d-%d, events range %d-%d"
-		% [sig_ticks[0], max_ticks, sig_events[0], max_events])
+	# HIGH 5 fix: max-based growth gate. If max_last > max_first * 3
+	# the last-5 worst-case is significantly degraded vs first-5.
+	var max_threshold: int = maxi(50, max_first * 3)
+	_assert(max_last <= max_threshold,
+		"last-5 max (%d) <= first-5 max * 3 (threshold=%d)" % [max_last, max_threshold])
+	print("  [INFO] 30 sequential resets: ticks range %d-%d, events range %d-%d, last-5 max=%d vs first-5 max=%d (threshold=%d)"
+		% [sig_ticks[0], max_ticks, sig_events[0], max_events, max_last, max_first, max_threshold])
 
 
 func _test_no_event_explosion() -> void:

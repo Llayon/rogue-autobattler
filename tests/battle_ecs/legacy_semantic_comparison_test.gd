@@ -37,7 +37,8 @@ var _failed: int = 0
 func _initialize() -> void:
 	await _test_legacy_1v1_damage_value()
 	await _test_legacy_defense_damage_value()
-	await _test_legacy_high_defense_damage_floored_at_1()
+	await _test_legacy_extreme_defense_damage_parity()
+	await _test_legacy_extreme_defense_floor_at_1_parity()
 	await _test_legacy_death_determines_winner()
 	await _test_legacy_same_definition_distinct_entities()
 	await _test_legacy_seeded_variance_dropped_normatively()
@@ -146,18 +147,39 @@ func _test_legacy_defense_damage_value() -> void:
 		"new sim damage == Balance formula at defense=10 (new=%d formula=%d)" % [new_dmg, formula_dmg])
 
 
-# --- L-3: PARITY REQUIRED (damage floored at 1) ---
-func _test_legacy_high_defense_damage_floored_at_1() -> void:
-	print("[L-3] legacy_high_defense_damage_floored_at_1 [PARITY REQUIRED]")
+# --- L-3: PARITY REQUIRED (damage formula at extreme defense) ---
+func _test_legacy_extreme_defense_damage_parity() -> void:
+	print("[L-3] legacy_extreme_defense_damage_parity [PARITY REQUIRED]")
+	# Renamed from "very high defense damage floored at 1" — the
+	# prior label was wrong. With defense=100, base=20:
+	# damage = 20*100/200 = 10 (NOT 1). Floor at 1 only kicks in
+	# when defense is so extreme the formula rounds to 0
+	# (e.g. defense=10000).
 	var attacker: Resource = _make_unit_def(&"attacker", 0, 80, 20, 0)
 	var target: Resource = _make_unit_def(&"target", 1, 80, 0, 100)
 	var legacy_dmg: int = _legacy_first_attack_dealt(attacker, target, 42)
 	var new_dmg: int = _new_sim_first_damage(20, 0, 80, 0, 100, 80, 42)
 	var formula_dmg: int = _balance_formula_damage(20, 100)
 	_assert(legacy_dmg == formula_dmg and formula_dmg >= 1,
-		"legacy damage floored at 1 (legacy=%d formula=%d)" % [legacy_dmg, formula_dmg])
-	_assert(new_dmg == formula_dmg and new_dmg >= 1,
-		"new sim damage floored at 1 (new=%d formula=%d)" % [new_dmg, formula_dmg])
+		"legacy damage matches formula at defense=100 (legacy=%d formula=%d)" % [legacy_dmg, formula_dmg])
+	_assert(new_dmg == formula_dmg,
+		"new sim matches formula at defense=100 (new=%d formula=%d)" % [new_dmg, formula_dmg])
+	_assert(formula_dmg >= 1, "damage >= 1 at defense=100 (got %d)" % formula_dmg)
+
+
+# --- L-3b: PARITY REQUIRED (floor at 1 with extreme defense) ---
+func _test_legacy_extreme_defense_floor_at_1_parity() -> void:
+	print("[L-3b] legacy_extreme_defense_floor_at_1_parity [PARITY REQUIRED]")
+	# Genuine floor-at-1 case: defense=10000, base=20.
+	# damage = 20*100/10200 ~= 0 -> max(1, 0) = 1.
+	var attacker: Resource = _make_unit_def(&"attacker", 0, 80, 20, 0)
+	var target: Resource = _make_unit_def(&"target", 1, 80, 0, 10000)
+	var legacy_dmg: int = _legacy_first_attack_dealt(attacker, target, 42)
+	var new_dmg: int = _new_sim_first_damage(20, 0, 80, 0, 10000, 80, 42)
+	var formula_dmg: int = _balance_formula_damage(20, 10000)
+	_assert(legacy_dmg == 1, "legacy floors at 1 (got %d)" % legacy_dmg)
+	_assert(new_dmg == 1, "new sim floors at 1 (got %d)" % new_dmg)
+	_assert(new_dmg == legacy_dmg, "legacy/new match at extreme defense")
 
 
 # --- L-4: PARITY REQUIRED (death determines winner) ---
