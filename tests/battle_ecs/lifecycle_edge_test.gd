@@ -25,6 +25,9 @@ func _initialize() -> void:
 	await _test_dead_at_spawn_immediate_loss()
 	await _test_set_max_ticks_hard_cap()
 	await _test_run_until_done_collects_all_events()
+	await _test_stalemate_winner_determination_unambiguous()
+	await _test_event_emitted_for_unit_dying_in_same_action_has_valid_target()
+	await _test_battle_result_does_not_mutate_run_domain()
 	print("\n=== lifecycle/edge adversarial: %d passed, %d failed ===\n" % [_passed, _failed])
 	if _failed > 0:
 		quit(1)
@@ -320,3 +323,66 @@ func _test_run_until_done_collects_all_events() -> void:
 		if e2.type == 4:
 			saw_ended = true
 	_assert(saw_died and saw_ended, "run_until_done returns both UNIT_DIED and BATTLE_ENDED")
+
+
+func _test_stalemate_winner_determination_unambiguous() -> void:
+	print("[e-14] stalemate_winner_determination_unambiguous")
+	# After stalemate force-finish, the result must have a
+	# defined winner. With both sides equally alive, the player
+	# wins (lower team index = 0 checked first).
+	var p: BattleUnitSetupScript = BattleUnitSetupScript.new(
+		"p", &"warrior", 0, Vector2i(0, 0), 80, 80, 20, 5, 1)
+	var e: BattleUnitSetupScript = BattleUnitSetupScript.new(
+		"", &"orc", 1, Vector2i(6, 3), 80, 80, 20, 5, 1)
+	var s: BattleSetupScript = BattleSetupScript.new(42, [p], [e], 7, 4)
+	var sim: BattleSimulationScript = BattleSimulationScript.new()
+	sim.initialize(s)
+	sim.run_until_done(100)
+	var r = sim.get_result()
+	_assert(r.winner_team == 0, "stalemate: player wins (got %d)" % r.winner_team)
+	_assert(r.outcome == 0, "stalemate: OUTCOME_VICTORY (got %d)" % r.outcome)
+
+
+func _test_event_emitted_for_unit_dying_in_same_action_has_valid_target() -> void:
+	print("[e-15] event_for_dying_unit_has_valid_target_after_kill")
+	# Death event payload must carry meaningful target_entity.
+	var p: BattleUnitSetupScript = BattleUnitSetupScript.new(
+		"p", &"warrior", 0, Vector2i(0, 1), 80, 80, 100, 0, 5)
+	var e: BattleUnitSetupScript = BattleUnitSetupScript.new(
+		"e_orc", &"orc", 1, Vector2i(0, 0), 10, 10, 0, 0, 5)
+	var s: BattleSetupScript = BattleSetupScript.new(42, [p], [e], 7, 4)
+	var sim: BattleSimulationScript = BattleSimulationScript.new()
+	sim.initialize(s)
+	var evs: Array = sim.run_until_done(100)
+	var died_event = null
+	for e2 in evs:
+		if e2.type == 1:
+			died_event = e2
+			break
+	_assert(died_event != null, "UNIT_DIED emitted")
+	_assert(died_event.target_entity >= 0, "target_entity is valid entity ID")
+	_assert(died_event.source_entity >= 0, "source_entity (attacker) is valid entity ID")
+	_assert(died_event.amount > 0, "amount carries the killing damage (got %d)" % died_event.amount)
+	# After death, the BattleWorld still has the entity as known
+	# (just not alive) — events referencing it remain valid.
+	var w = sim.world()
+	_assert(not w.is_alive(died_event.target_entity), "target entity dead in world")
+
+
+func _test_battle_result_does_not_mutate_run_domain() -> void:
+	print("[e-16] battle_result_does_not_mutate_run_domain")
+	# BattleResult is a pure DTO. Constructing one and inspecting
+	# fields must not leak back into any state.
+	var res_inst = BattleResultScript.new()
+	res_inst.winner_team = 0
+	res_inst.outcome = 0
+	res_inst.tick_count = 5
+	res_inst.surviving_player_ids = [0, 1]
+	res_inst.surviving_enemy_ids = [2, 3]
+	_assert(res_inst.winner_team == 0 and res_inst.outcome == 0, "set fields read back")
+	_assert(res_inst.tick_count == 5, "tick_count round-trip")
+	_assert(res_inst.surviving_player_ids.size() == 2, "player IDs preserved")
+	_assert(res_inst.surviving_enemy_ids.size() == 2, "enemy IDs preserved")
+	# Result has no method to mutate RunDomain (no setter, no callback).
+	_assert(not res_inst.has_method("apply_to_run"), "BattleResult has no apply_to_run method")
+	_assert(not res_inst.has_method("commit"), "BattleResult has no commit method")
