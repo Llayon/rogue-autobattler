@@ -38,6 +38,14 @@ var _tick_count: int = 0
 var _finished: bool = false
 var _result: RefCounted = null        # BattleResult
 var _next_event_id: int = 0
+## Tick budget for self-bounded termination. When set to a
+## positive int, step_tick() will detect non-progress (no damage
+## applied AND no entity state change for two consecutive ticks)
+## and force-finish the simulation with the current alive state.
+## 0 = no progress-detection (caller must bound externally).
+var _max_ticks: int = 0
+var _no_progress_count: int = 0
+var _last_progress_state: Dictionary = {}
 
 
 func initialize(setup: BattleSetup) -> void:
@@ -49,9 +57,30 @@ func initialize(setup: BattleSetup) -> void:
 	_finished = false
 	_result = null
 	_next_event_id = 0
+	_no_progress_count = 0
+	_last_progress_state = _progress_snapshot()
 	# Spawn entities (placeholder for Gauntlet 2/3; here we just
 	# record the seed and defer real spawning to Gauntlet 5 slice).
 	_world.spawn_from_setup(setup)
+
+
+## Optional safety: set a hard ceiling on simulation ticks.
+## After _max_ticks, step_tick returns [] and is_finished()
+## returns true. Useful for callers that don't want to bound
+## the loop themselves. Defaults to 0 = no internal bound.
+func set_max_ticks(p_max_ticks: int) -> void:
+	_max_ticks = maxi(0, int(p_max_ticks))
+
+
+## Run step_tick repeatedly until finished or until max_ticks
+## is reached. Returns all events emitted.
+func run_until_done(max_ticks: int = 10000) -> Array:
+	var collected: Array = []
+	while not _finished and _tick_count < max_ticks:
+		var evs: Array = step_tick()
+		for e in evs:
+			collected.append(e)
+	return collected
 
 
 ## Returns events emitted during this tick (may be empty Array).
@@ -62,14 +91,51 @@ func step_tick() -> Array:
 		return []
 	_tick_count += 1
 	var events: Array = []
-	# Drive basic attack scheduling. Gauntlet 5 expands this.
+	# Drive basic attack scheduling.
 	events.append_array(_drive_basic_attacks())
-	# Check termination.
-	if _world.one_side_empty():
+	# Check termination: one side empty OR hard tick budget hit.
+	var natural_finished: bool = _world.one_side_empty()
+	var budget_hit: bool = _max_ticks > 0 and _tick_count >= _max_ticks
+	# Progress detection: if no damage applied AND entity state
+	# unchanged for two consecutive ticks, assume stalemate and
+	# force-finish (e.g. out-of-range entities can never engage).
+	var progressed: bool = _has_progressed(events)
+	if not progressed and not natural_finished and not budget_hit:
+		_no_progress_count += 1
+		if _no_progress_count >= 2:
+			natural_finished = true
+	else:
+		_no_progress_count = 0
+		_last_progress_state = _progress_snapshot()
+	if natural_finished or budget_hit:
 		_finished = true
 		_result = _build_result()
 		events.append(_make_battle_ended_event())
 	return events
+
+
+# === Progress detection ===
+
+func _progress_snapshot() -> Dictionary:
+	# Cheap signature of alive state for stalemate detection.
+	var sig: Dictionary = {}
+	for id in _world.alive_ids_by_team(0):
+		var id_i: int = int(id)
+		sig[id_i] = int(_world.current_hp_of(id_i))
+	for id in _world.alive_ids_by_team(1):
+		var id_i: int = int(id)
+		sig[id_i] = int(_world.current_hp_of(id_i))
+	return sig
+
+
+func _has_progressed(events: Array) -> bool:
+	# Progress = at least one DAMAGE_APPLIED or UNIT_DIED event
+	# OR alive HP state changed since last tick.
+	for e in events:
+		if e.type == 3 or e.type == 1:  # DAMAGE_APPLIED or UNIT_DIED
+			return true
+	var current: Dictionary = _progress_snapshot()
+	return current.hash() != _last_progress_state.hash()
 
 
 func is_finished() -> bool:

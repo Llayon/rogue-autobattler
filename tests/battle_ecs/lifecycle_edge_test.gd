@@ -23,6 +23,8 @@ func _initialize() -> void:
 	await _test_finite_termination_guard_violation_reports()
 	await _test_both_teams_empty_validation_rejects()
 	await _test_dead_at_spawn_immediate_loss()
+	await _test_set_max_ticks_hard_cap()
+	await _test_run_until_done_collects_all_events()
 	print("\n=== lifecycle/edge adversarial: %d passed, %d failed ===\n" % [_passed, _failed])
 	if _failed > 0:
 		quit(1)
@@ -216,10 +218,11 @@ func _test_winner_after_final_transition() -> void:
 
 func _test_finite_termination_guard_violation_reports() -> void:
 	print("[e-9] finite_termination_guard_violation_reports")
-	# Construct a scenario where the simulation cannot terminate
-	# (e.g. all entities out of attack range). The current
-	# implementation loops forever — this test DOCUMENTS that
-	# the caller must enforce a step bound externally.
+	# Construct a scenario where the simulation cannot progress
+	# (e.g. all entities out of attack range). The simulation now
+	# has built-in stalemate detection: if no DAMAGE_APPLIED and
+	# no HP change for 2 consecutive ticks, the simulation
+	# force-finishes. Verify that behavior.
 	var p: BattleUnitSetupScript = BattleUnitSetupScript.new(
 		"p", &"warrior", 0, Vector2i(0, 0), 80, 80, 20, 5, 1)  # range=1
 	var e: BattleUnitSetupScript = BattleUnitSetupScript.new(
@@ -227,15 +230,24 @@ func _test_finite_termination_guard_violation_reports() -> void:
 	var s: BattleSetupScript = BattleSetupScript.new(42, [p], [e], 7, 4)
 	var sim: BattleSimulationScript = BattleSimulationScript.new()
 	sim.initialize(s)
-	# Caller MUST bound the loop; otherwise this hangs. Verify
-	# bounded loop terminates (without finishing).
-	var ticks: int = 0
-	while not sim.is_finished() and ticks < 50:
-		sim.step_tick()
-		ticks += 1
-	_assert(ticks == 50, "caller-bounded loop terminates (got ticks=%d)" % ticks)
-	_assert(not sim.is_finished(), "simulation never finishes (out of range)")
-	print("  [INFO] out-of-range entities cause non-termination; callers must bound loop externally.")
+	# Simulation must terminate via stalemate detection (not hang).
+	var evs: Array = sim.run_until_done(100)
+	_assert(sim.is_finished(), "out-of-range simulation force-finishes via stalemate")
+	_assert(sim.get_result() != null, "result non-null")
+	# BATTLE_ENDED event was emitted.
+	var saw_ended: bool = false
+	for e2 in evs:
+		if e2.type == 4:  # BATTLE_ENDED
+			saw_ended = true
+			break
+	_assert(saw_ended, "BATTLE_ENDED emitted on stalemate")
+	# Both entities still alive (winner determined by whoever
+	# has more alive units).
+	var r = sim.get_result()
+	_assert(r.surviving_player_ids.size() == 1 and r.surviving_enemy_ids.size() == 1,
+		"both sides still alive at stalemate (got p=%d e=%d)" % [r.surviving_player_ids.size(), r.surviving_enemy_ids.size()])
+	# winner_team is 0 because both sides equal but player came first.
+	print("  [INFO] out-of-range scenarios force-finish via 2-tick stalemate detection.")
 
 
 func _test_both_teams_empty_validation_rejects() -> void:
@@ -253,23 +265,58 @@ func _test_dead_at_spawn_immediate_loss() -> void:
 	var e: BattleUnitSetupScript = BattleUnitSetupScript.new(
 		"", &"orc", 1, Vector2i(0, 0), 80, 80, 20, 5, 5)
 	var s: BattleSetupScript = BattleSetupScript.new(42, [p], [e], 7, 4)
-	# validate() allows starting_hp=0 (it's in [0, max_hp]).
-	# The simulation must handle the 0-HP unit gracefully.
 	var sim: BattleSimulationScript = BattleSimulationScript.new()
 	sim.initialize(s)
-	var w: BattleWorldScript = sim.world()
-	# The 0-HP player should be alive=false (is_alive checks hp<=0).
-	# Wait — current impl sets _alive=true on spawn regardless of HP.
-	# Check what happens in practice.
-	# Drain with a tick cap.
 	var ticks: int = 0
 	while not sim.is_finished() and ticks < 100:
 		sim.step_tick()
 		ticks += 1
-	# Either simulation completed or hit the cap. Either is OK
-	# as long as no crash, no infinite loop.
 	if not sim.is_finished():
 		print("  [INFO] 0-HP-at-spawn simulation did not terminate within 100 ticks (caller must bound)")
 	else:
 		print("  [INFO] 0-HP-at-spawn simulation terminated in %d ticks" % ticks)
 	_assert(true, "no crash on dead-at-spawn")
+
+
+func _test_set_max_ticks_hard_cap() -> void:
+	print("[e-12] set_max_ticks_hard_cap")
+	# Hard tick budget forces termination even if no progress.
+	var p: BattleUnitSetupScript = BattleUnitSetupScript.new(
+		"p", &"warrior", 0, Vector2i(0, 0), 80, 80, 20, 5, 1)
+	var e: BattleUnitSetupScript = BattleUnitSetupScript.new(
+		"", &"orc", 1, Vector2i(6, 3), 80, 80, 20, 5, 1)
+	var s: BattleSetupScript = BattleSetupScript.new(42, [p], [e], 7, 4)
+	var sim: BattleSimulationScript = BattleSimulationScript.new()
+	sim.initialize(s)
+	sim.set_max_ticks(5)
+	var evs: Array = sim.run_until_done(100)
+	_assert(sim.is_finished(), "max_ticks budget forces finish")
+	_assert(sim.get_result().tick_count <= 5, "tick_count <= max_ticks (got %d)" % sim.get_result().tick_count)
+	var saw_ended: bool = false
+	for e2 in evs:
+		if e2.type == 4:
+			saw_ended = true
+			break
+	_assert(saw_ended, "BATTLE_ENDED emitted at max_ticks budget hit")
+
+
+func _test_run_until_done_collects_all_events() -> void:
+	print("[e-13] run_until_done_collects_all_events")
+	# run_until_done should return all events in order.
+	var p: BattleUnitSetupScript = BattleUnitSetupScript.new(
+		"p", &"warrior", 0, Vector2i(0, 1), 80, 80, 100, 0, 5)
+	var e: BattleUnitSetupScript = BattleUnitSetupScript.new(
+		"", &"orc", 1, Vector2i(0, 0), 10, 10, 0, 0, 5)
+	var s: BattleSetupScript = BattleSetupScript.new(42, [p], [e], 7, 4)
+	var sim: BattleSimulationScript = BattleSimulationScript.new()
+	sim.initialize(s)
+	var collected: Array = sim.run_until_done(100)
+	_assert(sim.is_finished(), "run_until_done finishes simulation")
+	var saw_died: bool = false
+	var saw_ended: bool = false
+	for e2 in collected:
+		if e2.type == 1:
+			saw_died = true
+		if e2.type == 4:
+			saw_ended = true
+	_assert(saw_died and saw_ended, "run_until_done returns both UNIT_DIED and BATTLE_ENDED")
