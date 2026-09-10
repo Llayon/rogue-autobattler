@@ -22,12 +22,18 @@ func _initialize() -> void:
 	await _test_winner_after_final_transition()
 	await _test_finite_termination_guard_violation_reports()
 	await _test_both_teams_empty_validation_rejects()
-	await _test_dead_at_spawn_immediate_loss()
+	await _test_dead_at_spawn_player_loses_naturally()
+	await _test_dead_at_spawn_enemy_loses_naturally()
+	await _test_dead_at_spawn_never_attacks()
+	await _test_dead_at_spawn_excluded_from_alive_ids()
 	await _test_set_max_ticks_hard_cap()
 	await _test_run_until_done_collects_all_events()
 	await _test_stalemate_winner_determination_unambiguous()
+	await _test_tick_budget_forced_termination_is_draw()
 	await _test_event_emitted_for_unit_dying_in_same_action_has_valid_target()
 	await _test_battle_result_does_not_mutate_run_domain()
+	await _test_simulation_rejects_invalid_setup()
+	await _test_battle_setup_defensive_copy()
 	print("\n=== lifecycle/edge adversarial: %d passed, %d failed ===\n" % [_passed, _failed])
 	if _failed > 0:
 		quit(1)
@@ -62,8 +68,11 @@ func _test_hp_1_kills_in_one_hit() -> void:
 
 func _test_very_high_defense_zero_damage_floor() -> void:
 	print("[e-2] very_high_defense_zero_damage_floor")
-	# damage = max(1, atk - def/2). With def >= 2*atk, damage = 1 (floor).
-	# Player has atk=10; enemy has defense=100.
+	# BLOCKER 2 fix: damage uses Balance.compute_damage:
+	# damage = max(1, round(base * 100 / (100 + defense))).
+	# attack=10, defense=100 -> round(10*100/200) = 5 (NOT 1).
+	# Floor only kicks in when defense is so high the formula
+	# rounds to 0; attack=10, defense=10000 -> 0 -> floored to 1.
 	var p: BattleUnitSetupScript = BattleUnitSetupScript.new(
 		"p", &"warrior", 0, Vector2i(0, 1), 80, 80, 10, 0, 5)
 	var e: BattleUnitSetupScript = BattleUnitSetupScript.new(
@@ -78,7 +87,23 @@ func _test_very_high_defense_zero_damage_floor() -> void:
 			if e2.type == 3 and e2.source_entity == 0:
 				first_dmg = e2.amount
 				break
-	_assert(first_dmg == 1, "damage floored at 1 (got %d)" % first_dmg)
+	_assert(first_dmg == 5, "damage with defense=100 (formula floor at 1): 10*100/200=5 (got %d)" % first_dmg)
+	# Extreme defense to verify floor at 1.
+	var p2: BattleUnitSetupScript = BattleUnitSetupScript.new(
+		"p2", &"warrior", 0, Vector2i(0, 1), 80, 80, 10, 0, 5)
+	var e2u: BattleUnitSetupScript = BattleUnitSetupScript.new(
+		"", &"orc", 1, Vector2i(0, 0), 80, 80, 0, 10000, 5)
+	var s2: BattleSetupScript = BattleSetupScript.new(42, [p2], [e2u], 7, 4)
+	var sim2: BattleSimulationScript = BattleSimulationScript.new()
+	sim2.initialize(s2)
+	var floor_dmg: int = -1
+	while floor_dmg < 0 and not sim2.is_finished():
+		var evs: Array = sim2.step_tick()
+		for e3 in evs:
+			if e3.type == 3 and e3.source_entity == 0:
+				floor_dmg = e3.amount
+				break
+	_assert(floor_dmg == 1, "damage floored at 1 when formula rounds to 0 (got %d)" % floor_dmg)
 
 
 func _test_duplicate_definition_ids_different_run_unit_ids() -> void:
@@ -225,32 +250,34 @@ func _test_finite_termination_guard_violation_reports() -> void:
 	# (e.g. all entities out of attack range). The simulation now
 	# has built-in stalemate detection: if no DAMAGE_APPLIED and
 	# no HP change for 2 consecutive ticks, the simulation
-	# force-finishes. Verify that behavior.
+	# force-finishes as a DRAW (NOT a player victory).
 	var p: BattleUnitSetupScript = BattleUnitSetupScript.new(
-		"p", &"warrior", 0, Vector2i(0, 0), 80, 80, 20, 5, 1)  # range=1
+		"p", &"warrior", 0, Vector2i(0, 0), 80, 80, 20, 5, 1)
 	var e: BattleUnitSetupScript = BattleUnitSetupScript.new(
-		"", &"orc", 1, Vector2i(6, 3), 80, 80, 20, 5, 1)  # far away
+		"", &"orc", 1, Vector2i(6, 3), 80, 80, 20, 5, 1)
 	var s: BattleSetupScript = BattleSetupScript.new(42, [p], [e], 7, 4)
 	var sim: BattleSimulationScript = BattleSimulationScript.new()
 	sim.initialize(s)
-	# Simulation must terminate via stalemate detection (not hang).
 	var evs: Array = sim.run_until_done(100)
 	_assert(sim.is_finished(), "out-of-range simulation force-finishes via stalemate")
 	_assert(sim.get_result() != null, "result non-null")
+	# BLOCKER 1 fix: forced termination MUST be DRAW, not victory.
+	var r = sim.get_result()
+	_assert(r.winner_team == -1, "stalemate: winner_team = -1 (draw), NOT 0 (got %d)" % r.winner_team)
+	_assert(r.outcome == BattleResultScript.OUTCOME_DRAW, "stalemate: OUTCOME_DRAW (got %d)" % r.outcome)
+	_assert(r.termination_reason == BattleResultScript.TERMINATION_STALEMATE,
+		"stalemate: TERMINATION_STALEMATE (got %d)" % r.termination_reason)
 	# BATTLE_ENDED event was emitted.
 	var saw_ended: bool = false
 	for e2 in evs:
-		if e2.type == 4:  # BATTLE_ENDED
+		if e2.type == 4:
 			saw_ended = true
 			break
 	_assert(saw_ended, "BATTLE_ENDED emitted on stalemate")
-	# Both entities still alive (winner determined by whoever
-	# has more alive units).
-	var r = sim.get_result()
+	# Both entities still alive at stalemate.
 	_assert(r.surviving_player_ids.size() == 1 and r.surviving_enemy_ids.size() == 1,
 		"both sides still alive at stalemate (got p=%d e=%d)" % [r.surviving_player_ids.size(), r.surviving_enemy_ids.size()])
-	# winner_team is 0 because both sides equal but player came first.
-	print("  [INFO] out-of-range scenarios force-finish via 2-tick stalemate detection.")
+	print("  [INFO] out-of-range scenarios force-finish as DRAW via 2-tick stalemate detection.")
 
 
 func _test_both_teams_empty_validation_rejects() -> void:
@@ -260,9 +287,10 @@ func _test_both_teams_empty_validation_rejects() -> void:
 	_assert(msg != "", "both-empty rejected (got '%s')" % msg)
 
 
-func _test_dead_at_spawn_immediate_loss() -> void:
-	print("[e-11] dead_at_spawn_immediate_loss")
-	# starting_hp=0 means dead at t=0.
+func _test_dead_at_spawn_player_loses_naturally() -> void:
+	print("[e-11] dead_at_spawn_player_loses_naturally")
+	# BLOCKER 3: dead-at-spawn player must NOT act. Enemy kills
+	# player (already dead at HP=0). Enemy wins naturally.
 	var p: BattleUnitSetupScript = BattleUnitSetupScript.new(
 		"dead_p", &"warrior", 0, Vector2i(0, 1), 0, 80, 20, 5, 5)
 	var e: BattleUnitSetupScript = BattleUnitSetupScript.new(
@@ -270,15 +298,135 @@ func _test_dead_at_spawn_immediate_loss() -> void:
 	var s: BattleSetupScript = BattleSetupScript.new(42, [p], [e], 7, 4)
 	var sim: BattleSimulationScript = BattleSimulationScript.new()
 	sim.initialize(s)
-	var ticks: int = 0
-	while not sim.is_finished() and ticks < 100:
-		sim.step_tick()
-		ticks += 1
-	if not sim.is_finished():
-		print("  [INFO] 0-HP-at-spawn simulation did not terminate within 100 ticks (caller must bound)")
-	else:
-		print("  [INFO] 0-HP-at-spawn simulation terminated in %d ticks" % ticks)
-	_assert(true, "no crash on dead-at-spawn")
+	sim.run_until_done(100)
+	_assert(sim.is_finished(), "dead-player vs live-enemy terminates")
+	var r = sim.get_result()
+	_assert(r.winner_team == 1, "dead player loses (winner=enemy=1) (got %d)" % r.winner_team)
+	_assert(r.outcome == BattleResultScript.OUTCOME_DEFEAT,
+		"dead player: OUTCOME_DEFEAT (got %d)" % r.outcome)
+	_assert(r.termination_reason == BattleResultScript.TERMINATION_NATURAL,
+		"dead player: TERMINATION_NATURAL (got %d)" % r.termination_reason)
+	_assert(r.surviving_player_ids.is_empty(), "no surviving players")
+	_assert(r.surviving_enemy_ids.size() == 1, "1 surviving enemy")
+
+
+func _test_dead_at_spawn_enemy_loses_naturally() -> void:
+	print("[e-11b] dead_at_spawn_enemy_loses_naturally")
+	# BLOCKER 3: dead-at-spawn enemy must NOT act. Player kills
+	# enemy. Player wins naturally.
+	var p: BattleUnitSetupScript = BattleUnitSetupScript.new(
+		"p", &"warrior", 0, Vector2i(0, 1), 80, 80, 100, 0, 5)
+	var e: BattleUnitSetupScript = BattleUnitSetupScript.new(
+		"", &"orc", 1, Vector2i(0, 0), 0, 30, 20, 5, 5)
+	var s: BattleSetupScript = BattleSetupScript.new(42, [p], [e], 7, 4)
+	var sim: BattleSimulationScript = BattleSimulationScript.new()
+	sim.initialize(s)
+	sim.run_until_done(100)
+	_assert(sim.is_finished(), "live-player vs dead-enemy terminates")
+	var r = sim.get_result()
+	_assert(r.winner_team == 0, "dead enemy loses (winner=player=0) (got %d)" % r.winner_team)
+	_assert(r.outcome == BattleResultScript.OUTCOME_VICTORY,
+		"dead enemy: OUTCOME_VICTORY (got %d)" % r.outcome)
+	_assert(r.surviving_player_ids.size() == 1, "1 surviving player")
+	_assert(r.surviving_enemy_ids.is_empty(), "no surviving enemies")
+
+
+func _test_dead_at_spawn_never_attacks() -> void:
+	print("[e-11c] dead_at_spawn_never_attacks")
+	# Dead unit must never emit ATTACK_RESOLVED or DAMAGE_APPLIED.
+	var p: BattleUnitSetupScript = BattleUnitSetupScript.new(
+		"dead_p", &"warrior", 0, Vector2i(0, 1), 0, 80, 100, 0, 5)
+	var e: BattleUnitSetupScript = BattleUnitSetupScript.new(
+		"", &"orc", 1, Vector2i(0, 0), 80, 80, 0, 0, 5)
+	var s: BattleSetupScript = BattleSetupScript.new(42, [p], [e], 7, 4)
+	var sim: BattleSimulationScript = BattleSimulationScript.new()
+	sim.initialize(s)
+	var evs: Array = sim.run_until_done(100)
+	# Player must NOT emit any ATTACK_RESOLVED or DAMAGE_APPLIED
+	# where source is the dead player's entity (id=0).
+	for e2 in evs:
+		if e2.source_entity == 0 and (e2.type == 2 or e2.type == 3):
+			_assert(false, "dead player emitted type=%d (got amount=%d)" % [e2.type, e2.amount])
+			return
+	_assert(true, "dead player never attacks")
+
+
+func _test_dead_at_spawn_excluded_from_alive_ids() -> void:
+	print("[e-11d] dead_at_spawn_excluded_from_alive_ids")
+	# Dead-at-spawn entities are NOT in alive_ids_by_team().
+	var p: BattleUnitSetupScript = BattleUnitSetupScript.new(
+		"dead_p", &"warrior", 0, Vector2i(0, 1), 0, 80, 20, 5, 5)
+	var e: BattleUnitSetupScript = BattleUnitSetupScript.new(
+		"", &"orc", 1, Vector2i(0, 0), 80, 80, 20, 5, 5)
+	var s: BattleSetupScript = BattleSetupScript.new(42, [p], [e], 7, 4)
+	var sim: BattleSimulationScript = BattleSimulationScript.new()
+	sim.initialize(s)
+	var w = sim.world()
+	_assert(w.alive_ids_by_team(0).is_empty(),
+		"dead player absent from alive_ids_by_team(0) (got %s)" % str(w.alive_ids_by_team(0)))
+	_assert(w.alive_ids_by_team(1).size() == 1, "1 alive enemy")
+
+
+func _test_simulation_rejects_invalid_setup() -> void:
+	print("[e-17] simulation_rejects_invalid_setup [BLOCKER 5]")
+	# BattleSimulation.initialize must reject invalid setups:
+	# empty side, overlapping cells, invalid HP, OOB deployment.
+	# Empty side: player empty.
+	var s_empty_p: BattleSetupScript = BattleSetupScript.new(42, [],
+		[BattleUnitSetupScript.new("", &"orc", 1, Vector2i(0, 0), 30, 30, 5, 2, 1)])
+	var sim1: BattleSimulationScript = BattleSimulationScript.new()
+	var ok1: bool = sim1.initialize(s_empty_p)
+	_assert(not ok1, "initialize rejects empty player side")
+	_assert(not sim1.is_valid(), "is_valid() returns false")
+	_assert(not sim1.is_finished(), "is_finished() returns false")
+	# Invalid HP.
+	var s_bad_hp: BattleSetupScript = BattleSetupScript.new(42,
+		[BattleUnitSetupScript.new("p", &"warrior", 0, Vector2i(0, 3), 200, 100, 5, 2, 1)],
+		[BattleUnitSetupScript.new("", &"orc", 1, Vector2i(0, 0), 30, 30, 5, 2, 1)])
+	var sim2: BattleSimulationScript = BattleSimulationScript.new()
+	var ok2: bool = sim2.initialize(s_bad_hp)
+	_assert(not ok2, "initialize rejects starting_hp > max_hp")
+	# Cross-team same cell.
+	var s_cross: BattleSetupScript = BattleSetupScript.new(42,
+		[BattleUnitSetupScript.new("p", &"warrior", 0, Vector2i(0, 3), 30, 30, 5, 2, 1)],
+		[BattleUnitSetupScript.new("", &"orc", 1, Vector2i(0, 3), 30, 30, 5, 2, 1)])
+	var sim3: BattleSimulationScript = BattleSimulationScript.new()
+	var ok3: bool = sim3.initialize(s_cross)
+	_assert(not ok3, "initialize rejects cross-team cell collision")
+	# OOB deployment.
+	var s_oob: BattleSetupScript = BattleSetupScript.new(42,
+		[BattleUnitSetupScript.new("p", &"warrior", 0, Vector2i(99, 99), 30, 30, 5, 2, 1)],
+		[BattleUnitSetupScript.new("", &"orc", 1, Vector2i(0, 0), 30, 30, 5, 2, 1)])
+	var sim4: BattleSimulationScript = BattleSimulationScript.new()
+	var ok4: bool = sim4.initialize(s_oob)
+	_assert(not ok4, "initialize rejects OOB cell")
+
+
+func _test_battle_setup_defensive_copy() -> void:
+	print("[e-18] battle_setup_defensive_copy [BLOCKER 8]")
+	# After construction, mutating the caller's arrays or unit
+	# fields must NOT change the BattleSetup contents.
+	var caller_players: Array = [
+		BattleUnitSetupScript.new("p", &"warrior", 0, Vector2i(0, 3), 80, 80, 20, 5, 5)
+	]
+	var caller_enemies: Array = [
+		BattleUnitSetupScript.new("", &"orc", 1, Vector2i(0, 0), 30, 30, 5, 2, 5)
+	]
+	var s: BattleSetupScript = BattleSetupScript.new(42, caller_players, caller_enemies, 7, 4)
+	# Capture before-mutation snapshots.
+	var before_p_hp: int = int(s.player_units[0].max_hp)
+	var before_e_hp: int = int(s.enemy_units[0].max_hp)
+	# Mutate the caller's arrays.
+	caller_players[0].max_hp = 1
+	caller_players.append(BattleUnitSetupScript.new("p2", &"warrior", 0, Vector2i(1, 3), 80, 80, 20, 5, 5))
+	caller_enemies.clear()
+	# BattleSetup contents must be unchanged.
+	_assert(s.player_units.size() == 1, "player_units array length unchanged (got %d)" % s.player_units.size())
+	_assert(s.player_units[0].max_hp == before_p_hp,
+		"player_units[0].max_hp unchanged (got %d expected %d)" % [s.player_units[0].max_hp, before_p_hp])
+	_assert(s.enemy_units.size() == 1, "enemy_units array length unchanged (got %d)" % s.enemy_units.size())
+	_assert(s.enemy_units[0].max_hp == before_e_hp,
+		"enemy_units[0].max_hp unchanged (got %d expected %d)" % [s.enemy_units[0].max_hp, before_e_hp])
 
 
 func _test_set_max_ticks_hard_cap() -> void:
@@ -327,9 +475,9 @@ func _test_run_until_done_collects_all_events() -> void:
 
 func _test_stalemate_winner_determination_unambiguous() -> void:
 	print("[e-14] stalemate_winner_determination_unambiguous")
-	# After stalemate force-finish, the result must have a
-	# defined winner. With both sides equally alive, the player
-	# wins (lower team index = 0 checked first).
+	# BLOCKER 1 fix: after stalemate force-finish, the result
+	# is OUTCOME_DRAW with winner_team = -1. Forced termination
+	# NEVER awards victory.
 	var p: BattleUnitSetupScript = BattleUnitSetupScript.new(
 		"p", &"warrior", 0, Vector2i(0, 0), 80, 80, 20, 5, 1)
 	var e: BattleUnitSetupScript = BattleUnitSetupScript.new(
@@ -339,8 +487,40 @@ func _test_stalemate_winner_determination_unambiguous() -> void:
 	sim.initialize(s)
 	sim.run_until_done(100)
 	var r = sim.get_result()
-	_assert(r.winner_team == 0, "stalemate: player wins (got %d)" % r.winner_team)
-	_assert(r.outcome == 0, "stalemate: OUTCOME_VICTORY (got %d)" % r.outcome)
+	_assert(r.winner_team == -1, "stalemate: winner_team = -1 (draw) (got %d)" % r.winner_team)
+	_assert(r.outcome == BattleResultScript.OUTCOME_DRAW, "stalemate: OUTCOME_DRAW (got %d)" % r.outcome)
+	_assert(r.termination_reason == BattleResultScript.TERMINATION_STALEMATE,
+		"stalemate: TERMINATION_STALEMATE (got %d)" % r.termination_reason)
+
+
+func _test_tick_budget_forced_termination_is_draw() -> void:
+	print("[e-14b] tick_budget_forced_termination_is_draw")
+	# BLOCKER 1 fix: tick budget force-finish MUST also be DRAW.
+	# Construct a scenario where ticks exhaust before any progress.
+	var p: BattleUnitSetupScript = BattleUnitSetupScript.new(
+		"p", &"warrior", 0, Vector2i(0, 0), 80, 80, 20, 5, 1)
+	var e: BattleUnitSetupScript = BattleUnitSetupScript.new(
+		"", &"orc", 1, Vector2i(6, 3), 80, 80, 20, 5, 1)
+	var s: BattleSetupScript = BattleSetupScript.new(42, [p], [e], 7, 4)
+	var sim: BattleSimulationScript = BattleSimulationScript.new()
+	sim.initialize(s)
+	sim.set_max_ticks(2)
+	var evs: Array = sim.run_until_done(100)
+	_assert(sim.is_finished(), "tick budget forces finish")
+	var r = sim.get_result()
+	_assert(r.termination_reason == BattleResultScript.TERMINATION_TICK_BUDGET,
+		"termination_reason = TICK_BUDGET (got %d)" % r.termination_reason)
+	_assert(r.winner_team == -1, "tick-budget: winner_team = -1 (draw) (got %d)" % r.winner_team)
+	_assert(r.outcome == BattleResultScript.OUTCOME_DRAW,
+		"tick-budget: OUTCOME_DRAW (got %d)" % r.outcome)
+	_assert(r.tick_count <= 2, "tick_count <= max_ticks (got %d)" % r.tick_count)
+	# BATTLE_ENDED must have been emitted.
+	var saw_ended: bool = false
+	for e2 in evs:
+		if e2.type == 4:
+			saw_ended = true
+			break
+	_assert(saw_ended, "BATTLE_ENDED emitted at tick budget")
 
 
 func _test_event_emitted_for_unit_dying_in_same_action_has_valid_target() -> void:
