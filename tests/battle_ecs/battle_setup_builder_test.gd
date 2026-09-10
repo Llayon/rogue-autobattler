@@ -25,6 +25,8 @@ func _initialize() -> void:
 	await _test_builder_swapped_board_order_reflected_in_setup()
 	await _test_builder_equipped_item_bonuses_applied()
 	await _test_builder_enemy_wave_has_empty_source_run_unit_id()
+	await _test_builder_enemy_wave_seeded_deterministic()
+	await _test_builder_enemy_wave_different_seeds_can_differ()
 	await _test_builder_no_runda_state_mutation()
 	await _test_builder_validation_passes_for_normal_setup()
 	print("\n=== battle_ecs setup_builder: %d passed, %d failed ===\n" % [_passed, _failed])
@@ -184,12 +186,43 @@ func _test_builder_equipped_item_bonuses_applied() -> void:
 func _test_builder_enemy_wave_has_empty_source_run_unit_id() -> void:
 	print("[b-8] enemy_wave_has_empty_source_run_unit_id")
 	var state: RunDomainStateScript = _make_state_with_units([&"warrior"])
-	var s: BattleSetupScript = BattleSetupBuilderScript.build(state, 42, 1)
+	var s: BattleSetupScript = BattleSetupBuilder.build(state, 42, 1)
 	for e in s.enemy_units:
 		_assert(String(e.source_run_unit_id) == "",
 			"enemy source_run_unit_id is empty (got '%s')" % String(e.source_run_unit_id))
 		_assert(int(e.team) == 1, "enemy team=1 (got %d)" % int(e.team))
 		_assert(int(e.cell.y) == 0, "enemy y=0 (got %d)" % int(e.cell.y))
+
+
+func _test_builder_enemy_wave_seeded_deterministic() -> void:
+	# HIGH 7 fix: enemy wave picks must use a deterministic
+	# builder-side RNG. Same seed -> same wave.
+	print("[b-8b] enemy_wave_seeded_deterministic")
+	var state: RunDomainStateScript = _make_state_with_units([&"warrior"])
+	var s_a: BattleSetupScript = BattleSetupBuilder.build(state, 7777, 3)
+	var s_b: BattleSetupScript = BattleSetupBuilder.build(state, 7777, 3)
+	_assert(s_a.enemy_units.size() == s_b.enemy_units.size(),
+		"same seed -> same enemy wave size (got %d vs %d)" % [s_a.enemy_units.size(), s_b.enemy_units.size()])
+	for i in s_a.enemy_units.size():
+		_assert(s_a.enemy_units[i].definition_id == s_b.enemy_units[i].definition_id,
+			"enemy[%d] definition_id matches (a=%s b=%s)" % [i, String(s_a.enemy_units[i].definition_id), String(s_b.enemy_units[i].definition_id)])
+		_assert(s_a.enemy_units[i].max_hp == s_b.enemy_units[i].max_hp,
+			"enemy[%d] max_hp matches (a=%d b=%d)" % [i, s_a.enemy_units[i].max_hp, s_b.enemy_units[i].max_hp])
+
+
+func _test_builder_enemy_wave_different_seeds_can_differ() -> void:
+	# HIGH 7 fix: different seeds MAY produce different enemy picks
+	# (but at minimum they must produce valid waves from the pool).
+	print("[b-8c] enemy_wave_different_seeds_can_differ")
+	var state: RunDomainStateScript = _make_state_with_units([&"warrior"])
+	# Run 10 different seeds. Each wave must use only pool members.
+	for seed in [1, 7, 42, 99, 123, 555, 777, 999, 1234, 5678]:
+		var s: BattleSetupScript = BattleSetupBuilder.build(state, seed, 3)
+		_assert(s.enemy_units.size() >= 1, "seed %d: wave non-empty" % seed)
+		# All enemy IDs must be valid (resolve via ContentDB).
+		for e in s.enemy_units:
+			var def = ContentDBScript.get_by_id(e.definition_id)
+			_assert(def != null, "seed %d: enemy def '%s' resolves" % [seed, String(e.definition_id)])
 
 
 func _test_builder_no_runda_state_mutation() -> void:
