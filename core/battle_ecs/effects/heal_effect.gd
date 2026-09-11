@@ -1,0 +1,53 @@
+extends RefCounted
+## Phase 3 / HealEffect — restore HP via the effect pipeline.
+##
+## Semantics:
+##   - Cannot exceed max HP (overheal capped at max).
+##   - Does NOT resurrect dead units.
+##   - Emits HEAL_APPLIED with ACTUAL HP restored (not requested).
+##
+## Event semantics (Phase 3):
+##   - Emits HEAL_APPLIED only.
+##   - Event has valid event_id, tick, source/target IDs,
+##     root_action_id, parent_event_id, chain_depth.
+
+const BattleEventTypeScript = preload("res://core/battle_ecs/battle_event_type.gd")
+const EffectResultScript = preload("res://core/battle_ecs/effects/effect_result.gd")
+
+const HEAL_APPLIED: int = 6
+
+
+## Execute heal effect.
+static func execute(ctx, req) -> RefCounted:
+	var world = ctx.world()
+	var tgt: int = int(req.target_entity)
+	if not world.is_alive(tgt):
+		return EffectResultScript.failed("heal target not alive", [], false)
+	var src: int = int(req.source_entity)
+	var cur_hp: int = int(world.current_hp_of(tgt))
+	if cur_hp <= 0:
+		return EffectResultScript.failed("heal target has 0 HP", [], false)
+	var max_hp: int = int(world.max_hp_of(tgt))
+	if cur_hp >= max_hp:
+		# Already at max. No-op success, no event.
+		return EffectResultScript.succeeded([], false)
+	var amount: int = int(req.amount)
+	var room: int = max_hp - cur_hp
+	var restored: int = mini(amount, room)
+	world.heal(tgt, restored)
+	var emitter = ctx.emitter()
+	var heal_event = emitter.emit(
+		HEAL_APPLIED,
+		src,
+		tgt,
+		"",
+		"",
+		restored,
+		"",
+		Vector2i(-1, -1),
+		Vector2i(-1, -1),
+		int(req.root_action_id),
+		int(req.parent_event_id),
+		int(req.chain_depth))
+	ctx.emit_through_sink(heal_event)
+	return EffectResultScript.succeeded([heal_event], false)
