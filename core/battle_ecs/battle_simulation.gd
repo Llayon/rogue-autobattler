@@ -87,26 +87,32 @@ func initialize(setup: BattleSetup) -> bool:
 	_last_progress_sig = ""
 	_termination_reason = BattleResultScript.TERMINATION_NATURAL
 	_max_ticks = 0  # reset caller-overridden tick budget
-	# HIGH 6 fix: snapshot the setup so caller mutation of the
-	# original BattleSetup after initialize() cannot retroactively
-	# alter an in-progress battle. BattleSetup constructor already
-	# deep-copies unit arrays, so reassigning the reference is
-	# sufficient for this slice.
-	_setup = setup
+	# HIGH 6 fix: own a true snapshot copy of the setup so
+	# caller mutation of the original BattleSetup after
+	# initialize() cannot retroactively alter an in-progress
+	# battle. BattleSetup constructor already deep-copies the
+	# unit arrays, so passing the same setup reference to the
+	# constructor produces a fresh defensive copy.
+	_setup = BattleSetupScript.new(
+		setup.seed,
+		setup.player_units,
+		setup.enemy_units,
+		setup.grid_width,
+		setup.grid_height)
 	# BLOCKER 5: validate setup before spawning. If validate
 	# returns non-empty, reject and leave _valid=false.
-	var err: String = setup.validate()
+	var err: String = _setup.validate()
 	if err != "":
 		_world = null
 		_rng = null
 		_setup = null
 		return false
 	_rng = DeterministicRngScript.new(0)
-	_rng.seed_with(int(setup.seed))
-	_world = BattleWorldScript.new(int(setup.grid_width), int(setup.grid_height))
+	_rng.seed_with(int(_setup.seed))
+	_world = BattleWorldScript.new(int(_setup.grid_width), int(_setup.grid_height))
 	# Spawn first, THEN capture the initial progress signature
 	# (BLOCKER 9 fix).
-	_world.spawn_from_setup(setup)
+	_world.spawn_from_setup(_setup)
 	_last_progress_sig = _progress_signature()
 	_valid = true
 	return true
@@ -119,8 +125,23 @@ func set_max_ticks(p_max_ticks: int) -> void:
 	_max_ticks = maxi(0, int(p_max_ticks))
 
 
-## Loop step_tick until finished or until max_ticks reached.
-## Returns all collected events in emission order.
+## MEDIUM 7: Caller safety helper. Loops step_tick until the
+## simulation finishes OR until the local `max_ticks` cap is
+## reached. This cap is a CALLER-side safety bound (independent
+## of the simulation's own set_max_ticks() termination rule).
+##
+## Important:
+##   - The cap is NOT a battle termination rule. If the cap
+##     fires first, is_finished() returns false and get_result()
+##     returns null. Caller MUST inspect is_finished().
+##   - For real termination rules, use set_max_ticks(N) which
+##     produces a TERMINATION_TICK_BUDGET outcome.
+##   - Two distinct concepts: `set_max_ticks(N)` (simulation
+##     termination rule, produces BATTLE_ENDED) vs
+##     `run_until_done(N)` (caller safety cap, may return early
+##     without is_finished).
+##
+## Returns all events collected during the run in emission order.
 func run_until_done(max_ticks: int = 10000) -> Array:
 	var collected: Array = []
 	if not _valid:

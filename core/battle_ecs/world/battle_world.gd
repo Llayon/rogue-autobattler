@@ -235,28 +235,77 @@ static func step_cell_toward(attacker_cell: Vector2i, target_cell: Vector2i) -> 
 ## Returns the new cell on success, or the current cell on
 ## failure (out of bounds, target cell occupied by another
 ## alive entity, or entity not alive).
+##
+## HIGH 4 fix: if the primary axis candidate is blocked, try
+## the secondary axis (X if Y was primary, Y if X was primary)
+## PROVIDED the secondary cell is in bounds, unoccupied, and
+## reduces Manhattan distance to target. If both blocked: no
+## movement. This prevents false stalemates in trivially
+## traversable formations.
+##
 ## Deterministic — same world state -> same result.
 func try_move_toward(entity_id: int, target_id: int) -> Vector2i:
 	if not is_alive(entity_id) or not is_alive(target_id):
 		return position_of(entity_id)
 	var src: Vector2i = position_of(entity_id)
 	var dst: Vector2i = position_of(target_id)
-	var candidate: Vector2i = step_cell_toward(src, dst)
-	# Bounds check.
-	if candidate.x < 0 or candidate.x >= grid_width or candidate.y < 0 or candidate.y >= grid_height:
-		return src
-	# Occupied check — another alive entity at the candidate cell?
+	# Try primary candidate.
+	var primary: Vector2i = step_cell_toward(src, dst)
+	if _is_walkable(entity_id, primary):
+		_positions[entity_id] = primary
+		return primary
+	# HIGH 4: try secondary-axis candidate.
+	var secondary: Vector2i = _secondary_axis_step(src, dst, primary)
+	if _is_walkable(entity_id, secondary):
+		_positions[entity_id] = secondary
+		return secondary
+	return src
+
+
+## True iff `cell` is in bounds AND unoccupied by any other
+## alive entity.
+func _is_walkable(entity_id: int, cell: Vector2i) -> bool:
+	if cell.x < 0 or cell.x >= grid_width or cell.y < 0 or cell.y >= grid_height:
+		return false
 	for id in _positions.keys():
 		if int(id) == entity_id:
 			continue
 		if not is_alive(int(id)):
 			continue
 		var p: Vector2i = _positions[id]
-		if p.x == candidate.x and p.y == candidate.y:
+		if p.x == cell.x and p.y == cell.y:
+			return false
+	return true
+
+
+## HIGH 4 helper: compute the secondary-axis step cell.
+## If `primary` stepped along Y, secondary steps along X (and
+## vice versa). The secondary step is in the direction of the
+## target's X (or Y) offset.
+static func _secondary_axis_step(src: Vector2i, dst: Vector2i, primary: Vector2i) -> Vector2i:
+	var dy: int = int(dst.y) - int(src.y)
+	var dx: int = int(dst.x) - int(src.x)
+	# If primary stepped along Y (dx unchanged), secondary steps
+	# along X.
+	if int(primary.x) == int(src.x) and int(primary.y) != int(src.y):
+		if dx > 0:
+			return Vector2i(int(src.x) + 1, int(src.y))
+		elif dx < 0:
+			return Vector2i(int(src.x) - 1, int(src.y))
+		else:
+			# dx == 0 means target is on the same column;
+			# primary is already the only move.
 			return src
-	# Move.
-	_positions[entity_id] = candidate
-	return candidate
+	# Else primary stepped along X; secondary steps along Y.
+	if int(primary.y) == int(src.y) and int(primary.x) != int(src.x):
+		if dy > 0:
+			return Vector2i(int(src.x), int(src.y) + 1)
+		elif dy < 0:
+			return Vector2i(int(src.x), int(src.y) - 1)
+		else:
+			return src
+	# On same cell as target.
+	return src
 
 
 ## True iff one side has zero alive entities (the battle should
