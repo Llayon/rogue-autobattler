@@ -57,7 +57,8 @@ func _run_full(seed: int) -> Array:
 func _normalize_event(e) -> Dictionary:
 	# Strip event_id (monotonic but starts at 0 each run) and
 	# tick (could vary based on internal bookkeeping). Keep type,
-	# source/target entities, amount, source_run_unit_id.
+	# source/target entities, source/target run ids, amount,
+	# movement coordinates.
 	return {
 		"type": e.type,
 		"source_entity": e.source_entity,
@@ -65,6 +66,8 @@ func _normalize_event(e) -> Dictionary:
 		"source_run_unit_id": e.source_run_unit_id,
 		"target_run_unit_id": e.target_run_unit_id,
 		"amount": e.amount,
+		"from_cell": e.from_cell,
+		"to_cell": e.to_cell,
 	}
 
 
@@ -119,7 +122,17 @@ func _test_same_seed_twenty_runs_identical_event_trace() -> void:
 		for j in normalized.size():
 			var a = first_normalized[j]
 			var b = normalized[j]
-			if a.type != b.type or a.source_entity != b.source_entity or a.target_entity != b.target_entity or a.amount != b.amount:
+			# Field-by-field comparison (HIGH 3 fix — Dictionary
+			# equality in Godot 4 uses randomized hash, so we
+			# cannot rely on `a == b`).
+			if a.type != b.type \
+					or a.source_entity != b.source_entity \
+					or a.target_entity != b.target_entity \
+					or a.source_run_unit_id != b.source_run_unit_id \
+					or a.target_run_unit_id != b.target_run_unit_id \
+					or a.amount != b.amount \
+					or a.from_cell != b.from_cell \
+					or a.to_cell != b.to_cell:
 				_assert(false, "run %d event[%d] differs: a=%s b=%s" % [i, j, str(a), str(b)])
 				return
 	_assert(true, "20 same-seed runs produce identical normalized event traces (%d events)" % first_normalized.size())

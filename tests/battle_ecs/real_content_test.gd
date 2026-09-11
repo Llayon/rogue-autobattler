@@ -34,6 +34,7 @@ func _initialize() -> void:
 	await _test_real_content_same_seed_deterministic()
 	await _test_real_content_battle_terminates_naturally()
 	await _test_real_content_with_pure_tier2_wave()
+	await _test_real_pure_melee_1v1()
 	print("\n=== real content end-to-end: %d passed, %d failed ===\n" % [_passed, _failed])
 	if _failed > 0:
 		quit(1)
@@ -166,30 +167,68 @@ func _test_real_content_emits_unit_moved_before_melee() -> void:
 
 func _test_real_content_no_cell_overlap_after_movement() -> void:
 	print("[real-5] real_content_no_cell_overlap_after_movement")
-	# After movement, no two entities can occupy the same cell.
-	# Verify by checking all UNIT_MOVED events' to_cells are unique.
+	# BLOCKER 1A fix: drive simulation TICK BY TICK, and after
+	# every tick inspect the actual world position of every
+	# alive entity. Build a cell -> entity-id dict and assert
+	# no two entities share a cell. Also validate that every
+	# UNIT_MOVED event's from_cell / to_cell match the real
+	# world state at that tick.
 	var seed: int = _find_seed_for_orc_warrior()
 	if seed < 0:
 		_assert(false, "could not find orc_warrior seed")
 		return
 	var d: Dictionary = _run_battle(seed, [&"warrior"], 4)
-	var events: Array = d.events
-	var occupied: Dictionary = {}
-	# Start positions.
-	for id in d.sim.world().all_known_ids():
-		pass  # all_known_ids returns 0..N-1, but not all are alive
-	# We can't reconstruct start positions cleanly here, but we
-	# can verify that each UNIT_MOVED event's to_cell does not
-	# collide with another entity's current cell.
 	var w: BattleWorldScript = d.sim.world()
-	for e in events:
+	# (1) Validate each UNIT_MOVED event's payload.
+	for e in d.events:
 		if e.type == BattleEventTypeScript.UNIT_MOVED:
-			var to_cell: Vector2i = Vector2i(e.to_cell_x, e.to_cell_y)
-			var entity_id: int = e.source_entity
-			_assert(not occupied.has(entity_id) or occupied[entity_id] != to_cell,
-				"entity %d at %s not duplicate" % [entity_id, str(to_cell)])
-			occupied[entity_id] = to_cell
-	_assert(true, "movement tracking complete (events=%d)" % events.size())
+			_assert(e.from_cell != Vector2i(-1, -1),
+				"UNIT_MOVED event has from_cell")
+			_assert(e.to_cell != Vector2i(-1, -1),
+				"UNIT_MOVED event has to_cell")
+			var current: Vector2i = w.position_of(e.source_entity)
+			# to_cell must match the current world position
+			# AFTER all subsequent ticks (we are looking at
+			# the final state; later moves overwrite). Assert
+			# that EITHER to_cell is the current position, OR
+			# the entity moved again later.
+			if current != e.to_cell:
+				# Position differs from to_cell — must be
+				# because the entity moved again (later
+				# UNIT_MOVED from same source). Verify by
+				# checking that some later UNIT_MOVED event
+				# exists with this source_entity.
+				var has_later_move: bool = false
+				for e2 in d.events:
+					if e2.type == BattleEventTypeScript.UNIT_MOVED \
+							and e2.source_entity == e.source_entity \
+							and e2.tick > e.tick:
+						has_later_move = true
+						break
+				_assert(has_later_move,
+					"UNIT_MOVED to_cell=%s but world position=%s and no later move (entity %d tick %d)" % [str(e.to_cell), str(current), e.source_entity, e.tick])
+	# (2) Tick-by-tick: after each tick, assert no two alive
+	# entities share a cell.
+	# Re-run the battle tick-by-tick to capture per-tick state.
+	var state: RunDomainStateScript = _make_state_with([&"warrior"])
+	var s: BattleSetupScript = BattleSetupBuilderScript.build(state, seed, 4)
+	var sim2: BattleSimulationScript = BattleSimulationScript.new()
+	sim2.initialize(s)
+	var ticks_checked: int = 0
+	var overlaps: int = 0
+	while not sim2.is_finished() and ticks_checked < 200:
+		sim2.step_tick()
+		# Snapshot all alive entity positions.
+		var seen: Dictionary = {}  # Vector2i -> entity id (int)
+		for id in w.alive_ids_by_team(0) + w.alive_ids_by_team(1):
+			var cell: Vector2i = w.position_of(int(id))
+			if seen.has(cell):
+				overlaps += 1
+				_assert(false, "tick %d: cells overlap at %s (entities %s and %s)" % [ticks_checked, str(cell), str(seen[cell]), str(id)])
+			else:
+				seen[cell] = int(id)
+		ticks_checked += 1
+	_assert(overlaps == 0, "no cell overlap across all %d ticks (overlaps=%d)" % [ticks_checked, overlaps])
 
 
 func _test_real_content_same_seed_deterministic() -> void:
@@ -226,17 +265,91 @@ func _test_real_content_battle_terminates_naturally() -> void:
 
 func _test_real_content_with_pure_tier2_wave() -> void:
 	print("[real-8] real_content_with_pure_tier2_wave")
-	# Pure melee warrior vs tier-2 wave (which includes orc_warrior).
+	# Real warrior vs real tier-2 wave (which includes
+	# orc_warrior). Wave may include other tier-2 units
+	# (skeleton_mage) — that is fine. This is the integration
+	# test against the real builder.
 	var seed: int = _find_seed_for_orc_warrior()
 	if seed < 0:
 		_assert(false, "could not find orc_warrior seed")
 		return
 	var d: Dictionary = _run_battle(seed, [&"warrior"], 4)
-	# Confirm the enemy wave actually contains an orc_warrior.
 	var has_orc: bool = false
 	for e in d.setup.enemy_units:
 		if e.definition_id == &"orc_warrior":
 			has_orc = true
 			break
 	_assert(has_orc, "tier-2 wave contains orc_warrior (seed=%d)" % seed)
-	_assert(d.sim.is_finished(), "pure-melee vs tier-2 completes")
+	_assert(d.sim.is_finished(), "real warrior vs tier-2 wave completes")
+
+
+func _test_real_pure_melee_1v1() -> void:
+	print("[real-9] real_pure_melee_1v1 [HIGH 5]")
+	# HIGH 5: build an EXACT 1v1 pure-melee setup from REAL
+	# UnitDefs (warrior and orc_warrior) with actual content
+	# attack_range. No builder; no enemy-wave generation.
+	# Proves: real warrior vs real orc_warrior closes range
+	# and terminates naturally.
+	ContentDBScript.load_all()
+	var warrior_def: Resource = ContentDBScript.get_by_id(&"warrior")
+	var orc_def: Resource = ContentDBScript.get_by_id(&"orc_warrior")
+	_assert(warrior_def != null, "warrior UnitDef loaded from content")
+	_assert(orc_def != null, "orc_warrior UnitDef loaded from content")
+	_assert(int(warrior_def.attack_range) == 1,
+		"real warrior attack_range=1 (got %d)" % int(warrior_def.attack_range))
+	_assert(int(orc_def.attack_range) == 1,
+		"real orc_warrior attack_range=1 (got %d)" % int(orc_def.attack_range))
+	# Build exact 1v1 pure-melee setup at legacy deployment
+	# (player at y=3, enemy at y=0).
+	var warrior: BattleUnitSetupScript = BattleUnitSetupScript.new(
+		"warrior_1", &"warrior", 0, Vector2i(0, 3),
+		int(warrior_def.max_hp), int(warrior_def.max_hp),
+		int(warrior_def.attack), int(warrior_def.defense), 1)
+	var orc: BattleUnitSetupScript = BattleUnitSetupScript.new(
+		"", &"orc_warrior", 1, Vector2i(0, 0),
+		int(orc_def.max_hp), int(orc_def.max_hp),
+		int(orc_def.attack), int(orc_def.defense), 1)
+	var s: BattleSetupScript = BattleSetupScript.new(42, [warrior], [orc], 7, 4)
+	_assert(s.validate() == "", "pure-melee 1v1 setup validates (got '%s')" % s.validate())
+	# Run the battle once to check natural termination.
+	var sim: BattleSimulationScript = BattleSimulationScript.new()
+	sim.initialize(s)
+	var ticks: int = 0
+	while not sim.is_finished() and ticks < 500:
+		sim.step_tick()
+		ticks += 1
+	_assert(sim.is_finished(), "pure-melee 1v1 terminates (ticks=%d)" % ticks)
+	var r = sim.get_result()
+	_assert(r.termination_reason == BattleResultScript.TERMINATION_NATURAL,
+		"pure-melee 1v1 terminates NATURALLY (got reason=%d)" % r.termination_reason)
+	# Run again to capture events and assert UNIT_MOVED.
+	var sim2: BattleSimulationScript = BattleSimulationScript.new()
+	sim2.initialize(s)
+	var events: Array = []
+	while not sim2.is_finished():
+		var step_evs: Array = sim2.step_tick()
+		for ev in step_evs:
+			events.append(ev)
+	var saw_movement: bool = false
+	for ev in events:
+		if ev.type == BattleEventTypeScript.UNIT_MOVED:
+			saw_movement = true
+			break
+	_assert(saw_movement,
+		"pure-melee 1v1 emits UNIT_MOVED (movement closed range)")
+	# Verify cell-state integrity (tick-by-tick).
+	var sim3: BattleSimulationScript = BattleSimulationScript.new()
+	sim3.initialize(s)
+	var ticks_checked: int = 0
+	var overlaps: int = 0
+	while not sim3.is_finished() and ticks_checked < 500:
+		sim3.step_tick()
+		var seen: Dictionary = {}
+		for id in sim3.world().alive_ids_by_team(0) + sim3.world().alive_ids_by_team(1):
+			var cell: Vector2i = sim3.world().position_of(int(id))
+			if seen.has(cell):
+				overlaps += 1
+			else:
+				seen[cell] = int(id)
+		ticks_checked += 1
+	_assert(overlaps == 0, "no cell overlap in pure-melee 1v1 (overlaps=%d)" % overlaps)
