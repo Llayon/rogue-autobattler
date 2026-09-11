@@ -78,10 +78,20 @@ static func build(
 			bonus_atk += int(item_def.bonus_attack) if "bonus_attack" in item_def else 0
 			bonus_def += int(item_def.bonus_defense) if "bonus_defense" in item_def else 0
 			bonus_hp += int(item_def.bonus_max_hp) if "bonus_max_hp" in item_def else 0
-		var starting_hp: int = int(u.current_hp)
-		if starting_hp <= 0:
-			starting_hp = int(def.max_hp)
 		var max_hp: int = int(round(float(def.max_hp) * 1.0)) + bonus_hp
+		# BLOCKER 2 fix: match legacy start_battle semantics for
+		# sentinel / partially-damaged RunUnit + bonus_max_hp.
+		# RunUnit.current_hp == -1 sentinel: full HP (use the
+		# bonused max). RunUnit.current_hp > 0: capped at the
+		# bonused max. RunUnit.current_hp <= 0: should be dead
+		# (already filtered by is_alive() above).
+		var raw_hp: int = int(u.current_hp)
+		var starting_hp: int
+		if raw_hp < 0:
+			# Sentinel: use the bonused max.
+			starting_hp = max_hp
+		else:
+			starting_hp = mini(raw_hp, max_hp)
 		var atk: int = int(round(float(def.attack) * atk_mul)) + bonus_atk
 		var dfs: int = int(round(float(def.defense) * 1.0)) + bonus_def
 		var cell: Vector2i = Vector2i(int(i), p_grid_height - 1)
