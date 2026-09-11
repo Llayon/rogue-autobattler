@@ -387,6 +387,10 @@ func _test_setup_snapshot_owns_true_copy() -> void:
 	# HIGH 6: after initialize(), the simulation must hold an
 	# INDEPENDENT BattleSetup object. Mutating the caller's
 	# setup must not affect the simulation's internal state.
+	# Snapshot ownership does NOT require freezing an unrelated
+	# balance number (e.g. exact damage amount). Compare the
+	# mutated sim's behavior to a fresh simulation with the
+	# ORIGINAL setup — they must match.
 	var s: BattleSetupScript = _make_simple_setup()
 	var sim: BattleSimulationScript = BattleSimulationScript.new()
 	sim.initialize(s)
@@ -394,33 +398,46 @@ func _test_setup_snapshot_owns_true_copy() -> void:
 	s.seed = 99999
 	s.player_units[0].attack_base = 999
 	s.player_units.clear()
-	# Run the simulation and capture first damage — must reflect
-	# the ORIGINAL setup (seed=42, attack=20), not the mutated one.
-	var first_dmg: int = -1
+	# Run the mutated-simulation to completion and capture
+	# full event trace.
+	var mutated_events: Array = []
 	while not sim.is_finished():
 		var evs: Array = sim.step_tick()
 		for e in evs:
-			if e.type == 3:
-				first_dmg = e.amount
-				break
-		if first_dmg > 0:
-			break
-	_assert(first_dmg == 19,
-		"snapshot preserved attack=20 not 999 (got %d)" % first_dmg)
-	# Compare against fresh simulation with the ORIGINAL setup.
+			mutated_events.append(e)
+	# Run a fresh simulation with the ORIGINAL setup.
 	var sim2: BattleSimulationScript = BattleSimulationScript.new()
 	sim2.initialize(_make_simple_setup())
-	var first_dmg_2: int = -1
+	var original_events: Array = []
 	while not sim2.is_finished():
 		var evs: Array = sim2.step_tick()
 		for e in evs:
-			if e.type == 3:
-				first_dmg_2 = e.amount
-				break
-		if first_dmg_2 > 0:
+			original_events.append(e)
+	# Event counts must match (mutating the caller's setup
+	# cannot have changed the simulation's outcome).
+	_assert(mutated_events.size() == original_events.size(),
+		"mutated sim produces same event count as fresh original (got %d vs %d)" % [mutated_events.size(), original_events.size()])
+	# Per-event semantic equality (field-by-field; we already
+	# proved field-by-field comparison is deterministic).
+	for j in mutated_events.size():
+		var a = mutated_events[j]
+		var b = original_events[j]
+		_assert(a.type == b.type and a.tick == b.tick
+				and a.source_entity == b.source_entity
+				and a.target_entity == b.target_entity
+				and a.amount == b.amount
+				and a.from_cell == b.from_cell
+				and a.to_cell == b.to_cell,
+			"mutated event[%d] matches fresh original (a.type=%d b.type=%d)" % [j, a.type, b.type])
+	# Confirm at least one damage event fired with positive
+	# amount (proves the snapshot preserves runtime behavior,
+	# not just structure).
+	var saw_damage: bool = false
+	for e in mutated_events:
+		if e.type == 3 and int(e.amount) > 0:
+			saw_damage = true
 			break
-	_assert(first_dmg == first_dmg_2,
-		"post-mutation sim matches fresh-original sim (got %d vs %d)" % [first_dmg, first_dmg_2])
+	_assert(saw_damage, "snapshot sim emitted at least one damage event")
 
 
 # === HIGH 4: secondary-axis fallback ===

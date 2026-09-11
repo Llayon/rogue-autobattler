@@ -14,6 +14,9 @@ var _failed: int = 0
 func _initialize() -> void:
 	await _test_same_seed_twenty_runs_identical_result()
 	await _test_same_seed_twenty_runs_identical_event_trace()
+	await _test_event_id_strictly_monotonic_within_one_run()
+	await _test_event_id_starts_at_one_and_increments_by_one()
+	await _test_event_id_identical_across_same_seed_runs()
 	await _test_interleaved_two_independent_simulations()
 	await _test_sequential_battles_no_state_leak()
 	print("\n=== determinism stress: %d passed, %d failed ===\n" % [_passed, _failed])
@@ -55,12 +58,14 @@ func _run_full(seed: int) -> Array:
 
 
 func _normalize_event(e) -> Dictionary:
-	# Strip event_id (monotonic but starts at 0 each run) and
-	# tick (could vary based on internal bookkeeping). Keep type,
+	# Strip event_id (monotonic but starts at 0 each run) from
+	# the normalization comparison — event_id is verified
+	# separately as a monotonic invariant. Keep type, tick,
 	# source/target entities, source/target run ids, amount,
 	# movement coordinates.
 	return {
 		"type": e.type,
+		"tick": e.tick,
 		"source_entity": e.source_entity,
 		"target_entity": e.target_entity,
 		"source_run_unit_id": e.source_run_unit_id,
@@ -124,8 +129,11 @@ func _test_same_seed_twenty_runs_identical_event_trace() -> void:
 			var b = normalized[j]
 			# Field-by-field comparison (HIGH 3 fix — Dictionary
 			# equality in Godot 4 uses randomized hash, so we
-			# cannot rely on `a == b`).
+			# cannot rely on `a == b`). Includes tick (HIGH 2
+			# fix — same seed must produce same logical event
+			# tick).
 			if a.type != b.type \
+					or a.tick != b.tick \
 					or a.source_entity != b.source_entity \
 					or a.target_entity != b.target_entity \
 					or a.source_run_unit_id != b.source_run_unit_id \
@@ -136,6 +144,59 @@ func _test_same_seed_twenty_runs_identical_event_trace() -> void:
 				_assert(false, "run %d event[%d] differs: a=%s b=%s" % [i, j, str(a), str(b)])
 				return
 	_assert(true, "20 same-seed runs produce identical normalized event traces (%d events)" % first_normalized.size())
+
+
+# === HIGH 2 / event_id monotonic invariant ===
+
+func _test_event_id_strictly_monotonic_within_one_run() -> void:
+	print("[d-3] event_id_strictly_monotonic_within_one_run")
+	# Within a single simulation run, event_id must be strictly
+	# increasing. Each event_id is unique and greater than the
+	# previous event's id.
+	var events: Array = _run_full(42)
+	_assert(events.size() > 0, "run produced events (got %d)" % events.size())
+	var prev_id: int = -1
+	var monotonic: bool = true
+	for e in events:
+		var eid: int = int(e.event_id)
+		if eid <= prev_id:
+			monotonic = false
+			_assert(false, "event_id not strictly increasing at idx %d (got %d after %d)" % [events.find(e), eid, prev_id])
+			return
+		prev_id = eid
+	_assert(monotonic, "event_id strictly monotonic across %d events" % events.size())
+
+
+func _test_event_id_starts_at_one_and_increments_by_one() -> void:
+	print("[d-4] event_id_starts_at_one_and_increments_by_one")
+	# First event must have event_id == 1. Each subsequent
+	# event_id must equal the previous event_id + 1 (no gaps).
+	var events: Array = _run_full(42)
+	_assert(events.size() > 0, "run produced events (got %d)" % events.size())
+	_assert(int(events[0].event_id) == 1,
+		"first event_id == 1 (got %d)" % int(events[0].event_id))
+	for j in range(1, events.size()):
+		var prev: int = int(events[j - 1].event_id)
+		var cur: int = int(events[j].event_id)
+		_assert(cur == prev + 1,
+			"event[%d].event_id == event[%d].event_id + 1 (got %d vs %d)" % [j, j - 1, cur, prev])
+
+
+func _test_event_id_identical_across_same_seed_runs() -> void:
+	print("[d-5] event_id_identical_across_same_seed_runs")
+	# Same seed must produce event_ids that are identical at
+	# every position across runs (proves event_id allocation
+	# is deterministic, not just monotonic).
+	var first_events: Array = _run_full(42)
+	for i in range(1, 20):
+		var events: Array = _run_full(42)
+		_assert(events.size() == first_events.size(),
+			"run %d event count matches (got %d vs %d)" % [i, events.size(), first_events.size()])
+		for j in events.size():
+			if int(events[j].event_id) != int(first_events[j].event_id):
+				_assert(false, "run %d event[%d].event_id differs (got %d vs %d)" % [i, j, int(events[j].event_id), int(first_events[j].event_id)])
+				return
+	_assert(true, "20 same-seed runs produce identical event_id sequence")
 
 
 func _test_interleaved_two_independent_simulations() -> void:

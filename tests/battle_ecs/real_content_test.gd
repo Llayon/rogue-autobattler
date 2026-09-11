@@ -167,68 +167,67 @@ func _test_real_content_emits_unit_moved_before_melee() -> void:
 
 func _test_real_content_no_cell_overlap_after_movement() -> void:
 	print("[real-5] real_content_no_cell_overlap_after_movement")
-	# BLOCKER 1A fix: drive simulation TICK BY TICK, and after
-	# every tick inspect the actual world position of every
-	# alive entity. Build a cell -> entity-id dict and assert
-	# no two entities share a cell. Also validate that every
-	# UNIT_MOVED event's from_cell / to_cell match the real
-	# world state at that tick.
+	# BLOCKER 1A fix: drive simulation TICK BY TICK using the LIVE
+	# simulation's world (sim2.world()), not a stale world from a
+	# previously completed simulation. After every step_tick,
+	# inspect the current world state and the just-emitted
+	# events to prove no cell overlap and UNIT_MOVED payload
+	# integrity.
 	var seed: int = _find_seed_for_orc_warrior()
 	if seed < 0:
 		_assert(false, "could not find orc_warrior seed")
 		return
-	var d: Dictionary = _run_battle(seed, [&"warrior"], 4)
-	var w: BattleWorldScript = d.sim.world()
-	# (1) Validate each UNIT_MOVED event's payload.
-	for e in d.events:
-		if e.type == BattleEventTypeScript.UNIT_MOVED:
-			_assert(e.from_cell != Vector2i(-1, -1),
-				"UNIT_MOVED event has from_cell")
-			_assert(e.to_cell != Vector2i(-1, -1),
-				"UNIT_MOVED event has to_cell")
-			var current: Vector2i = w.position_of(e.source_entity)
-			# to_cell must match the current world position
-			# AFTER all subsequent ticks (we are looking at
-			# the final state; later moves overwrite). Assert
-			# that EITHER to_cell is the current position, OR
-			# the entity moved again later.
-			if current != e.to_cell:
-				# Position differs from to_cell — must be
-				# because the entity moved again (later
-				# UNIT_MOVED from same source). Verify by
-				# checking that some later UNIT_MOVED event
-				# exists with this source_entity.
-				var has_later_move: bool = false
-				for e2 in d.events:
-					if e2.type == BattleEventTypeScript.UNIT_MOVED \
-							and e2.source_entity == e.source_entity \
-							and e2.tick > e.tick:
-						has_later_move = true
-						break
-				_assert(has_later_move,
-					"UNIT_MOVED to_cell=%s but world position=%s and no later move (entity %d tick %d)" % [str(e.to_cell), str(current), e.source_entity, e.tick])
-	# (2) Tick-by-tick: after each tick, assert no two alive
-	# entities share a cell.
-	# Re-run the battle tick-by-tick to capture per-tick state.
+	# Set up a single live simulation.
 	var state: RunDomainStateScript = _make_state_with([&"warrior"])
 	var s: BattleSetupScript = BattleSetupBuilderScript.build(state, seed, 4)
 	var sim2: BattleSimulationScript = BattleSimulationScript.new()
 	sim2.initialize(s)
+	var w2: BattleWorldScript = sim2.world()
 	var ticks_checked: int = 0
 	var overlaps: int = 0
+	# (1) Tick-by-tick: after every step, build a cell -> id
+	# dict from the LIVE world's alive positions.
 	while not sim2.is_finished() and ticks_checked < 200:
-		sim2.step_tick()
-		# Snapshot all alive entity positions.
-		var seen: Dictionary = {}  # Vector2i -> entity id (int)
-		for id in w.alive_ids_by_team(0) + w.alive_ids_by_team(1):
-			var cell: Vector2i = w.position_of(int(id))
+		var step_events: Array = sim2.step_tick()
+		var seen: Dictionary = {}
+		var all_alive: Array = w2.alive_ids_by_team(0) + w2.alive_ids_by_team(1)
+		for id in all_alive:
+			var cell: Vector2i = w2.position_of(int(id))
 			if seen.has(cell):
 				overlaps += 1
-				_assert(false, "tick %d: cells overlap at %s (entities %s and %s)" % [ticks_checked, str(cell), str(seen[cell]), str(id)])
+				_assert(false,
+					"tick %d: cells overlap at %s (entities %s and %s)" \
+					% [ticks_checked, str(cell), str(seen[cell]), str(id)])
 			else:
 				seen[cell] = int(id)
+		# (2) Validate every UNIT_MOVED event in this tick.
+		for e in step_events:
+			if e.type == BattleEventTypeScript.UNIT_MOVED:
+				_assert(e.from_cell != Vector2i(-1, -1),
+					"UNIT_MOVED event has from_cell at tick %d" % ticks_checked)
+				_assert(e.to_cell != Vector2i(-1, -1),
+					"UNIT_MOVED event has to_cell at tick %d" % ticks_checked)
+				# Right after this tick, the moving entity's
+				# world position must equal e.to_cell.
+				var after_pos: Vector2i = w2.position_of(e.source_entity)
+				_assert(after_pos == e.to_cell,
+					"UNIT_MOVED to_cell=%s but world position after tick=%s (entity %d)" % [str(e.to_cell), str(after_pos), e.source_entity])
+				# The from_cell must be where the entity was
+				# BEFORE this tick — but the simulation hasn't
+				# moved yet, so it's the previous-tick world
+				# position. We've already inspected this tick's
+				# events so we can't reliably go back; instead
+				# assert that e.from_cell is in bounds and that
+				# e.from_cell + e.to_cell are adjacent (one
+				# Manhattan step apart).
+				var dx: int = absi(int(e.to_cell.x) - int(e.from_cell.x))
+				var dy: int = absi(int(e.to_cell.y) - int(e.from_cell.y))
+				_assert(dx + dy == 1,
+					"UNIT_MOVED from/to must be 1 Manhattan step (from=%s to=%s)" % [str(e.from_cell), str(e.to_cell)])
 		ticks_checked += 1
 	_assert(overlaps == 0, "no cell overlap across all %d ticks (overlaps=%d)" % [ticks_checked, overlaps])
+	_assert(sim2.is_finished(), "live simulation reached natural finish")
+	_assert(ticks_checked > 0, "live simulation ran at least 1 tick (got %d)" % ticks_checked)
 
 
 func _test_real_content_same_seed_deterministic() -> void:
