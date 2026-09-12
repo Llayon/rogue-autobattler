@@ -1,142 +1,170 @@
 class_name StatusContainer extends RefCounted
-## Phase 3 / StatusContainer — owns runtime StatusInstance
-## values for one battle entity.
+## Phase 3 / StatusContainer — owns runtime StatusInstance values
+## for EXACTLY ONE BattleWorld entity.
+##
+## Architectural contract (B0.1):
+##   - One StatusContainer = one owner entity.
+##   - Constructed via StatusContainer.new(owner_entity_id).
+##   - Internal storage is a plain Array (insertion order).
+##   - All add() / get / remove operations are OWNER-SCOPED.
+##     StatusInstance.target_entity MUST equal owner_entity_id.
+##   - Mismatched target_entity is REJECTED.
 ##
 ## Iteration order is deterministic (insertion order). No
 ## Dictionary iteration is used for trigger semantics — the
-## `status_ids_for(entity)` method returns statuses in insertion
-## order.
+## `all()` method returns statuses in insertion order.
 ##
-## Stacking policy (Phase 3 minimum):
-##   - Adding a status with the same status_id as an existing
-##     one INCREMENTS the existing instance's stacks.
-##   - This avoids StatusInstance explosion for repeated
-##     applies of the same status.
+## Stacking policy (B0.1):
+##   - Resolved through a StatusDefResolver at apply time.
+##   - If StatusDef.stackable == false: reapply refreshes duration;
+##     stacks remain at 1.
+##   - If StatusDef.stackable == true: reapply increments stacks
+##     up to StatusDef.max_stacks; duration refreshed.
 
-var _by_entity: Dictionary = {}
+var _owner_entity_id: int = -1
+var _statuses: Array = []  # Array[StatusInstance]
 
 
-## Add a status to the entity. If the entity already has a
-## status with the same status_id, increment stacks of the
-## existing instance and return that. Otherwise insert.
-## Returns the (possibly existing) StatusInstance.
+## Construct a container that OWNS one BattleWorld entity. Once
+## constructed, every add/get/remove operation is scoped to
+## owner_entity_id.
+func _init(p_owner_entity_id: int = -1) -> void:
+	_owner_entity_id = int(p_owner_entity_id)
+
+
+## Returns the owning BattleWorld entity id.
+func owner_entity_id() -> int:
+	return int(_owner_entity_id)
+
+
+## True iff `entity_id` equals the owner.
+func owns(entity_id: int) -> bool:
+	return int(_owner_entity_id) == int(entity_id)
+
+
+## Add a status to this container. The status's target_entity
+## MUST equal owner_entity_id; otherwise the add is REJECTED
+## (returns null, no mutation).
 ##
-## Ownership invariant: a StatusContainer logically belongs to
-## ONE BattleWorld entity. `inst.target_entity` MUST equal the
-## owning entity. If it does not, the status is still stored
-## under its target_entity key (forwarded), but production code
-## is expected to call set_status_container() once per entity
-## and pass StatusInstances whose target_entity matches.
-func add(inst) -> RefCounted:
-	var tgt: int = int(inst.target_entity)
-	if not _by_entity.has(tgt):
-		_by_entity[tgt] = []
-	var arr: Array = _by_entity[tgt]
-	for existing in arr:
-		if existing.status_id == inst.status_id:
-			existing.stacks = int(existing.stacks) + int(inst.stacks)
-			# Refresh duration to the new instance's remaining
-			# (Phase 3 minimum: refresh-on-stack policy).
+## Stacking is decided by `stacking_policy`. Pass:
+##   - "unique": never stack (reapply refreshes duration, stacks=1)
+##   - "stackable": increment stacks up to max_stacks, refresh
+##
+## Returns the (existing or newly-inserted) StatusInstance, or
+## null if rejected.
+func add(inst, stacking_policy: String = "stackable", max_stacks: int = 99) -> RefCounted:
+	if inst == null:
+		return null
+	if int(inst.target_entity) != int(_owner_entity_id):
+		# Reject: status does not belong to this container.
+		return null
+	var existing = _find(inst.status_id)
+	if existing != null:
+		if stacking_policy == "unique":
+			# Refresh duration; stacks remain 1.
 			if int(inst.remaining) > 0:
 				existing.remaining = int(inst.remaining)
 			return existing
-	arr.append(inst)
+		# stackable: increment up to max_stacks.
+		var new_stacks: int = int(existing.stacks) + int(inst.stacks)
+		if max_stacks <= 0:
+			max_stacks = 99
+		if new_stacks > max_stacks:
+			new_stacks = int(max_stacks)
+		existing.stacks = new_stacks
+		if int(inst.remaining) > 0:
+			existing.remaining = int(inst.remaining)
+		return existing
+	_statuses.append(inst)
 	return inst
 
 
-## Remove the status with this status_id from the entity.
+## Remove the status with this status_id from this container.
 ## Returns true if removed, false if not present.
-func remove(entity_id: int, status_id: StringName) -> bool:
-	if not _by_entity.has(entity_id):
-		return false
-	var arr: Array = _by_entity[entity_id]
-	for i in arr.size():
-		if arr[i].status_id == status_id:
-			arr.remove_at(i)
-			if arr.is_empty():
-				_by_entity.erase(entity_id)
+func remove(status_id: StringName) -> bool:
+	for i in _statuses.size():
+		if _statuses[i].status_id == status_id:
+			_statuses.remove_at(i)
 			return true
 	return false
 
 
-## True iff the entity has a status with this status_id.
-func has_status(entity_id: int, status_id: StringName) -> bool:
-	if not _by_entity.has(entity_id):
-		return false
-	for inst in _by_entity[entity_id]:
-		if inst.status_id == status_id:
-			return true
-	return false
-
-
-## Returns the StatusInstance for this entity + status_id, or null.
-func get_status(entity_id: int, status_id: StringName) -> RefCounted:
-	if not _by_entity.has(entity_id):
-		return null
-	for inst in _by_entity[entity_id]:
-		if inst.status_id == status_id:
+## Remove the status with this status_id AND return the
+## removed instance (used by expiry sweeps to inspect identity).
+## Returns null if not present.
+func take(status_id: StringName) -> RefCounted:
+	for i in _statuses.size():
+		if _statuses[i].status_id == status_id:
+			var inst = _statuses[i]
+			_statuses.remove_at(i)
 			return inst
 	return null
 
 
-## Returns status_ids for the entity in insertion order.
-func status_ids_for(entity_id: int) -> Array:
-	if not _by_entity.has(entity_id):
-		return []
+## True iff this container has a status with this status_id.
+func has_status(status_id: StringName) -> bool:
+	return _find(status_id) != null
+
+
+## Returns the StatusInstance for this status_id, or null.
+func get_status(status_id: StringName) -> RefCounted:
+	return _find(status_id)
+
+
+## Returns status_ids for this container in insertion order.
+func status_ids() -> Array:
 	var out: Array = []
-	for inst in _by_entity[entity_id]:
+	for inst in _statuses:
 		out.append(inst.status_id)
 	return out
 
 
-## Returns all StatusInstances for the entity, in insertion order.
+## Returns all StatusInstances in insertion order.
 ## Callers MUST NOT mutate the returned array or the instances.
-func all_for(entity_id: int) -> Array:
-	if not _by_entity.has(entity_id):
-		return []
-	# Return a shallow copy so callers cannot mutate storage.
+func all() -> Array:
 	var out: Array = []
-	for inst in _by_entity[entity_id]:
+	for inst in _statuses:
 		out.append(inst)
 	return out
 
 
-## Number of distinct statuses on this entity.
-func size(entity_id: int) -> int:
-	if not _by_entity.has(entity_id):
-		return 0
-	return (_by_entity[entity_id] as Array).size()
+## Number of distinct statuses on this container.
+func size() -> int:
+	return _statuses.size()
 
 
-## Tick all durations on all entities by `delta`. Returns the
-## list of (entity_id, status_id) tuples that just expired.
-func tick_all(delta: int) -> Array:
+## Tick all durations on this container by `delta`. Returns the
+## list of expired StatusInstances (in expiry order).
+## Each returned entry preserves StringName status_id (no
+## int-cast corruption).
+func tick(delta: int) -> Array:
 	var expired: Array = []
-	for entity_id in _by_entity.keys():
-		var arr: Array = _by_entity[entity_id]
-		var i: int = 0
-		while i < arr.size():
-			var inst = arr[i]
-			if inst.tick(delta):
-				var sid = inst.status_id
-				arr.remove_at(i)
-				expired.append([int(entity_id), int(sid)])
-				# do not advance i
-			else:
-				i += 1
-	# Clean up empty entity entries.
-	for entity_id in _by_entity.keys():
-		if (_by_entity[entity_id] as Array).is_empty():
-			_by_entity.erase(entity_id)
+	var i: int = 0
+	while i < _statuses.size():
+		var inst = _statuses[i]
+		if inst.tick(delta):
+			_statuses.remove_at(i)
+			expired.append(inst)
+			# do not advance i
+		else:
+			i += 1
 	return expired
 
 
-## Remove all statuses for an entity. Returns the removed ids.
-func clear(entity_id: int) -> Array:
-	if not _by_entity.has(entity_id):
-		return []
-	var out: Array = []
-	for inst in _by_entity[entity_id]:
-		out.append(int(inst.status_id))
-	_by_entity.erase(entity_id)
-	return out
+## Remove all statuses. Returns the removed StatusInstances in
+## insertion order (StringName status_id preserved).
+func clear() -> Array:
+	var removed: Array = []
+	for inst in _statuses:
+		removed.append(inst)
+	_statuses.clear()
+	return removed
+
+
+## Internal: linear scan lookup. StatusContainer cardinality
+## in Phase 3 is bounded (1-N per entity), so this is acceptable.
+func _find(status_id: StringName) -> RefCounted:
+	for inst in _statuses:
+		if inst.status_id == status_id:
+			return inst
+	return null

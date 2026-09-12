@@ -186,12 +186,27 @@ func heal(id: int, amount: int) -> int:
 
 
 ## Phase 3: set the StatusContainer for an entity.
+## Container must belong to `entity_id` (ownership assertion).
 ## Container may be null (clears it). Replaces any existing.
-func set_status_container(entity_id: int, container) -> void:
+##
+## B0.1 ownership contract: a StatusContainer is single-owner.
+## If the container's owner_entity_id is set and does not equal
+## entity_id, the assignment is rejected and the world keeps its
+## previous container (or null). This prevents one entity from
+## silently receiving another entity's container.
+func set_status_container(entity_id: int, container) -> bool:
 	if container == null:
 		_status_containers.erase(entity_id)
-	else:
-		_status_containers[entity_id] = container
+		return true
+	# Ownership assertion.
+	var owner: int = -1
+	if container.has_method("owner_entity_id"):
+		owner = int(container.owner_entity_id())
+	if owner >= 0 and owner != int(entity_id):
+		# Reject: container belongs to a different entity.
+		return false
+	_status_containers[entity_id] = container
+	return true
 
 
 ## Phase 3: get the StatusContainer for an entity.
@@ -200,6 +215,17 @@ func get_status_container(entity_id: int) -> RefCounted:
 	if not _status_containers.has(entity_id):
 		return null
 	return _status_containers[entity_id]
+
+
+## Phase 3: convenience — create and attach a fresh
+## StatusContainer for the entity. Returns the new container.
+## Equivalent to constructing StatusContainer.new(entity_id)
+## and passing it to set_status_container().
+func create_status_container(entity_id: int) -> RefCounted:
+	var C = preload("res://core/battle_ecs/status/status_container.gd")
+	var c = C.new(int(entity_id))
+	set_status_container(entity_id, c)
+	return c
 
 
 ## Removes an entity from the world. All component entries are
