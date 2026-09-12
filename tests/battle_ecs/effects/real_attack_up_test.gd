@@ -290,9 +290,10 @@ func _test_real_attack_up_aggregation_rounding() -> void:
 # === Multi-stack policy (synthetic stackable test) ===
 
 func _test_real_attack_up_multi_stack_caps_at_max_stacks() -> void:
-	print("[au-10] real_attack_up_multi_stack_caps_at_max_stacks")
-	# Real attack_up is stackable=false max_stacks=1. Two
-	# applies must keep stacks at 1 (NOT 2).
+	print("[au-10] real_attack_up_multi_stack_caps_at_max_stacks [production-path]")
+	# Real attack_up is stackable=false max_stacks=1 (from real
+	# attack_up.tres). Production ApplyStatusEffect must respect
+	# the StatusDef's stackable/max_stacks policy.
 	var w = _make_world_with_base_attack(20)
 	var ctx = _make_ctx(w)[0]
 	var exec = EffectExecutorScript.new()
@@ -301,28 +302,25 @@ func _test_real_attack_up_multi_stack_caps_at_max_stacks() -> void:
 		EffectKindScript.APPLY_STATUS, 0, 0, 0, 1, -1, -1)
 	req.definition_id = &"attack_up"
 	exec.execute(ctx, req)
-	# Second apply with stacks=1 in payload. Real policy
-	# (stackable=false, max_stacks=1) keeps stacks at 1.
+	# Second apply via production ApplyStatusEffect.
 	var req2 = EffectRequestScript.new(
 		EffectKindScript.APPLY_STATUS, 0, 0, 0, 1, -1, -1)
 	req2.definition_id = &"attack_up"
 	exec.execute(ctx, req2)
 	var c = w.get_status_container(0)
 	_assert(int(c.get_status(&"attack_up").stacks) == 1,
-		"max_stacks=1 caps second apply (got %d)" % int(c.get_status(&"attack_up").stacks))
-	# Now test synthetic stackable=true case by going through
-	# the StatusContainer directly (B1 ApplyStatusEffect uses
-	# the real StatusDef which says stackable=false). For the
-	# container-level guarantee, we test that an apply with
-	# policy="stackable" max_stacks=3 caps at 3.
-	var w2 = _make_world_with_base_attack(20)
-	var c2 = StatusContainerScript.new(0)
-	c2.add(StatusInstanceScript.new(&"burn", 0, 0, 1, 5, 0), "stackable", 3)
-	c2.add(StatusInstanceScript.new(&"burn", 0, 0, 1, 5, 0), "stackable", 3)
-	c2.add(StatusInstanceScript.new(&"burn", 0, 0, 1, 5, 0), "stackable", 3)
-	c2.add(StatusInstanceScript.new(&"burn", 0, 0, 1, 5, 0), "stackable", 3)
-	_assert(int(c2.get_status(&"burn").stacks) == 3,
-		"stackable max_stacks=3 caps at 3 (got %d)" % int(c2.get_status(&"burn").stacks))
+		"production max_stacks=1 caps second apply (got %d)" % int(c.get_status(&"attack_up").stacks))
+	# Third apply: still 1.
+	var req3 = EffectRequestScript.new(
+		EffectKindScript.APPLY_STATUS, 0, 0, 0, 1, -1, -1)
+	req3.definition_id = &"attack_up"
+	exec.execute(ctx, req3)
+	_assert(int(c.get_status(&"attack_up").stacks) == 1,
+		"third apply still capped at 1 (got %d)" % int(c.get_status(&"attack_up").stacks))
+	# NOTE: stackable=true production-path coverage is deferred
+	# until a stackable real-content StatusDef exists. Container
+	# unit tests in status_and_heal_test.gd already cover the
+	# StatusContainer-level stackable=true policy.
 
 
 # === Unknown status safety ===
