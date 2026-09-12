@@ -47,6 +47,10 @@ var _attack_range: Dictionary = {}   # int -> int
 var _definition_ids: Dictionary = {} # int -> StringName
 var _source_run_unit_ids: Dictionary = {}  # int -> String
 
+# Phase 3: per-entity StatusContainer storage.
+# int -> StatusContainer (or null if no statuses yet).
+var _status_containers: Dictionary = {}
+
 # Internal ordered list per team to guarantee deterministic
 # iteration order (NOT depending on Dictionary ordering).
 var _player_ids_ordered: Array = []
@@ -167,9 +171,41 @@ func apply_damage(id: int, amount: int) -> int:
 	return dealt
 
 
+## Phase 3: applies heal to entity. Restores HP up to max_hp.
+## Returns the actual amount restored (capped at remaining HP).
+## Caller MUST validate target is alive BEFORE calling.
+func heal(id: int, amount: int) -> int:
+	if not is_alive(id):
+		return 0
+	var hp: int = current_hp_of(id)
+	var max_hp: int = max_hp_of(id)
+	var room: int = max_hp - hp
+	var restored: int = mini(maxi(0, amount), room)
+	_current_hp[id] = hp + restored
+	return restored
+
+
+## Phase 3: set the StatusContainer for an entity.
+## Container may be null (clears it). Replaces any existing.
+func set_status_container(entity_id: int, container) -> void:
+	if container == null:
+		_status_containers.erase(entity_id)
+	else:
+		_status_containers[entity_id] = container
+
+
+## Phase 3: get the StatusContainer for an entity.
+## Returns null if no container is set.
+func get_status_container(entity_id: int) -> RefCounted:
+	if not _status_containers.has(entity_id):
+		return null
+	return _status_containers[entity_id]
+
+
 ## Removes an entity from the world. All component entries are
 ## dropped. The entity ID is NOT reused (entity is "dead" but
 ## remains a stable reference for events).
+## Phase 3: also clears the entity's status container.
 func remove_entity(id: int) -> void:
 	_alive.erase(id)
 	_teams.erase(id)
@@ -181,6 +217,8 @@ func remove_entity(id: int) -> void:
 	_attack_range.erase(id)
 	_definition_ids.erase(id)
 	_source_run_unit_ids.erase(id)
+	# Phase 3: clear status container on entity removal.
+	_status_containers.erase(id)
 	var i: int = _player_ids_ordered.find(id)
 	if i >= 0:
 		_player_ids_ordered.remove_at(i)
