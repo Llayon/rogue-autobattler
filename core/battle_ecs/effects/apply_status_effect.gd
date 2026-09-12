@@ -1,16 +1,37 @@
 extends RefCounted
-## Phase 3 / ApplyStatusEffect — applies a StatusInstance to
-## the target entity (creates the StatusContainer if absent).
+## Phase 3 / B1 / ApplyStatusEffect — applies a StatusInstance to
+## the target entity using a real StatusDef.
+##
+## Architectural rules (B1):
+##   - StatusDef is content definition (immutable Resource).
+##   - StatusInstance is runtime state.
+##   - Resolve StatusDef via StatusDefResolver BEFORE mutating
+##     state. Unknown status_id fails safely (no container
+##     mutation, no STATUS_APPLIED event).
+##   - StatusContainer.add() enforces stackable/max_stacks via
+##     the StatusDef's policy.
+##   - Duration is converted from float seconds to integer ticks
+##     via StatusDefResolver.convert_duration_to_ticks.
 
 const BattleEventTypeScript = preload("res://core/battle_ecs/battle_event_type.gd")
 const EffectResultScript = preload("res://core/battle_ecs/effects/effect_result.gd")
 const StatusContainerScript = preload("res://core/battle_ecs/status/status_container.gd")
 const StatusInstanceScript = preload("res://core/battle_ecs/status/status_instance.gd")
+const StatusDefResolverScript = preload("res://core/battle_ecs/status/status_def_resolver.gd")
 
 const STATUS_APPLIED: int = 7
 
 
-## Execute apply-status effect.
+## Execute apply-status effect. The status_id is read from the
+## request payload's "status_id" or from request.definition_id.
+## ApplyStatusEffect will:
+##   1. resolve the StatusDef via ContentDB
+##   2. validate target is alive
+##   3. get-or-create the entity's StatusContainer
+##   4. convert StatusDef.duration (float) -> integer ticks
+##   5. delegate to StatusContainer.add() with the
+##      stackable/max_stacks policy from the StatusDef
+##   6. emit a STATUS_APPLIED BattleEvent on success
 static func execute(ctx, req) -> RefCounted:
 	var world = ctx.world()
 	var tgt: int = int(req.target_entity)
@@ -23,21 +44,35 @@ static func execute(ctx, req) -> RefCounted:
 		status_id = req.definition_id
 	else:
 		return EffectResultScript.failed("apply_status missing status_id", [], false)
+	# B1: resolve StatusDef via real content lookup.
+	var def: Resource = StatusDefResolverScript.resolve(status_id)
+	if def == null:
+		return EffectResultScript.failed("apply_status unknown status_id: %s" % str(status_id), [], false)
+	# B1: convert duration from float seconds to integer ticks.
+	var ticks: int = int(StatusDefResolverScript.convert_duration_to_ticks(float(def.duration)))
+	# Determine stacks from payload (default 1).
 	var stacks: int = int(req.payload.get("stacks", 1))
-	var duration: int = int(req.payload.get("duration", -1))
-	var magnitude: int = int(req.payload.get("magnitude", 0))
+	# Magnitude is not used for StatusDef-driven statuses; legacy
+	# magnitude field remains for backwards compat with non-Def
+	# callers but is unused here.
+	# Get or create the entity's StatusContainer.
 	var container = world.get_status_container(tgt)
 	if container == null:
-		container = StatusContainerScript.new()
-		world.set_status_container(tgt, container)
+		container = world.create_status_container(tgt)
+	# Create the runtime StatusInstance.
 	var inst = StatusInstanceScript.new(
 		status_id,
 		int(req.source_entity),
 		tgt,
 		stacks,
-		duration,
-		magnitude)
-	container.add(inst)
+		ticks,
+		0)
+	# B1: stackable/max_stacks from the StatusDef.
+	var policy: String = "stackable" if bool(def.stackable) else "unique"
+	var max_stacks: int = int(def.max_stacks) if int(def.max_stacks) > 0 else 1
+	var accepted = container.add(inst, policy, max_stacks)
+	if accepted == null:
+		return EffectResultScript.failed("apply_status rejected by container", [], false)
 	var emitter = ctx.emitter()
 	var ev = emitter.emit(
 		STATUS_APPLIED,
@@ -45,7 +80,7 @@ static func execute(ctx, req) -> RefCounted:
 		tgt,
 		"",
 		"",
-		int(inst.stacks),
+		int(accepted.stacks),
 		String(status_id),
 		Vector2i(-1, -1),
 		Vector2i(-1, -1),

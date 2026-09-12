@@ -1,9 +1,13 @@
 extends RefCounted
-## Phase 3 / RemoveStatusEffect — removes a StatusInstance
+## Phase 3 / B1 / RemoveStatusEffect — removes a StatusInstance
 ## from the target entity.
+##
+## B1: StatusDef is consulted only to confirm the status_id is
+## known. Removal itself is owner-scoped.
 
 const BattleEventTypeScript = preload("res://core/battle_ecs/battle_event_type.gd")
 const EffectResultScript = preload("res://core/battle_ecs/effects/effect_result.gd")
+const StatusDefResolverScript = preload("res://core/battle_ecs/status/status_def_resolver.gd")
 
 const STATUS_REMOVED: int = 8
 
@@ -21,10 +25,13 @@ static func execute(ctx, req) -> RefCounted:
 		status_id = req.definition_id
 	else:
 		return EffectResultScript.failed("remove_status missing status_id", [], false)
+	# B1: confirm status_id is known via StatusDef lookup.
+	if not StatusDefResolverScript.has(status_id):
+		return EffectResultScript.failed("remove_status unknown status_id: %s" % str(status_id), [], false)
 	var container = world.get_status_container(tgt)
 	if container == null:
 		return EffectResultScript.failed("no status container", [], false)
-	if not container.remove(tgt, status_id):
+	if not container.remove(status_id):
 		return EffectResultScript.failed("status not present", [], false)
 	var emitter = ctx.emitter()
 	var ev = emitter.emit(

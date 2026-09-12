@@ -1,16 +1,28 @@
 class_name StatQuery extends RefCounted
-## Phase 3 / StatQuery — pure stat aggregation.
+## Phase 3 / B1 / StatQuery — pure stat aggregation using
+## StatusDef content for modifier semantics.
 ##
-## effective_stat(entity) = base_stat(entity) + sum of magnitudes
-## of all status modifiers on entity (filtered by status_id
-## semantics).
+## Aggregation rule (B1):
+##   effective_stat = round(base * (1 + sum_pct)) + sum_flat
 ##
-## Phase 3 minimum: effective_attack().
+## where:
+##   sum_pct = sum over all relevant statuses of
+##             (stacks * modifier_amount) for statuses with
+##             is_percent_modifier == true
+##   sum_flat = sum over all relevant statuses of
+##             (stacks * modifier_amount) for statuses with
+##             is_percent_modifier == false
 ##
-## Does NOT mutate stored base stats. Removing a status modifier
-## naturally restores the base value (verified by tests).
+## Round is applied ONCE after combining all modifiers. This
+## avoids status-order-dependent rounding.
+##
+## Phase 3 minimum: effective_attack(), effective_defense(),
+## is_stunned().
+##
+## Does NOT mutate stored base stats.
 
 const StatusContainerScript = preload("res://core/battle_ecs/status/status_container.gd")
+const StatusDefResolverScript = preload("res://core/battle_ecs/status/status_def_resolver.gd")
 
 var _world = null
 
@@ -20,42 +32,17 @@ func _init(p_world) -> void:
 
 
 ## Returns effective attack for entity_id.
-## = world.attack_of(id) + sum of magnitude across all statuses
-##   on the entity whose status_id starts with "attack_".
-##
-## Phase 3 minimum policy: any status with id matching
-## &"attack_up" or &"attack_down" contributes its magnitude
-## (negative for down). Future expansion: explicit "modifies
-## attack" flag on the status definition.
+## Reads each StatusDef's attack_modifier + is_percent_modifier and
+## applies the aggregation rule.
 func effective_attack(entity_id: int) -> int:
 	var base: int = int(_world.attack_of(entity_id))
-	var container = _world.get_status_container(entity_id)
-	if container == null:
-		return base
-	var statuses: Array = container.all_for(entity_id)
-	for inst in statuses:
-		var sid: StringName = inst.status_id
-		if sid == &"attack_up" or sid == &"attack_up_stack":
-			base += int(inst.magnitude) * int(inst.stacks)
-		elif sid == &"attack_down":
-			base -= int(inst.magnitude) * int(inst.stacks)
-	return base
+	return _aggregate_stat(entity_id, base, "attack_modifier")
 
 
 ## Returns effective defense (mirror of effective_attack).
 func effective_defense(entity_id: int) -> int:
 	var base: int = int(_world.defense_of(entity_id))
-	var container = _world.get_status_container(entity_id)
-	if container == null:
-		return base
-	var statuses: Array = container.all_for(entity_id)
-	for inst in statuses:
-		var sid: StringName = inst.status_id
-		if sid == &"defense_up":
-			base += int(inst.magnitude) * int(inst.stacks)
-		elif sid == &"defense_down":
-			base -= int(inst.magnitude) * int(inst.stacks)
-	return base
+	return _aggregate_stat(entity_id, base, "defense_modifier")
 
 
 ## True iff the entity is currently stunned (has &"stun" status
@@ -64,8 +51,42 @@ func is_stunned(entity_id: int) -> bool:
 	var container = _world.get_status_container(entity_id)
 	if container == null:
 		return false
-	var inst = container.get_status(entity_id, &"stun")
+	var inst = container.get_status(&"stun")
 	if inst == null:
 		return false
 	# Indefinite remaining (-1) OR remaining > 0.
 	return int(inst.remaining) != 0
+
+
+## Internal: aggregate one stat field (attack_modifier or
+## defense_modifier) across all of the entity's statuses using
+## StatusDef semantics.
+func _aggregate_stat(entity_id: int, base: int, def_field: String) -> int:
+	var container = _world.get_status_container(entity_id)
+	if container == null:
+		return base
+	var sum_pct: float = 0.0
+	var sum_flat: float = 0.0
+	for inst in container.all():
+		var def: Resource = StatusDefResolverScript.resolve(inst.status_id)
+		if def == null:
+			continue
+		# Read the requested modifier field from the StatusDef.
+		# Default to 0.0 if missing.
+		var amount: float = 0.0
+		if def.get(def_field) != null:
+			amount = float(def.get(def_field))
+		var stacks: int = int(inst.stacks)
+		var contribution: float = amount * float(stacks)
+		if bool(def.is_percent_modifier):
+			sum_pct += contribution
+		else:
+			sum_flat += contribution
+	# Aggregation: base * (1 + sum_pct) + sum_flat, rounded once.
+	var result: float = float(base) * (1.0 + sum_pct) + sum_flat
+	# Round half-to-even (banker's) is deterministic; but for
+	# game readability we use standard round-half-up.
+	if result >= 0.0:
+		return int(floor(result + 0.5))
+	else:
+		return int(ceil(result - 0.5))
