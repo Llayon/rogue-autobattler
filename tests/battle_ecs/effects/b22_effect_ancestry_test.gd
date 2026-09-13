@@ -63,7 +63,7 @@ func _initialize() -> void:
 	await _test_heal_event_completeness()
 	await _test_apply_remove_event_completeness()
 	# === HIGH 4: 14-field normalization contract (smoke) ===
-	await _test_14_normalized_field_completeness()
+	await _test_event_object_exposes_normalized_properties()
 	print("\n=== B2.2 focused tests: %d passed, %d failed ===\n" % [_passed, _failed])
 	if _failed > 0:
 		quit(1)
@@ -279,8 +279,11 @@ func _test_direct_child_effect_event_chain_depth_exact() -> void:
 
 func _test_nested_child_effect_event_chain_depth_exact() -> void:
 	print("[DEPTH-2] nested_child_effect_event_chain_depth_exact")
-	# Construct a parent at depth 3, request child with
-	# chain_depth=4. Emitted child must be at depth 4.
+	# B2.3 corrected test: build a real chain root -> child ->
+	# grandchild (depth 0 -> 1 -> 2). Then construct the next
+	# child EffectRequest via child_from_parent(grandchild).
+	# The factory derives chain_depth = grandchild.depth + 1 = 3.
+	# Caller does NOT pick chain_depth manually.
 	var arr: Array = _make_world_and_ctx(80)
 	var w: BattleWorldScript = arr[0]
 	var ctx = arr[1]
@@ -290,16 +293,31 @@ func _test_nested_child_effect_event_chain_depth_exact() -> void:
 		int(root.event_id), int(root.root_action_id), int(root.chain_depth))
 	var r3 = em.emit_child(BattleEventTypeScript.UNIT_DIED,
 		int(r2.event_id), int(r2.root_action_id), int(r2.chain_depth))
-	_assert(int(r3.chain_depth) == 2, "r3 chain_depth == 2")
-	# Now construct child effect request with chain_depth=4.
-	var req = EffectRequestScript.new(
-		EffectKindScript.DAMAGE, 0, 1, 10,
-		int(r3.root_action_id), int(r3.event_id), 4)
+	_assert(int(r3.chain_depth) == 2, "grandchild chain_depth == 2")
+	# Use the canonical CHILD factory — no caller arithmetic.
+	var req = EffectRequestScript.child_from_parent(
+		EffectKindScript.DAMAGE,
+		r3,
+		0, 1, 10)
+	_assert(req != null, "child_from_parent returned a request")
+	# Factory must have derived exactly: parent_event_id =
+	# grandchild.event_id, root_action_id = grandchild.root,
+	# chain_depth = grandchild.depth + 1 = 3.
+	_assert(int(req.parent_event_id) == int(r3.event_id),
+		"req.parent_event_id == grandchild.event_id")
+	_assert(int(req.root_action_id) == int(r3.root_action_id),
+		"req.root_action_id == grandchild.root_action_id")
+	_assert(int(req.chain_depth) == 3,
+		"req.chain_depth == grandchild.depth + 1 (got %d)" % int(req.chain_depth))
 	var result = DamageEffectScript.execute(ctx, req)
-	_assert(result.success, "nested damage succeeds")
+	_assert(result.success, "damage succeeds")
 	var dmg_ev = result.events[0]
-	_assert(int(dmg_ev.chain_depth) == 4,
-		"nested child event chain_depth == 4 (req.chain_depth), got %d" % int(dmg_ev.chain_depth))
+	_assert(int(dmg_ev.chain_depth) == 3,
+		"emitted child event chain_depth == 3 (req.chain_depth), got %d" % int(dmg_ev.chain_depth))
+	_assert(int(dmg_ev.parent_event_id) == int(r3.event_id),
+		"emitted event parent_event_id == grandchild.event_id")
+	_assert(int(dmg_ev.root_action_id) == int(r3.root_action_id),
+		"emitted event shares root_action_id with grandchild")
 
 
 # === HIGH 2: malformed matrix per effect ===
@@ -472,10 +490,12 @@ func _test_apply_remove_event_completeness() -> void:
 
 # === HIGH 4 ===
 
-func _test_14_normalized_field_completeness() -> void:
-	print("[NORM-1] 14_normalized_field_completeness")
-	# Build a real BattleSimulation trace and confirm every
-	# event has all 14 normalized fields populated (non-null).
+func _test_event_object_exposes_normalized_properties() -> void:
+	print("[NORM-1] event_object_exposes_normalized_properties")
+	# B2.3: this test verifies that BattleEvent objects expose
+	# the properties the determinism stress test expects to read.
+	# It does NOT make claims about which property values are
+	# semantically valid — those vary per event type.
 	var sim = _make_sim()
 	sim.set_max_ticks(20)
 	var evs: Array = sim.run_until_done(1000)
@@ -485,8 +505,8 @@ func _test_14_normalized_field_completeness() -> void:
 				"source_run_unit_id", "target_run_unit_id", "amount", "tag",
 				"from_cell", "to_cell", "parent_event_id", "root_action_id",
 				"chain_depth"]:
-			_assert(e.get(f) != null or true,
-				"field '%s' present on event %s" % [f, str(e.event_id)])
+			_assert(e.get(f) != null,
+				"property '%s' present on event %d" % [f, int(e.event_id)])
 
 
 # === Helpers ===
