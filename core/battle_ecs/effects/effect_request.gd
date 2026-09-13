@@ -5,7 +5,7 @@ class_name EffectRequest extends RefCounted
 ## Carries NO Node/scene references. Stateless. Reusable across
 ## effects.
 ##
-## B2.2 ancestry contract:
+## B2.3 ancestry contract:
 ##
 ## EffectRequest ancestry describes the EVENT that the effect
 ## itself will emit (not the parent's depth).
@@ -25,11 +25,20 @@ class_name EffectRequest extends RefCounted
 ##      (parent_event_id, root_action_id) with chain_depth =
 ##      req.chain_depth (one more than parent's depth).
 ##
-## Any other combination is INVALID. validate_ancestry()
+## Any other combination is INVALID. validate_ancestry_shape()
 ## returns {ok: false, reason: "..."} for invalid requests.
 ## No effect may mutate state for an invalid request.
+##
+## IMPORTANT (B2.3): validate_ancestry_shape() validates the
+## SHAPE of the ancestry fields. It does NOT prove that the
+## referenced parent_event_id corresponds to a real BattleEvent
+## with root_action_id == self.root_action_id and
+## chain_depth == self.chain_depth - 1. Production chain code
+## MUST use child_from_parent(parent_event) which derives those
+## fields from an actual parent BattleEvent. The raw
+## constructor is reserved for tests and low-level use.
 
-## B2.2 ancestry kinds.
+## B2.3 ancestry kinds.
 const ANCESTRY_ROOT: StringName = &"root"
 const ANCESTRY_CHILD: StringName = &"child"
 const ANCESTRY_INVALID: StringName = &"invalid"
@@ -45,6 +54,9 @@ var definition_id: StringName = &""
 var payload: Dictionary = {}
 
 
+## Raw constructor. Use root() or child_from_parent() in
+## production code. The raw constructor remains available for
+## tests, serialization, and other low-level consumers.
 func _init(
 		p_kind: int = 0,
 		p_source: int = 0,
@@ -62,6 +74,54 @@ func _init(
 	chain_depth = int(p_chain_depth)
 
 
+## B2.3 canonical ROOT factory. All raw fields are explicitly
+## the ROOT shape (-1, -1, 0). Use this in production code
+## that wants to emit a fresh-root event.
+static func root(
+		p_kind: int,
+		p_source: int = 0,
+		p_target: int = 0,
+		p_amount: int = 0) -> EffectRequest:
+	var r = EffectRequest.new(
+		int(p_kind), int(p_source), int(p_target), int(p_amount),
+		-1, -1, 0)
+	return r
+
+
+## B2.3 canonical CHILD factory. Derives root_action_id,
+## parent_event_id, and chain_depth FROM the parent BattleEvent.
+## No caller-supplied child ancestry. If the parent is null or
+## malformed, returns null.
+##
+## Production chain code (TriggerDispatcher, future Burn/Regen
+## reactions) MUST use this factory.
+static func child_from_parent(
+		p_kind: int,
+		p_parent_event,
+		p_source: int = 0,
+		p_target: int = 0,
+		p_amount: int = 0) -> RefCounted:
+	if p_parent_event == null:
+		return null
+	var parent_event_id: int = int(p_parent_event.event_id)
+	var parent_root_action_id: int = int(p_parent_event.root_action_id)
+	var parent_chain_depth: int = int(p_parent_event.chain_depth)
+	if parent_event_id <= 0:
+		return null
+	if parent_root_action_id <= 0:
+		return null
+	if parent_chain_depth < 0:
+		return null
+	return EffectRequest.new(
+		int(p_kind),
+		int(p_source),
+		int(p_target),
+		int(p_amount),
+		parent_root_action_id,
+		parent_event_id,
+		parent_chain_depth + 1)
+
+
 ## Returns the kind without validation cost.
 func ancestry_kind() -> StringName:
 	if int(root_action_id) == -1 and int(parent_event_id) == -1 and int(chain_depth) == 0:
@@ -71,14 +131,12 @@ func ancestry_kind() -> StringName:
 	return ANCESTRY_INVALID
 
 
-## Validates the ancestry contract. Returns a Dictionary:
-##   { ok: bool, kind: ANCESTRY_ROOT|ANCESTRY_CHILD|ANCESTRY_INVALID,
-##     reason: String (only when !ok) }
-##
-## ROOT:  exactly root=-1, parent=-1, depth=0
-## CHILD: exactly root>0, parent>0, depth>=1
-## INVALID: anything else, with a human-readable reason.
-func validate_ancestry() -> Dictionary:
+## B2.3: renamed from validate_ancestry() — this method
+## validates the SHAPE of the ancestry fields. It cannot
+## detect forged parent metadata (it does not have access to
+## the parent BattleEvent). Use a trace auditor for
+## referential parent consistency.
+func validate_ancestry_shape() -> Dictionary:
 	# Disallow 0 (sentinel for unset-but-intentional). -1 is the
 	# root sentinel; 0 must not appear in either field.
 	if int(root_action_id) == 0:
@@ -105,6 +163,11 @@ func validate_ancestry() -> Dictionary:
 		return _invalid(
 			"root_action_id > 0 but parent_event_id == -1 (must be both -1 or both > 0)")
 	return _invalid("ancestry: unclassified")
+
+
+## Backward-compatible instance method alias.
+func validate_ancestry() -> Dictionary:
+	return validate_ancestry_shape()
 
 
 static func _invalid(p_reason: String) -> Dictionary:
