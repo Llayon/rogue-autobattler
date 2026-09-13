@@ -48,6 +48,7 @@ const BattleSetupScript = preload("res://core/battle_ecs/battle_setup.gd")
 const BattleResultScript = preload("res://core/battle_ecs/battle_result.gd")
 const BattleEventScript = preload("res://core/battle_ecs/battle_event.gd")
 const BattleEventTypeScript = preload("res://core/battle_ecs/battle_event_type.gd")
+const BattleEventEmitterScript = preload("res://core/battle_ecs/events/battle_event_emitter.gd")
 const BalanceScript = preload("res://core/balance.gd")
 
 const _MAX_NO_PROGRESS_TICKS: int = 2
@@ -58,12 +59,24 @@ var _setup: RefCounted = null
 var _tick_count: int = 0
 var _finished: bool = false
 var _result: RefCounted = null
-var _next_event_id: int = 0
+# B2.0: removed _next_event_id. Simulation owns ONE
+# BattleEventEmitter. All event_id / root_action_id allocation
+# flows through it.
+var _event_emitter: RefCounted = null
 var _max_ticks: int = 0
 var _no_progress_count: int = 0
 var _last_progress_sig: String = ""
 var _valid: bool = false
 var _termination_reason: int = BattleResultScript.TERMINATION_NATURAL
+
+
+## Returns the simulation-owned BattleEventEmitter. Effects
+## operating outside BattleSimulation may own their own
+## emitter; this method exposes the simulation's single
+## authoritative one so future EffectContext wiring can share
+## it.
+func emitter() -> RefCounted:
+	return _event_emitter
 
 
 func is_valid() -> bool:
@@ -82,11 +95,17 @@ func initialize(setup: BattleSetup) -> bool:
 	_finished = false
 	_result = null
 	_tick_count = 0
-	_next_event_id = 0
 	_no_progress_count = 0
 	_last_progress_sig = ""
 	_termination_reason = BattleResultScript.TERMINATION_NATURAL
 	_max_ticks = 0  # reset caller-overridden tick budget
+	# B2.0: own exactly one BattleEventEmitter. reset() makes
+	# the next event_id start at 1 and the next root_action_id
+	# start at 1. No previous battle counter leaks across
+	# reinitialize.
+	_event_emitter = BattleEventEmitterScript.new()
+	_event_emitter.reset()
+	_event_emitter.set_tick(0)
 	# HIGH 6 fix: own a true snapshot copy of the setup so
 	# caller mutation of the original BattleSetup after
 	# initialize() cannot retroactively alter an in-progress
@@ -161,6 +180,10 @@ func step_tick() -> Array:
 	if _finished:
 		return []
 	_tick_count += 1
+	# B2.0: update the emitter's tick BEFORE any event is emitted
+	# during this tick. The emitter tags every event with this
+	# tick value automatically.
+	_event_emitter.set_tick(_tick_count)
 	var events: Array = []
 	events.append_array(_drive_basic_attacks())
 	var natural: bool = _world.one_side_empty()
@@ -275,18 +298,19 @@ func _resolve_or_move(attacker_id: int, target_id: int) -> Array:
 		# Emit no event — caller will detect no-progress and
 		# eventually force-finish.
 		return []
-	# Emit UNIT_MOVED with from_cell/to_cell.
-	_next_event_id += 1
-	var moved_event: BattleEventScript = BattleEventScript.new()
-	moved_event.event_id = _next_event_id
-	moved_event.type = BattleEventTypeScript.UNIT_MOVED
-	moved_event.tick = _tick_count
-	moved_event.source_entity = attacker_id
-	moved_event.target_entity = target_id
-	moved_event.source_run_unit_id = _world.source_run_unit_id_of(attacker_id)
-	moved_event.target_run_unit_id = _world.source_run_unit_id_of(target_id)
-	moved_event.from_cell = src
-	moved_event.to_cell = dst
+	# B2.0: movement is its own root action. Use emitter.emit()
+	# (allocates a fresh root_action_id, parent=-1, depth=0,
+	# tick taken from the emitter).
+	var moved_event = _event_emitter.emit(
+		BattleEventTypeScript.UNIT_MOVED,
+		attacker_id,
+		target_id,
+		_world.source_run_unit_id_of(attacker_id),
+		_world.source_run_unit_id_of(target_id),
+		0,
+		"",
+		src,
+		dst)
 	return [moved_event]
 
 
@@ -310,51 +334,57 @@ func _resolve_attack(attacker_id: int, target_id: int) -> Array:
 	if not _world.in_attack_range(attacker_id, target_id):
 		return events
 	var dmg: int = _compute_damage(attacker_id, target_id)
-	_next_event_id += 1
-	var attack_event: BattleEventScript = BattleEventScript.new()
-	attack_event.event_id = _next_event_id
-	attack_event.type = BattleEventTypeScript.ATTACK_RESOLVED
-	attack_event.tick = _tick_count
-	attack_event.source_entity = attacker_id
-	attack_event.target_entity = target_id
-	attack_event.source_run_unit_id = _world.source_run_unit_id_of(attacker_id)
-	attack_event.target_run_unit_id = _world.source_run_unit_id_of(target_id)
-	attack_event.amount = dmg
+	# B2.0: ATTACK_RESOLVED is the root event for the entire
+	# attack action. Subsequent DAMAGE_APPLIED (and optional
+	# UNIT_DIED) become children under the same root_action_id.
+	var attack_event = _event_emitter.emit(
+		BattleEventTypeScript.ATTACK_RESOLVED,
+		attacker_id,
+		target_id,
+		_world.source_run_unit_id_of(attacker_id),
+		_world.source_run_unit_id_of(target_id),
+		dmg)
 	events.append(attack_event)
 	var dealt: int = _world.apply_damage(target_id, dmg)
-	_next_event_id += 1
-	var dmg_event: BattleEventScript = BattleEventScript.new()
-	dmg_event.event_id = _next_event_id
-	dmg_event.type = BattleEventTypeScript.DAMAGE_APPLIED
-	dmg_event.tick = _tick_count
-	dmg_event.source_entity = attacker_id
-	dmg_event.target_entity = target_id
-	dmg_event.source_run_unit_id = _world.source_run_unit_id_of(attacker_id)
-	dmg_event.target_run_unit_id = _world.source_run_unit_id_of(target_id)
-	dmg_event.amount = dealt
+	# DAMAGE_APPLIED as a child of ATTACK_RESOLVED.
+	var dmg_event = _event_emitter.emit_child(
+		BattleEventTypeScript.DAMAGE_APPLIED,
+		int(attack_event.event_id),
+		int(attack_event.root_action_id),
+		int(attack_event.chain_depth),
+		attacker_id,
+		target_id,
+		_world.source_run_unit_id_of(attacker_id),
+		_world.source_run_unit_id_of(target_id),
+		dealt)
 	events.append(dmg_event)
 	if not _world.is_alive(target_id):
-		_next_event_id += 1
-		var died_event: BattleEventScript = BattleEventScript.new()
-		died_event.event_id = _next_event_id
-		died_event.type = BattleEventTypeScript.UNIT_DIED
-		died_event.tick = _tick_count
-		died_event.source_entity = attacker_id
-		died_event.target_entity = target_id
-		died_event.source_run_unit_id = _world.source_run_unit_id_of(attacker_id)
-		died_event.target_run_unit_id = _world.source_run_unit_id_of(target_id)
-		died_event.amount = dealt
+		# UNIT_DIED as a child of DAMAGE_APPLIED.
+		var died_event = _event_emitter.emit_child(
+			BattleEventTypeScript.UNIT_DIED,
+			int(dmg_event.event_id),
+			int(dmg_event.root_action_id),
+			int(dmg_event.chain_depth),
+			attacker_id,
+			target_id,
+			_world.source_run_unit_id_of(attacker_id),
+			_world.source_run_unit_id_of(target_id),
+			dealt)
 		events.append(died_event)
 	return events
 
 
+## B2.0: BATTLE_ENDED is its own root event under the chosen
+## "fresh root per simulation-lifecycle event" policy. It is
+## NOT attached to the last attack/death action.
 func _make_battle_ended_event() -> BattleEvent:
-	_next_event_id += 1
-	var e: BattleEventScript = BattleEventScript.new()
-	e.event_id = _next_event_id
-	e.type = BattleEventTypeScript.BATTLE_ENDED
-	e.tick = _tick_count
-	e.amount = _result.winner_team if _result != null else -1
+	var e = _event_emitter.emit(
+		BattleEventTypeScript.BATTLE_ENDED,
+		-1,
+		-1,
+		"",
+		"",
+		(_result.winner_team if _result != null else -1))
 	return e
 
 
