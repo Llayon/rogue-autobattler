@@ -64,12 +64,31 @@ static func execute(ctx, req) -> RefCounted:
 	var ticks: int = int(dur_res.get("ticks", 0))
 	# Determine stacks from payload (default 1).
 	var stacks: int = int(req.payload.get("stacks", 1))
-	# B1.1: reject stacks <= 0 (do not silently create zero/negative
-	# stack statuses).
+	# B1.2: reject stacks <= 0 explicitly (the container also
+	# rejects, but we want an explicit failure reason at the
+	# ApplyStatusEffect boundary).
 	if stacks <= 0:
 		return EffectResultScript.failed(
 			"apply_status invalid stacks: %d (must be > 0)" % stacks, [], false)
-	# Get or create the entity's StatusContainer.
+	# B1.2: defensive policy + max_stacks normalization from
+	# StatusDef. Malformed content cannot weaken the invariant:
+	#   - def.stackable == false -> policy = "unique",
+	#     effective_max_stacks = 1 (regardless of def.max_stacks).
+	#   - def.stackable == true  -> policy = "stackable",
+	#     effective_max_stacks = def.max_stacks (must be >= 1).
+	var policy: String = "unique"
+	var effective_max_stacks: int = 1
+	if bool(def.stackable):
+		policy = "stackable"
+		var m: int = int(def.max_stacks)
+		if m < 1:
+			# Defensive: malformed stackable status without a valid
+			# max_stacks cannot silently use an arbitrary fallback.
+			# Refuse rather than invent one.
+			return EffectResultScript.failed(
+				"apply_status stackable def has invalid max_stacks: %d" % m, [], false)
+		effective_max_stacks = m
+	# Apply policy via the container boundary.
 	var container = world.get_status_container(tgt)
 	if container == null:
 		container = world.create_status_container(tgt)
@@ -81,10 +100,7 @@ static func execute(ctx, req) -> RefCounted:
 		stacks,
 		ticks,
 		0)
-	# B1: stackable/max_stacks from the StatusDef.
-	var policy: String = "stackable" if bool(def.stackable) else "unique"
-	var max_stacks: int = int(def.max_stacks) if int(def.max_stacks) > 0 else 1
-	var accepted = container.add(inst, policy, max_stacks)
+	var accepted = container.add(inst, policy, effective_max_stacks)
 	if accepted == null:
 		return EffectResultScript.failed("apply_status rejected by container", [], false)
 	var emitter = ctx.emitter()

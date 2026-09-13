@@ -52,10 +52,19 @@ func owns(entity_id: int) -> bool:
 ##
 ## Returns the (existing or newly-inserted) StatusInstance, or
 ## null if rejected.
-## B1.1 stack invariant contract (enforced at container boundary):
-##   - Stacks are ALWAYS clamped to [1, max_stacks] when max_stacks > 0.
-##   - Stacks requested as <= 0 cause rejection (returns null).
-##   - This invariant holds for BOTH first insert and reapply.
+## B1.2 stacking policy contract (enforced at container boundary):
+##   - "unique": stored stacks == 1, ALWAYS. Requested stacks and
+##     max_stacks are IGNORED for stack count purposes. Duration
+##     refreshes on reapply.
+##   - "stackable": requested stacks > 0; clamped to [1, max_stacks]
+##     on first insert; existing + requested clamped to max_stacks
+##     on reapply.
+##   - any other policy value: REJECTED (returns null, no mutation).
+##
+## Stacks invariant:
+##   - Requested stacks <= 0 → rejection.
+##   - Stored stacks never exceeds max_stacks.
+##   - Under "unique", stored stacks is always 1.
 func add(inst, stacking_policy: String = "stackable", max_stacks: int = 99) -> RefCounted:
 	if inst == null:
 		return null
@@ -68,15 +77,22 @@ func add(inst, stacking_policy: String = "stackable", max_stacks: int = 99) -> R
 	# Normalize max_stacks: <= 0 falls back to 99 (legacy safety).
 	if max_stacks <= 0:
 		max_stacks = 99
+	# Validate stacking_policy. Unknown values are rejected so
+	# the container can never silently default to "stackable".
+	var policy: String = String(stacking_policy)
+	if policy != "unique" and policy != "stackable":
+		return null
 	var existing = _find(inst.status_id)
 	if existing != null:
-		if stacking_policy == "unique":
-			# Refresh duration; stacks clamped to [1, max_stacks].
-			existing.stacks = clampi(int(inst.stacks), 1, max_stacks)
+		if policy == "unique":
+			# B1.2: UNIQUE forces stored stacks == 1, ignoring
+			# requested stacks AND max_stacks for the stack
+			# count. Duration still refreshes.
+			existing.stacks = 1
 			if int(inst.remaining) > 0:
 				existing.remaining = int(inst.remaining)
 			return existing
-		# stackable: increment up to max_stacks.
+		# "stackable": increment up to max_stacks.
 		var new_stacks: int = int(existing.stacks) + int(inst.stacks)
 		if new_stacks > max_stacks:
 			new_stacks = max_stacks
@@ -86,8 +102,13 @@ func add(inst, stacking_policy: String = "stackable", max_stacks: int = 99) -> R
 		if int(inst.remaining) > 0:
 			existing.remaining = int(inst.remaining)
 		return existing
-	# First insert. Clamp requested stacks to [1, max_stacks].
-	inst.stacks = clampi(int(inst.stacks), 1, max_stacks)
+	# First insert.
+	if policy == "unique":
+		# B1.2: UNIQUE forces stored stacks == 1.
+		inst.stacks = 1
+	else:
+		# "stackable": clamp to [1, max_stacks].
+		inst.stacks = clampi(int(inst.stacks), 1, max_stacks)
 	_statuses.append(inst)
 	return inst
 
