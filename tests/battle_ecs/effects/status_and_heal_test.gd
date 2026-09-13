@@ -310,7 +310,7 @@ func _test_heal_partial() -> void:
 	_assert(world.current_hp_of(0) == 70, "HP restored to 70 (got %d)" % world.current_hp_of(0))
 	var saw_heal: bool = false
 	for e in pair[1]:
-		if int(e.type) == HealEffectScript.HEAL_APPLIED:
+		if int(e.type) == BattleEventTypeScript.HEAL_APPLIED:
 			saw_heal = true
 			break
 	_assert(saw_heal, "HEAL_APPLIED BattleEvent emitted")
@@ -382,7 +382,7 @@ func _test_heal_emits_heal_event_with_actual_amount() -> void:
 	var saw_event_id: bool = false
 	var saw_amount_match: bool = false
 	for e in sink:
-		if int(e.type) == HealEffectScript.HEAL_APPLIED:
+		if int(e.type) == BattleEventTypeScript.HEAL_APPLIED:
 			saw_heal = true
 			if int(e.event_id) >= 1:
 				saw_event_id = true
@@ -415,7 +415,7 @@ func _test_apply_status_to_live_target_emits_event() -> void:
 	_assert(c.has_status(&"attack_up"), "target has attack_up status")
 	var saw_applied: bool = false
 	for e in sink:
-		if int(e.type) == ApplyStatusEffectScript.STATUS_APPLIED:
+		if int(e.type) == BattleEventTypeScript.STATUS_APPLIED:
 			saw_applied = true
 			break
 	_assert(saw_applied, "STATUS_APPLIED BattleEvent emitted")
@@ -479,7 +479,7 @@ func _test_remove_status_existing_emits_event() -> void:
 	_assert(not c.has_status(&"attack_up"), "status removed")
 	var saw_removed: bool = false
 	for e in sink.slice(sink_size_before):
-		if int(e.type) == RemoveStatusEffectScript.STATUS_REMOVED:
+		if int(e.type) == BattleEventTypeScript.STATUS_REMOVED:
 			saw_removed = true
 			break
 	_assert(saw_removed, "STATUS_REMOVED BattleEvent emitted")

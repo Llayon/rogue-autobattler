@@ -14,8 +14,6 @@ extends RefCounted
 const BattleEventTypeScript = preload("res://core/battle_ecs/battle_event_type.gd")
 const EffectResultScript = preload("res://core/battle_ecs/effects/effect_result.gd")
 
-const HEAL_APPLIED: int = 6
-
 
 ## Execute heal effect.
 static func execute(ctx, req) -> RefCounted:
@@ -37,7 +35,7 @@ static func execute(ctx, req) -> RefCounted:
 	world.heal(tgt, restored)
 	var emitter = ctx.emitter()
 	var heal_event = emitter.emit(
-		HEAL_APPLIED,
+		BattleEventTypeScript.HEAL_APPLIED,
 		src,
 		tgt,
 		"",

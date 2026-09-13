@@ -9,9 +9,6 @@ const BattleEventTypeScript = preload("res://core/battle_ecs/battle_event_type.g
 const EffectResultScript = preload("res://core/battle_ecs/effects/effect_result.gd")
 const StatusDefResolverScript = preload("res://core/battle_ecs/status/status_def_resolver.gd")
 
-const STATUS_REMOVED: int = 8
-
-
 ## Execute remove-status effect.
 static func execute(ctx, req) -> RefCounted:
 	var world = ctx.world()
@@ -35,7 +32,7 @@ static func execute(ctx, req) -> RefCounted:
 		return EffectResultScript.failed("status not present", [], false)
 	var emitter = ctx.emitter()
 	var ev = emitter.emit(
-		STATUS_REMOVED,
+		BattleEventTypeScript.STATUS_REMOVED,
 		int(req.source_entity),
 		tgt,
 		"",

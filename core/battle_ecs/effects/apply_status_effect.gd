@@ -19,9 +19,6 @@ const StatusContainerScript = preload("res://core/battle_ecs/status/status_conta
 const StatusInstanceScript = preload("res://core/battle_ecs/status/status_instance.gd")
 const StatusDefResolverScript = preload("res://core/battle_ecs/status/status_def_resolver.gd")
 
-const STATUS_APPLIED: int = 7
-
-
 ## Execute apply-status effect. The status_id is read from the
 ## request payload's "status_id" or from request.definition_id.
 ## ApplyStatusEffect will:
@@ -105,7 +102,7 @@ static func execute(ctx, req) -> RefCounted:
 		return EffectResultScript.failed("apply_status rejected by container", [], false)
 	var emitter = ctx.emitter()
 	var ev = emitter.emit(
-		STATUS_APPLIED,
+		BattleEventTypeScript.STATUS_APPLIED,
 		int(req.source_entity),
 		tgt,
 		"",
