@@ -99,7 +99,7 @@ func _make_ctx() -> Array:
 func _test_status_instance_basic_construction() -> void:
 	print("[sc-1] status_instance_basic_construction")
 	var st = StatusInstanceScript.new(&"attack_up", 0, 1, 2, 9999, 5)
-	_assert(int(st.status_id) == int(&"attack_up"), "status_id stored")
+	_assert(st.status_id == &"attack_up", "status_id stored")
 	_assert(int(st.source_entity) == 0, "source_entity stored")
 	_assert(int(st.target_entity) == 1, "target_entity stored")
 	_assert(int(st.stacks) == 2, "stacks stored")
@@ -176,9 +176,9 @@ func _test_status_container_iteration_order_deterministic() -> void:
 	c.add(StatusInstanceScript.new(&"third", 0, 0, 1, 9999, 3))
 	var ids: Array = c.status_ids()
 	_assert(ids.size() == 3, "3 statuses")
-	_assert(int(ids[0]) == int(&"first"), "first by insertion")
-	_assert(int(ids[1]) == int(&"second"), "second by insertion")
-	_assert(int(ids[2]) == int(&"third"), "third by insertion")
+	_assert(ids[0] == &"first", "first by insertion")
+	_assert(ids[1] == &"second", "second by insertion")
+	_assert(ids[2] == &"third", "third by insertion")
 
 
 func _test_status_container_cleanup_on_remove_entity() -> void:
@@ -239,9 +239,9 @@ func _test_container_stringname_identity_preserved_through_expiry() -> void:
 	c.add(StatusInstanceScript.new(&"stun", 0, 0, 1, 1, 0))
 	var expired: Array = c.tick(1)
 	_assert(expired.size() == 2, "both expired (got %d)" % expired.size())
-	_assert(int(expired[0].status_id) == int(&"attack_up"),
+	_assert(expired[0].status_id == &"attack_up",
 		"first expired status_id == attack_up (got %s)" % str(expired[0].status_id))
-	_assert(int(expired[1].status_id) == int(&"stun"),
+	_assert(expired[1].status_id == &"stun",
 		"second expired status_id == stun (got %s)" % str(expired[1].status_id))
 	_assert(expired[0].status_id != expired[1].status_id,
 		"status_id distinct (no int-casting corruption, got %s vs %s)" % [str(expired[0].status_id), str(expired[1].status_id)])
@@ -249,7 +249,7 @@ func _test_container_stringname_identity_preserved_through_expiry() -> void:
 	c.add(StatusInstanceScript.new(&"burn", 0, 0, 1, 5, 5))
 	var removed: Array = c.clear()
 	_assert(removed.size() == 1, "clear returns removed instances (got %d)" % removed.size())
-	_assert(int(removed[0].status_id) == int(&"burn"),
+	_assert(removed[0].status_id == &"burn",
 		"cleared status_id == burn (got %s)" % str(removed[0].status_id))
 
 

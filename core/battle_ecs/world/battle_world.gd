@@ -189,21 +189,29 @@ func heal(id: int, amount: int) -> int:
 ## Container must belong to `entity_id` (ownership assertion).
 ## Container may be null (clears it). Replaces any existing.
 ##
-## B0.1 ownership contract: a StatusContainer is single-owner.
-## If the container's owner_entity_id is set and does not equal
-## entity_id, the assignment is rejected and the world keeps its
-## previous container (or null). This prevents one entity from
-## silently receiving another entity's container.
+## B1.1 strict container owner:
+##   - A container assigned to entity X must have
+##     owner_entity_id() == X.
+##   - Containers with owner == -1 (signaling "unset") are
+##     rejected.
+##   - Containers missing the owner_entity_id() API entirely
+##     are rejected.
+##
+## On rejection the world keeps its previous container (or null)
+## and returns false.
 func set_status_container(entity_id: int, container) -> bool:
 	if container == null:
 		_status_containers.erase(entity_id)
 		return true
-	# Ownership assertion.
-	var owner: int = -1
-	if container.has_method("owner_entity_id"):
-		owner = int(container.owner_entity_id())
-	if owner >= 0 and owner != int(entity_id):
-		# Reject: container belongs to a different entity.
+	# Strict ownership: the container must expose owner_entity_id
+	# and it must equal the entity it is being attached to.
+	if not container.has_method("owner_entity_id"):
+		return false
+	var owner: int = int(container.owner_entity_id())
+	if owner != int(entity_id):
+		# Reject: container owner does not match the target
+		# entity. This covers owner == -1 (unset), owner == other,
+		# and any other mismatch.
 		return false
 	_status_containers[entity_id] = container
 	return true

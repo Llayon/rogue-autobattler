@@ -48,13 +48,27 @@ static func execute(ctx, req) -> RefCounted:
 	var def: Resource = StatusDefResolverScript.resolve(status_id)
 	if def == null:
 		return EffectResultScript.failed("apply_status unknown status_id: %s" % str(status_id), [], false)
-	# B1: convert duration from float seconds to integer ticks.
-	var ticks: int = int(StatusDefResolverScript.convert_duration_to_ticks(float(def.duration)))
+	# B1.1: validate duration via the explicit result Dictionary.
+	# Reject INVALID (fractional / negative / non-finite) and
+	# INSTANT (duration==0) BEFORE creating any container or
+	# StatusInstance.
+	var dur_res: Dictionary = StatusDefResolverScript.convert_duration(float(def.duration))
+	if not bool(dur_res.get("ok", false)):
+		# Do NOT create a container. Do NOT mutate state. Return
+		# failure with the reason from the validation.
+		return EffectResultScript.failed(
+			"apply_status invalid duration: %s (status_id=%s)" % [
+				String(dur_res.get("reason", "")),
+				String(status_id),
+			], [], false)
+	var ticks: int = int(dur_res.get("ticks", 0))
 	# Determine stacks from payload (default 1).
 	var stacks: int = int(req.payload.get("stacks", 1))
-	# Magnitude is not used for StatusDef-driven statuses; legacy
-	# magnitude field remains for backwards compat with non-Def
-	# callers but is unused here.
+	# B1.1: reject stacks <= 0 (do not silently create zero/negative
+	# stack statuses).
+	if stacks <= 0:
+		return EffectResultScript.failed(
+			"apply_status invalid stacks: %d (must be > 0)" % stacks, [], false)
 	# Get or create the entity's StatusContainer.
 	var container = world.get_status_container(tgt)
 	if container == null:

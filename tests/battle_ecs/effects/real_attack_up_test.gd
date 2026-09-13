@@ -94,7 +94,7 @@ func _test_real_attack_up_definition_loadable() -> void:
 	var def: Resource = StatusDefResolverScript.resolve(&"attack_up")
 	_assert(def != null, "StatusDefResolver resolves real attack_up.tres")
 	if def != null:
-		_assert(int(def.id) == int(&"attack_up"),
+		_assert(def.id == &"attack_up",
 			"loaded StatusDef.id == &\"attack_up\" (got %s)" % str(def.id))
 		_assert(float(def.duration) == 5.0,
 			"real duration == 5.0 (got %s)" % str(def.duration))

@@ -52,29 +52,42 @@ func owns(entity_id: int) -> bool:
 ##
 ## Returns the (existing or newly-inserted) StatusInstance, or
 ## null if rejected.
+## B1.1 stack invariant contract (enforced at container boundary):
+##   - Stacks are ALWAYS clamped to [1, max_stacks] when max_stacks > 0.
+##   - Stacks requested as <= 0 cause rejection (returns null).
+##   - This invariant holds for BOTH first insert and reapply.
 func add(inst, stacking_policy: String = "stackable", max_stacks: int = 99) -> RefCounted:
 	if inst == null:
 		return null
 	if int(inst.target_entity) != int(_owner_entity_id):
 		# Reject: status does not belong to this container.
 		return null
+	# Reject invalid requested stacks (<= 0).
+	if int(inst.stacks) <= 0:
+		return null
+	# Normalize max_stacks: <= 0 falls back to 99 (legacy safety).
+	if max_stacks <= 0:
+		max_stacks = 99
 	var existing = _find(inst.status_id)
 	if existing != null:
 		if stacking_policy == "unique":
-			# Refresh duration; stacks remain 1.
+			# Refresh duration; stacks clamped to [1, max_stacks].
+			existing.stacks = clampi(int(inst.stacks), 1, max_stacks)
 			if int(inst.remaining) > 0:
 				existing.remaining = int(inst.remaining)
 			return existing
 		# stackable: increment up to max_stacks.
 		var new_stacks: int = int(existing.stacks) + int(inst.stacks)
-		if max_stacks <= 0:
-			max_stacks = 99
 		if new_stacks > max_stacks:
-			new_stacks = int(max_stacks)
+			new_stacks = max_stacks
+		if new_stacks < 1:
+			new_stacks = 1
 		existing.stacks = new_stacks
 		if int(inst.remaining) > 0:
 			existing.remaining = int(inst.remaining)
 		return existing
+	# First insert. Clamp requested stacks to [1, max_stacks].
+	inst.stacks = clampi(int(inst.stacks), 1, max_stacks)
 	_statuses.append(inst)
 	return inst
 

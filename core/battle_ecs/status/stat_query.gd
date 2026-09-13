@@ -2,19 +2,24 @@ class_name StatQuery extends RefCounted
 ## Phase 3 / B1 / StatQuery — pure stat aggregation using
 ## StatusDef content for modifier semantics.
 ##
-## Aggregation rule (B1):
-##   effective_stat = round(base * (1 + sum_pct)) + sum_flat
-##
+## B1.1 aggregation rule (single round after combining):
+##   effective_stat = round_half_away_from_zero(
+##       base * (1 + sum_pct) + sum_flat
+##   )
 ## where:
-##   sum_pct = sum over all relevant statuses of
-##             (stacks * modifier_amount) for statuses with
-##             is_percent_modifier == true
+##   sum_pct  = sum over all relevant statuses of
+##              (stacks * modifier_amount) for statuses with
+##              is_percent_modifier == true
 ##   sum_flat = sum over all relevant statuses of
-##             (stacks * modifier_amount) for statuses with
-##             is_percent_modifier == false
+##              (stacks * modifier_amount) for statuses with
+##              is_percent_modifier == false
 ##
-## Round is applied ONCE after combining all modifiers. This
+## The round is applied ONCE after combining all modifiers. This
 ## avoids status-order-dependent rounding.
+##
+## "round_half_away_from_zero" = ties go to whichever integer is
+## farther from zero (positive: floor(x+0.5); negative: ceil(x-0.5)).
+## Examples: 31.5 -> 32, 34.5 -> 35, -1.5 -> -2.
 ##
 ## Phase 3 minimum: effective_attack(), effective_defense(),
 ## is_stunned().
@@ -82,10 +87,10 @@ func _aggregate_stat(entity_id: int, base: int, def_field: String) -> int:
 			sum_pct += contribution
 		else:
 			sum_flat += contribution
-	# Aggregation: base * (1 + sum_pct) + sum_flat, rounded once.
+	# Aggregation: base * (1 + sum_pct) + sum_flat, rounded ONCE.
+	# round_half_away_from_zero: positive ties go up, negative ties
+	# go down (further from zero).
 	var result: float = float(base) * (1.0 + sum_pct) + sum_flat
-	# Round half-to-even (banker's) is deterministic; but for
-	# game readability we use standard round-half-up.
 	if result >= 0.0:
 		return int(floor(result + 0.5))
 	else:
