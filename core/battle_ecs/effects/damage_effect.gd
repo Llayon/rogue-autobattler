@@ -1,5 +1,6 @@
 extends RefCounted
-## Phase 3 / DamageEffect — generic deterministic physical damage.
+## Phase 3 / B2.2 / DamageEffect — generic deterministic
+## physical damage.
 ##
 ## Semantics (Phase 2 parity):
 ##   - Uses Balance.compute_damage (pure defense scaling)
@@ -9,14 +10,16 @@ extends RefCounted
 ##   - Invalid target -> EffectResult.failed
 ##   - Self-target -> EffectResult.failed
 ##
-## Event semantics (Phase 3):
+## Event semantics:
 ##   - Emits DAMAGE_APPLIED (NOT ATTACK_RESOLVED).
-##   - Generic damage. PerformAttack (not yet wired) is what
-##     emits ATTACK_RESOLVED for combat attacks. Poison / Burn /
-##     Thorns / environmental damage all flow through DamageEffect
-##     and must NOT masquerade as attacks.
-##   - If lethal, emits UNIT_DIED as a CHILD event (parent =
-##     DAMAGE_APPLIED.event_id, same root_action_id, depth+1).
+##   - If lethal, emits UNIT_DIED as a CHILD of DAMAGE_APPLIED.
+##   - result.events contains EVERY event emitted, in emission
+##     order. For lethal damage: [DAMAGE_APPLIED, UNIT_DIED].
+##
+## B2.2 ancestry contract:
+##   - Validates req.validate_ancestry() BEFORE any mutation.
+##   - Bad ancestry -> success=false, no world mutation, no
+##     event, no emitter counter advance.
 ##
 ## Called ONLY through EffectExecutor. Never invoked directly.
 
@@ -31,6 +34,13 @@ const BalanceScript = preload("res://core/balance.gd")
 ## Emits DAMAGE_APPLIED (and UNIT_DIED on kill) through the
 ## emitter. Does NOT emit ATTACK_RESOLVED.
 static func execute(ctx, req) -> RefCounted:
+	# B2.2: validate ancestry FIRST. No mutation may occur
+	# before this check.
+	var av = req.validate_ancestry()
+	if not bool(av.get("ok", false)):
+		return EffectResultScript.failed(
+			"damage invalid ancestry: %s" % String(av.get("reason", "")),
+			[], false)
 	var world = ctx.world()
 	# Validate target.
 	if not world.is_alive(int(req.target_entity)):
@@ -52,16 +62,17 @@ static func execute(ctx, req) -> RefCounted:
 	var req_parent: int = int(req.parent_event_id)
 	var req_root: int = int(req.root_action_id)
 	var req_depth: int = int(req.chain_depth)
-	# Build DAMAGE_APPLIED via the emitter. If the caller is
-	# inside a parent root action (parent_event_id > 0),
-	# DAMAGE_APPLIED is a child of it. Otherwise it is a root.
+	# Build DAMAGE_APPLIED via the emitter. If the request is
+	# CHILD, the emitted event has chain_depth == req_depth and
+	# shares req_root_action_id. If ROOT, the emitter allocates
+	# a fresh root.
 	var dmg_event = null
-	if req_parent > 0 and req_root > 0 and req_depth >= 0:
+	if String(av.get("kind", "")) == EffectRequestScript.ANCESTRY_CHILD:
 		dmg_event = emitter.emit_child(
 			BattleEventTypeScript.DAMAGE_APPLIED,
 			req_parent,
 			req_root,
-			req_depth,
+			req_depth - 1,  # emitter stores parent.depth; ours is depth+1
 			src,
 			tgt,
 			"",
@@ -69,6 +80,7 @@ static func execute(ctx, req) -> RefCounted:
 			0,  # amount placeholder; set after apply
 			"")
 	else:
+		# ROOT request.
 		dmg_event = emitter.emit(
 			BattleEventTypeScript.DAMAGE_APPLIED,
 			src,
@@ -77,12 +89,18 @@ static func execute(ctx, req) -> RefCounted:
 			"",
 			0,  # amount placeholder; set after apply
 			"")
+	if dmg_event == null:
+		return EffectResultScript.failed(
+			"damage emit failed (request was valid but emitter refused)", [], false)
 	# Apply damage (returns actual amount removed, capped at HP).
 	var dealt: int = int(world.apply_damage(tgt, dmg))
 	# Patch the event with the actual dealt amount (post-apply).
 	dmg_event.amount = int(dealt)
 	ctx.emit_through_sink(dmg_event)
+	# B2.2: result.events must include EVERY emitted event.
+	var result_events: Array = [dmg_event]
 	# If lethal, emit UNIT_DIED as child of DAMAGE_APPLIED.
+	var continues_chain: bool = true
 	if dealt > 0 and not world.is_alive(tgt):
 		var died_event = emitter.emit_child(
 			BattleEventTypeScript.UNIT_DIED,
@@ -91,5 +109,10 @@ static func execute(ctx, req) -> RefCounted:
 			int(dmg_event.chain_depth),
 			src,
 			tgt)
-		ctx.emit_through_sink(died_event)
-	return EffectResultScript.succeeded([dmg_event], true)
+		if died_event != null:
+			ctx.emit_through_sink(died_event)
+			result_events.append(died_event)
+		# UNIT_DIED ends the chain (no reaction should fire on
+		# a dead unit within this EffectExecutor pass).
+		continues_chain = false
+	return EffectResultScript.succeeded(result_events, continues_chain)

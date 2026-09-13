@@ -1,22 +1,34 @@
 extends RefCounted
-## Phase 3 / HealEffect — restore HP via the effect pipeline.
+## Phase 3 / B2.2 / HealEffect — restore HP via the effect pipeline.
 ##
 ## Semantics:
 ##   - Cannot exceed max HP (overheal capped at max).
 ##   - Does NOT resurrect dead units.
 ##   - Emits HEAL_APPLIED with ACTUAL HP restored (not requested).
 ##
-## Event semantics (Phase 3):
-##   - Emits HEAL_APPLIED only.
-##   - Event has valid event_id, tick, source/target IDs,
-##     root_action_id, parent_event_id, chain_depth.
+## Event semantics:
+##   - Emits HEAL_APPLIED only when actual HP is restored.
+##   - result.events contains EVERY event emitted (typically
+##     exactly [HEAL_APPLIED] on success, [] on no-op).
+##
+## B2.2 ancestry contract:
+##   - Validates req.validate_ancestry() BEFORE world.heal().
+##   - Bad ancestry -> success=false, no world mutation, no
+##     event, no emitter counter advance.
 
 const BattleEventTypeScript = preload("res://core/battle_ecs/battle_event_type.gd")
 const EffectResultScript = preload("res://core/battle_ecs/effects/effect_result.gd")
+const EffectRequestScript = preload("res://core/battle_ecs/effects/effect_request.gd")
 
 
 ## Execute heal effect.
 static func execute(ctx, req) -> RefCounted:
+	# B2.2: validate ancestry FIRST. No mutation may occur before.
+	var av = req.validate_ancestry()
+	if not bool(av.get("ok", false)):
+		return EffectResultScript.failed(
+			"heal invalid ancestry: %s" % String(av.get("reason", "")),
+			[], false)
 	var world = ctx.world()
 	var tgt: int = int(req.target_entity)
 	if not world.is_alive(tgt):
@@ -35,12 +47,12 @@ static func execute(ctx, req) -> RefCounted:
 	world.heal(tgt, restored)
 	var emitter = ctx.emitter()
 	var heal_event = null
-	if int(req.parent_event_id) > 0 and int(req.root_action_id) > 0:
+	if String(av.get("kind", "")) == EffectRequestScript.ANCESTRY_CHILD:
 		heal_event = emitter.emit_child(
 			BattleEventTypeScript.HEAL_APPLIED,
 			int(req.parent_event_id),
 			int(req.root_action_id),
-			int(req.chain_depth),
+			int(req.chain_depth) - 1,
 			src,
 			tgt,
 			"",
@@ -56,5 +68,8 @@ static func execute(ctx, req) -> RefCounted:
 			"",
 			restored,
 			"")
+	if heal_event == null:
+		return EffectResultScript.failed(
+			"heal emit failed (ancestry valid but emitter refused)", [], false)
 	ctx.emit_through_sink(heal_event)
 	return EffectResultScript.succeeded([heal_event], false)

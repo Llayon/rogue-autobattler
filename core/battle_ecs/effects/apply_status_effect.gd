@@ -15,6 +15,7 @@ extends RefCounted
 
 const BattleEventTypeScript = preload("res://core/battle_ecs/battle_event_type.gd")
 const EffectResultScript = preload("res://core/battle_ecs/effects/effect_result.gd")
+const EffectRequestScript = preload("res://core/battle_ecs/effects/effect_request.gd")
 const StatusContainerScript = preload("res://core/battle_ecs/status/status_container.gd")
 const StatusInstanceScript = preload("res://core/battle_ecs/status/status_instance.gd")
 const StatusDefResolverScript = preload("res://core/battle_ecs/status/status_def_resolver.gd")
@@ -22,6 +23,7 @@ const StatusDefResolverScript = preload("res://core/battle_ecs/status/status_def
 ## Execute apply-status effect. The status_id is read from the
 ## request payload's "status_id" or from request.definition_id.
 ## ApplyStatusEffect will:
+##   0. B2.2: validate ancestry BEFORE any mutation.
 ##   1. resolve the StatusDef via ContentDB
 ##   2. validate target is alive
 ##   3. get-or-create the entity's StatusContainer
@@ -30,6 +32,12 @@ const StatusDefResolverScript = preload("res://core/battle_ecs/status/status_def
 ##      stackable/max_stacks policy from the StatusDef
 ##   6. emit a STATUS_APPLIED BattleEvent on success
 static func execute(ctx, req) -> RefCounted:
+	# B2.2: validate ancestry FIRST. No mutation may occur before.
+	var av = req.validate_ancestry()
+	if not bool(av.get("ok", false)):
+		return EffectResultScript.failed(
+			"apply_status invalid ancestry: %s" % String(av.get("reason", "")),
+			[], false)
 	var world = ctx.world()
 	var tgt: int = int(req.target_entity)
 	if not world.is_alive(tgt):
@@ -102,14 +110,14 @@ static func execute(ctx, req) -> RefCounted:
 		return EffectResultScript.failed("apply_status rejected by container", [], false)
 	var emitter = ctx.emitter()
 	var ev = null
-	if int(req.parent_event_id) > 0 and int(req.root_action_id) > 0:
+	if String(av.get("kind", "")) == EffectRequestScript.ANCESTRY_CHILD:
 		# Caller is operating inside a parent root action.
 		# STATUS_APPLIED is a child of that action.
 		ev = emitter.emit_child(
 			BattleEventTypeScript.STATUS_APPLIED,
 			int(req.parent_event_id),
 			int(req.root_action_id),
-			int(req.chain_depth),
+			int(req.chain_depth) - 1,
 			int(req.source_entity),
 			tgt,
 			"",
@@ -126,5 +134,8 @@ static func execute(ctx, req) -> RefCounted:
 			"",
 			int(accepted.stacks),
 			String(status_id))
+	if ev == null:
+		return EffectResultScript.failed(
+			"apply_status emit failed (ancestry valid but emitter refused)", [], false)
 	ctx.emit_through_sink(ev)
 	return EffectResultScript.succeeded([ev], true)
