@@ -101,18 +101,30 @@ static func execute(ctx, req) -> RefCounted:
 	if accepted == null:
 		return EffectResultScript.failed("apply_status rejected by container", [], false)
 	var emitter = ctx.emitter()
-	var ev = emitter.emit(
-		BattleEventTypeScript.STATUS_APPLIED,
-		int(req.source_entity),
-		tgt,
-		"",
-		"",
-		int(accepted.stacks),
-		String(status_id),
-		Vector2i(-1, -1),
-		Vector2i(-1, -1),
-		int(req.root_action_id),
-		int(req.parent_event_id),
-		int(req.chain_depth))
+	var ev = null
+	if int(req.parent_event_id) > 0 and int(req.root_action_id) > 0:
+		# Caller is operating inside a parent root action.
+		# STATUS_APPLIED is a child of that action.
+		ev = emitter.emit_child(
+			BattleEventTypeScript.STATUS_APPLIED,
+			int(req.parent_event_id),
+			int(req.root_action_id),
+			int(req.chain_depth),
+			int(req.source_entity),
+			tgt,
+			"",
+			"",
+			int(accepted.stacks),
+			String(status_id))
+	else:
+		# Standalone root emission (no parent action).
+		ev = emitter.emit(
+			BattleEventTypeScript.STATUS_APPLIED,
+			int(req.source_entity),
+			tgt,
+			"",
+			"",
+			int(accepted.stacks),
+			String(status_id))
 	ctx.emit_through_sink(ev)
 	return EffectResultScript.succeeded([ev], true)

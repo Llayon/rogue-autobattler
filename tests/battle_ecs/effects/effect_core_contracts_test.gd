@@ -125,7 +125,7 @@ func _test_effect_context_provides_world_rng_emitter_and_sink() -> void:
 	# emitter is the central allocator
 	var ev = ctx.emitter().emit(
 		BattleEventTypeScript.UNIT_MOVED, 0, 0, "", "", 0, "",
-		Vector2i(0, 0), Vector2i(0, 1), -1, -1, -1)
+		Vector2i(0, 0), Vector2i(0, 1))
 	_assert(ev.event_id >= 1, "emitted event has event_id >= 1")
 	ctx.emit_through_sink(ev)
 	_assert(sink.size() == 1, "sink receives the event")

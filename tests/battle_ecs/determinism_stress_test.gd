@@ -57,22 +57,27 @@ func _run_full(seed: int) -> Array:
 	return evs
 
 
+## B2.1 normalizes the full BattleEvent shape including
+## ancestry. Same-seed runs MUST produce identical normalized
+## output. event_id starts at 1 (per B2.1 emitter contract);
+## root_action_id is the canonical root identifier (starts at
+## 1); parent_event_id / chain_depth establish ancestry.
 func _normalize_event(e) -> Dictionary:
-	# Strip event_id (monotonic but starts at 0 each run) from
-	# the normalization comparison — event_id is verified
-	# separately as a monotonic invariant. Keep type, tick,
-	# source/target entities, source/target run ids, amount,
-	# movement coordinates.
 	return {
-		"type": e.type,
-		"tick": e.tick,
-		"source_entity": e.source_entity,
-		"target_entity": e.target_entity,
-		"source_run_unit_id": e.source_run_unit_id,
-		"target_run_unit_id": e.target_run_unit_id,
-		"amount": e.amount,
-		"from_cell": e.from_cell,
-		"to_cell": e.to_cell,
+		"event_id": int(e.event_id),
+		"type": int(e.type),
+		"tick": int(e.tick),
+		"source_entity": int(e.source_entity),
+		"target_entity": int(e.target_entity),
+		"source_run_unit_id": String(e.source_run_unit_id),
+		"target_run_unit_id": String(e.target_run_unit_id),
+		"amount": int(e.amount),
+		"tag": String(e.tag),
+		"from_cell": Vector2i(int(e.from_cell.x), int(e.from_cell.y)),
+		"to_cell": Vector2i(int(e.to_cell.x), int(e.to_cell.y)),
+		"parent_event_id": int(e.parent_event_id),
+		"root_action_id": int(e.root_action_id),
+		"chain_depth": int(e.chain_depth),
 	}
 
 

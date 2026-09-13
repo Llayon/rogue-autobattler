@@ -34,18 +34,27 @@ static func execute(ctx, req) -> RefCounted:
 	var restored: int = mini(amount, room)
 	world.heal(tgt, restored)
 	var emitter = ctx.emitter()
-	var heal_event = emitter.emit(
-		BattleEventTypeScript.HEAL_APPLIED,
-		src,
-		tgt,
-		"",
-		"",
-		restored,
-		"",
-		Vector2i(-1, -1),
-		Vector2i(-1, -1),
-		int(req.root_action_id),
-		int(req.parent_event_id),
-		int(req.chain_depth))
+	var heal_event = null
+	if int(req.parent_event_id) > 0 and int(req.root_action_id) > 0:
+		heal_event = emitter.emit_child(
+			BattleEventTypeScript.HEAL_APPLIED,
+			int(req.parent_event_id),
+			int(req.root_action_id),
+			int(req.chain_depth),
+			src,
+			tgt,
+			"",
+			"",
+			restored,
+			"")
+	else:
+		heal_event = emitter.emit(
+			BattleEventTypeScript.HEAL_APPLIED,
+			src,
+			tgt,
+			"",
+			"",
+			restored,
+			"")
 	ctx.emit_through_sink(heal_event)
 	return EffectResultScript.succeeded([heal_event], false)

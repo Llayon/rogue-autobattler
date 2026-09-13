@@ -132,6 +132,7 @@ func _test_emit_step_tick_carries_to_events() -> void:
 
 func _test_first_event_id_is_one() -> void:
 	print("[ID1] first_event_id_is_one")
+	# B2.1: first root event_id must be exactly 1 (not >= 1).
 	var sim = _make_sim()
 	sim.set_max_ticks(1)
 	var evs: Array = sim.run_until_done(1000)
@@ -140,7 +141,7 @@ func _test_first_event_id_is_one() -> void:
 		if int(e.type) == BattleEventTypeScript.UNIT_MOVED or int(e.type) == BattleEventTypeScript.ATTACK_RESOLVED:
 			first = int(e.event_id)
 			break
-	_assert(first >= 1, "first root event_id >= 1 (got %d)" % first)
+	_assert(first == 1, "first root event_id == 1 (got %d)" % first)
 
 
 func _test_basic_attack_ancestry() -> void:
@@ -224,22 +225,36 @@ func _test_movement_root_event() -> void:
 
 func _test_unit_died_parent_is_damage_applied() -> void:
 	print("[A4] unit_died_parent_is_damage_applied")
+	# B2.1 strict contract: UNIT_DIED is always a child of
+	# DAMAGE_APPLIED (which is a child of ATTACK_RESOLVED).
+	# No root UNIT_DIED from the BattleSimulation attack path.
 	var sim = _make_sim()
 	sim.set_max_ticks(100)
 	var evs: Array = sim.run_until_done(1000)
 	var damage_ids: Dictionary = {}
+	var damage_by_id: Dictionary = {}
 	var died: Array = []
 	for e in evs:
 		if int(e.type) == BattleEventTypeScript.DAMAGE_APPLIED:
 			damage_ids[int(e.event_id)] = true
+			damage_by_id[int(e.event_id)] = e
 		elif int(e.type) == BattleEventTypeScript.UNIT_DIED:
 			died.append(e)
 	if died.is_empty():
 		_assert(false, "expected at least one UNIT_DIED")
 		return
-	var d = died[0]
-	_assert(int(d.parent_event_id) == -1 or damage_ids.has(int(d.parent_event_id)),
-		"UNIT_DIED parent is root (-1) OR a DAMAGE_APPLIED event_id (got %d)" % int(d.parent_event_id))
+	for d in died:
+		var pid: int = int(d.parent_event_id)
+		_assert(pid > 0, "UNIT_DIED parent_event_id > 0 (got %d)" % pid)
+		_assert(damage_ids.has(pid),
+			"UNIT_DIED parent is a real DAMAGE_APPLIED event_id (got %d)" % pid)
+		var p = damage_by_id[pid]
+		_assert(int(p.type) == BattleEventTypeScript.DAMAGE_APPLIED,
+			"UNIT_DIED parent.type == DAMAGE_APPLIED")
+		_assert(int(p.root_action_id) == int(d.root_action_id),
+			"UNIT_DIED shares root_action_id with its DAMAGE_APPLIED parent")
+		_assert(int(d.chain_depth) == int(p.chain_depth) + 1,
+			"UNIT_DIED chain_depth == parent.chain_depth + 1")
 
 
 func _test_battle_ended_own_root_event() -> void:

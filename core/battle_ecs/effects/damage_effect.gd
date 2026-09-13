@@ -49,24 +49,34 @@ static func execute(ctx, req) -> RefCounted:
 	if int(req.amount) > 0:
 		dmg = int(req.amount)
 	var emitter = ctx.emitter()
-	var req_root: int = int(req.root_action_id)
 	var req_parent: int = int(req.parent_event_id)
+	var req_root: int = int(req.root_action_id)
 	var req_depth: int = int(req.chain_depth)
-	# Build DAMAGE_APPLIED via the emitter. If root_action_id is
-	# -1, the emitter allocates a fresh root.
-	var dmg_event = emitter.emit(
-		BattleEventTypeScript.DAMAGE_APPLIED,
-		src,
-		tgt,
-		"",
-		"",
-		0,  # amount placeholder; set after apply
-		"",
-		Vector2i(-1, -1),
-		Vector2i(-1, -1),
-		req_root,
-		req_parent,
-		req_depth)
+	# Build DAMAGE_APPLIED via the emitter. If the caller is
+	# inside a parent root action (parent_event_id > 0),
+	# DAMAGE_APPLIED is a child of it. Otherwise it is a root.
+	var dmg_event = null
+	if req_parent > 0 and req_root > 0 and req_depth >= 0:
+		dmg_event = emitter.emit_child(
+			BattleEventTypeScript.DAMAGE_APPLIED,
+			req_parent,
+			req_root,
+			req_depth,
+			src,
+			tgt,
+			"",
+			"",
+			0,  # amount placeholder; set after apply
+			"")
+	else:
+		dmg_event = emitter.emit(
+			BattleEventTypeScript.DAMAGE_APPLIED,
+			src,
+			tgt,
+			"",
+			"",
+			0,  # amount placeholder; set after apply
+			"")
 	# Apply damage (returns actual amount removed, capped at HP).
 	var dealt: int = int(world.apply_damage(tgt, dmg))
 	# Patch the event with the actual dealt amount (post-apply).
@@ -76,9 +86,9 @@ static func execute(ctx, req) -> RefCounted:
 	if dealt > 0 and not world.is_alive(tgt):
 		var died_event = emitter.emit_child(
 			BattleEventTypeScript.UNIT_DIED,
-			dmg_event.event_id,
-			dmg_event.root_action_id,
-			dmg_event.chain_depth,
+			int(dmg_event.event_id),
+			int(dmg_event.root_action_id),
+			int(dmg_event.chain_depth),
 			src,
 			tgt)
 		ctx.emit_through_sink(died_event)
