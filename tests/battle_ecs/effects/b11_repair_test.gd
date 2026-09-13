@@ -238,7 +238,7 @@ func _make_world_and_ctx() -> Array:
 
 func _apply_attack_up_with_payload(world, ctx, stacks_in_payload: int) -> Array:
 	var req = EffectRequestScript.new(
-		EffectKindScript.APPLY_STATUS, 0, 0, 0, 1, -1, -1)
+		EffectKindScript.APPLY_STATUS, 0, 0, 0, -1, -1, 0)
 	req.definition_id = &"attack_up"
 	req.payload["stacks"] = stacks_in_payload
 	var exec = EffectExecutorScript.new()
@@ -276,7 +276,7 @@ func _test_apply_status_unknown_id_does_not_create_container() -> void:
 	var world: BattleWorldScript = arr[0]
 	var ctx = arr[1]
 	var req = EffectRequestScript.new(
-		EffectKindScript.APPLY_STATUS, 0, 0, 0, 1, -1, -1)
+		EffectKindScript.APPLY_STATUS, 0, 0, 0, -1, -1, 0)
 	req.definition_id = &"not_a_real_status_zzz"
 	EffectExecutorScript.new().execute(ctx, req)
 	_assert(world.get_status_container(0) == null,
@@ -408,7 +408,7 @@ func _test_rounding_half_away_from_zero_positive() -> void:
 	var w = arr[0]
 	# Apply attack_up via production path.
 	var req = EffectRequestScript.new(
-		EffectKindScript.APPLY_STATUS, 0, 0, 0, 1, -1, -1)
+		EffectKindScript.APPLY_STATUS, 0, 0, 0, -1, -1, 0)
 	req.definition_id = &"attack_up"
 	EffectExecutorScript.new().execute(ctx, req)
 	# Verify effective_attack for base=20 -> 30.
@@ -430,7 +430,7 @@ func _test_rounding_half_away_from_zero_positive() -> void:
 	var sink2: Array = []
 	var ctx2 = EffectContextScript.new(w2, rng2, emitter2, sink2)
 	var req2 = EffectRequestScript.new(
-		EffectKindScript.APPLY_STATUS, 0, 0, 0, 1, -1, -1)
+		EffectKindScript.APPLY_STATUS, 0, 0, 0, -1, -1, 0)
 	req2.definition_id = &"attack_up"
 	EffectExecutorScript.new().execute(ctx2, req2)
 	var sq2 = StatQueryScript.new(w2)
@@ -446,7 +446,7 @@ func _test_rounding_half_away_from_zero_positive() -> void:
 	emitter3.reset()
 	var ctx3 = EffectContextScript.new(w3, rng3, emitter3, Array())
 	var req3 = EffectRequestScript.new(
-		EffectKindScript.APPLY_STATUS, 0, 0, 0, 1, -1, -1)
+		EffectKindScript.APPLY_STATUS, 0, 0, 0, -1, -1, 0)
 	req3.definition_id = &"attack_up"
 	EffectExecutorScript.new().execute(ctx3, req3)
 	var sq3 = StatQueryScript.new(w3)

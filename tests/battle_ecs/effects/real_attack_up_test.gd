@@ -115,7 +115,7 @@ func _test_apply_status_resolves_real_attack_up() -> void:
 	var w = _make_world_with_base_attack(20)
 	var ctx = _make_ctx(w)[0]
 	var req = EffectRequestScript.new(
-		EffectKindScript.APPLY_STATUS, 0, 0, 0, 1, -1, -1)
+		EffectKindScript.APPLY_STATUS, 0, 0, 0, -1, -1, 0)
 	req.definition_id = &"attack_up"
 	var exec = EffectExecutorScript.new()
 	var result = exec.execute(ctx, req)
@@ -138,7 +138,7 @@ func _test_real_attack_up_increases_effective_attack() -> void:
 	var w = _make_world_with_base_attack(20)
 	var ctx = _make_ctx(w)[0]
 	var req = EffectRequestScript.new(
-		EffectKindScript.APPLY_STATUS, 0, 0, 0, 1, -1, -1)
+		EffectKindScript.APPLY_STATUS, 0, 0, 0, -1, -1, 0)
 	req.definition_id = &"attack_up"
 	EffectExecutorScript.new().execute(ctx, req)
 	var sq = StatQueryScript.new(w)
@@ -151,7 +151,7 @@ func _test_real_attack_up_does_not_mutate_base_attack() -> void:
 	var w = _make_world_with_base_attack(20)
 	var ctx = _make_ctx(w)[0]
 	var req = EffectRequestScript.new(
-		EffectKindScript.APPLY_STATUS, 0, 0, 0, 1, -1, -1)
+		EffectKindScript.APPLY_STATUS, 0, 0, 0, -1, -1, 0)
 	req.definition_id = &"attack_up"
 	EffectExecutorScript.new().execute(ctx, req)
 	_assert(int(w.attack_of(0)) == 20,
@@ -170,7 +170,7 @@ func _test_reapply_real_attack_up_keeps_stacks_one_refreshes_duration() -> void:
 	# First apply with non-default payload? No — we use real
 	# StatusDef, so payload stacks=1 by default.
 	var req = EffectRequestScript.new(
-		EffectKindScript.APPLY_STATUS, 0, 0, 0, 1, -1, -1)
+		EffectKindScript.APPLY_STATUS, 0, 0, 0, -1, -1, 0)
 	req.definition_id = &"attack_up"
 	exec.execute(ctx, req)
 	# Tick down 3 ticks to consume 3 of 5.
@@ -182,7 +182,7 @@ func _test_reapply_real_attack_up_keeps_stacks_one_refreshes_duration() -> void:
 		"after 3 ticks remaining == 2 (got %d)" % remaining_after_3)
 	# Reapply — should refresh remaining to 5 (real duration).
 	var req2 = EffectRequestScript.new(
-		EffectKindScript.APPLY_STATUS, 0, 0, 0, 1, -1, -1)
+		EffectKindScript.APPLY_STATUS, 0, 0, 0, -1, -1, 0)
 	req2.definition_id = &"attack_up"
 	exec.execute(ctx, req2)
 	var inst = c.get_status(&"attack_up")
@@ -198,11 +198,11 @@ func _test_remove_real_attack_up_restores_base_attack() -> void:
 	var ctx = _make_ctx(w)[0]
 	var exec = EffectExecutorScript.new()
 	var req = EffectRequestScript.new(
-		EffectKindScript.APPLY_STATUS, 0, 0, 0, 1, -1, -1)
+		EffectKindScript.APPLY_STATUS, 0, 0, 0, -1, -1, 0)
 	req.definition_id = &"attack_up"
 	exec.execute(ctx, req)
 	var rm_req = EffectRequestScript.new(
-		EffectKindScript.REMOVE_STATUS, 0, 0, 0, 1, -1, -1)
+		EffectKindScript.REMOVE_STATUS, 0, 0, 0, -1, -1, 0)
 	rm_req.definition_id = &"attack_up"
 	exec.execute(ctx, rm_req)
 	var sq = StatQueryScript.new(w)
@@ -218,7 +218,7 @@ func _test_expiry_restores_base_attack_and_preserves_stringname_identity() -> vo
 	var ctx = _make_ctx(w)[0]
 	var exec = EffectExecutorScript.new()
 	var req = EffectRequestScript.new(
-		EffectKindScript.APPLY_STATUS, 0, 0, 0, 1, -1, -1)
+		EffectKindScript.APPLY_STATUS, 0, 0, 0, -1, -1, 0)
 	req.definition_id = &"attack_up"
 	exec.execute(ctx, req)
 	var c = w.get_status_container(0)
@@ -238,7 +238,7 @@ func _test_real_attack_up_two_entities_independent() -> void:
 	var exec = EffectExecutorScript.new()
 	# Apply to entity 0 only.
 	var req = EffectRequestScript.new(
-		EffectKindScript.APPLY_STATUS, 0, 0, 0, 1, -1, -1)
+		EffectKindScript.APPLY_STATUS, 0, 0, 0, -1, -1, 0)
 	req.definition_id = &"attack_up"
 	exec.execute(ctx, req)
 	var sq = StatQueryScript.new(w)
@@ -248,7 +248,7 @@ func _test_real_attack_up_two_entities_independent() -> void:
 		"entity 1 unchanged at base 20 (got %d)" % sq.effective_attack(1))
 	# Remove from entity 0.
 	var rm_req = EffectRequestScript.new(
-		EffectKindScript.REMOVE_STATUS, 0, 0, 0, 1, -1, -1)
+		EffectKindScript.REMOVE_STATUS, 0, 0, 0, -1, -1, 0)
 	rm_req.definition_id = &"attack_up"
 	exec.execute(ctx, rm_req)
 	_assert(sq.effective_attack(0) == 20,
@@ -268,7 +268,7 @@ func _test_real_attack_up_aggregation_rounding() -> void:
 	var ctx = _make_ctx(w)[0]
 	var exec = EffectExecutorScript.new()
 	var req = EffectRequestScript.new(
-		EffectKindScript.APPLY_STATUS, 0, 0, 0, 1, -1, -1)
+		EffectKindScript.APPLY_STATUS, 0, 0, 0, -1, -1, 0)
 	req.definition_id = &"attack_up"
 	exec.execute(ctx, req)
 	var sq = StatQueryScript.new(w)
@@ -279,7 +279,7 @@ func _test_real_attack_up_aggregation_rounding() -> void:
 	var w2 = _make_world_with_base_attack(23)
 	var ctx2 = _make_ctx(w2)[0]
 	var req2 = EffectRequestScript.new(
-		EffectKindScript.APPLY_STATUS, 0, 0, 0, 1, -1, -1)
+		EffectKindScript.APPLY_STATUS, 0, 0, 0, -1, -1, 0)
 	req2.definition_id = &"attack_up"
 	EffectExecutorScript.new().execute(ctx2, req2)
 	var sq2 = StatQueryScript.new(w2)
@@ -299,12 +299,12 @@ func _test_real_attack_up_multi_stack_caps_at_max_stacks() -> void:
 	var exec = EffectExecutorScript.new()
 	# First apply.
 	var req = EffectRequestScript.new(
-		EffectKindScript.APPLY_STATUS, 0, 0, 0, 1, -1, -1)
+		EffectKindScript.APPLY_STATUS, 0, 0, 0, -1, -1, 0)
 	req.definition_id = &"attack_up"
 	exec.execute(ctx, req)
 	# Second apply via production ApplyStatusEffect.
 	var req2 = EffectRequestScript.new(
-		EffectKindScript.APPLY_STATUS, 0, 0, 0, 1, -1, -1)
+		EffectKindScript.APPLY_STATUS, 0, 0, 0, -1, -1, 0)
 	req2.definition_id = &"attack_up"
 	exec.execute(ctx, req2)
 	var c = w.get_status_container(0)
@@ -312,7 +312,7 @@ func _test_real_attack_up_multi_stack_caps_at_max_stacks() -> void:
 		"production max_stacks=1 caps second apply (got %d)" % int(c.get_status(&"attack_up").stacks))
 	# Third apply: still 1.
 	var req3 = EffectRequestScript.new(
-		EffectKindScript.APPLY_STATUS, 0, 0, 0, 1, -1, -1)
+		EffectKindScript.APPLY_STATUS, 0, 0, 0, -1, -1, 0)
 	req3.definition_id = &"attack_up"
 	exec.execute(ctx, req3)
 	_assert(int(c.get_status(&"attack_up").stacks) == 1,
@@ -330,7 +330,7 @@ func _test_apply_unknown_status_id_fails_safely() -> void:
 	var w = _make_world_with_base_attack(20)
 	var ctx = _make_ctx(w)[0]
 	var req = EffectRequestScript.new(
-		EffectKindScript.APPLY_STATUS, 0, 0, 0, 1, -1, -1)
+		EffectKindScript.APPLY_STATUS, 0, 0, 0, -1, -1, 0)
 	req.definition_id = &"totally_unknown_status_xyz"
 	var result = EffectExecutorScript.new().execute(ctx, req)
 	_assert(not result.success, "unknown status_id returns failure")
@@ -343,7 +343,7 @@ func _test_unknown_status_id_does_not_create_container() -> void:
 	var w = _make_world_with_base_attack(20)
 	var ctx = _make_ctx(w)[0]
 	var req = EffectRequestScript.new(
-		EffectKindScript.APPLY_STATUS, 0, 0, 0, 1, -1, -1)
+		EffectKindScript.APPLY_STATUS, 0, 0, 0, -1, -1, 0)
 	req.definition_id = &"totally_unknown_status_xyz"
 	EffectExecutorScript.new().execute(ctx, req)
 	_assert(w.get_status_container(0) == null,

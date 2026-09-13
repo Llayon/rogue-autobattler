@@ -132,23 +132,42 @@ func _test_same_seed_twenty_runs_identical_event_trace() -> void:
 		for j in normalized.size():
 			var a = first_normalized[j]
 			var b = normalized[j]
-			# Field-by-field comparison (HIGH 3 fix — Dictionary
-			# equality in Godot 4 uses randomized hash, so we
-			# cannot rely on `a == b`). Includes tick (HIGH 2
-			# fix — same seed must produce same logical event
-			# tick).
-			if a.type != b.type \
-					or a.tick != b.tick \
-					or a.source_entity != b.source_entity \
-					or a.target_entity != b.target_entity \
-					or a.source_run_unit_id != b.source_run_unit_id \
-					or a.target_run_unit_id != b.target_run_unit_id \
-					or a.amount != b.amount \
-					or a.from_cell != b.from_cell \
-					or a.to_cell != b.to_cell:
-				_assert(false, "run %d event[%d] differs: a=%s b=%s" % [i, j, str(a), str(b)])
+			# B2.2: field-by-field comparison of ALL 14 normalized
+			# fields. Dictionary equality in Godot 4 uses
+			# randomized hash so `a == b` is forbidden.
+			var diff: String = _normalized_events_field_diff(a, b)
+			if diff != "":
+				_assert(false, "run %d event[%d] differs: %s" % [i, j, diff])
 				return
-	_assert(true, "20 same-seed runs produce identical normalized event traces (%d events)" % first_normalized.size())
+	_assert(true, "20 same-seed runs produce identical normalized event traces (all 14 fields, %d events)" % first_normalized.size())
+
+
+## B2.2: returns the empty string if a and b are field-for-field
+## equal on every normalized field. Returns a human-readable
+## diff string on the first mismatch.
+func _normalized_events_field_diff(a, b) -> String:
+	var fields: Array = [
+		"event_id", "type", "tick",
+		"source_entity", "target_entity",
+		"source_run_unit_id", "target_run_unit_id",
+		"amount", "tag",
+		"from_cell", "to_cell",
+		"parent_event_id", "root_action_id", "chain_depth",
+	]
+	for f in fields:
+		if not b.has(f):
+			return "missing field '%s' in b" % f
+		var av = a.get(f)
+		var bv = b.get(f)
+		if typeof(av) != typeof(bv):
+			return "field '%s' type differs (a=%s b=%s)" % [f, str(av), str(bv)]
+		if av is Vector2i:
+			if int(av.x) != int(bv.x) or int(av.y) != int(bv.y):
+				return "field '%s' differs (a=%s b=%s)" % [f, str(av), str(bv)]
+		else:
+			if av != bv:
+				return "field '%s' differs (a=%s b=%s)" % [f, str(av), str(bv)]
+	return ""
 
 
 # === HIGH 2 / event_id monotonic invariant ===

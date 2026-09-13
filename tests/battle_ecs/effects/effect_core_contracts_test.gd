@@ -139,7 +139,7 @@ func _test_executor_routes_damage_request_through_damage_effect() -> void:
 	var ctx = pair[0]
 	var sink: Array = pair[1]
 	var req = EffectRequestScript.new(
-		EffectKindScript.DAMAGE, 0, 1, 100, -1, -1, -1)
+		EffectKindScript.DAMAGE, 0, 1, 100, -1, -1, 0)
 	var exec = EffectExecutorScript.new()
 	exec.execute(ctx, req)
 	_assert(sink.size() > 0, "executor emitted at least one event for DAMAGE request")
@@ -152,7 +152,7 @@ func _test_executor_damage_against_live_target_deals_and_returns_events() -> voi
 	var world: BattleWorldScript = ctx.world()
 	var sink: Array = pair[1]
 	var req = EffectRequestScript.new(
-		EffectKindScript.DAMAGE, 0, 1, 200, -1, -1, -1)
+		EffectKindScript.DAMAGE, 0, 1, 200, -1, -1, 0)
 	var exec = EffectExecutorScript.new()
 	var result = exec.execute(ctx, req)
 	_assert(result.success, "executor returns success")
@@ -169,7 +169,7 @@ func _test_executor_damage_against_dead_target_returns_failure_no_mutation() -> 
 	var hp_before_dead: int = world.current_hp_of(1)
 	var sink_size_before: int = pair[1].size()
 	var req = EffectRequestScript.new(
-		EffectKindScript.DAMAGE, 0, 1, 300, -1, -1, -1)
+		EffectKindScript.DAMAGE, 0, 1, 300, -1, -1, 0)
 	var exec = EffectExecutorScript.new()
 	var result = exec.execute(ctx, req)
 	_assert(result.success == false, "damage on dead target returns failure")
@@ -189,7 +189,7 @@ func _test_executor_damage_against_invalid_target_returns_failure() -> void:
 	var pair: Array = _make_ctx()
 	var ctx = pair[0]
 	var req = EffectRequestScript.new(
-		EffectKindScript.DAMAGE, 0, 999, 400, -1, -1, -1)
+		EffectKindScript.DAMAGE, 0, 999, 400, -1, -1, 0)
 	var exec = EffectExecutorScript.new()
 	var result = exec.execute(ctx, req)
 	_assert(result.success == false, "invalid target returns failure")
@@ -209,7 +209,7 @@ func _test_executor_does_not_use_global_rng() -> void:
 		var sink: Array = []
 		var ctx = EffectContextScript.new(w, rng, emitter, sink)
 		var req = EffectRequestScript.new(
-			EffectKindScript.DAMAGE, 0, 1, 500 + i, -1, -1, -1)
+			EffectKindScript.DAMAGE, 0, 1, 500 + i, -1, -1, 0)
 		var exec = EffectExecutorScript.new()
 		exec.execute(ctx, req)
 		deltas.append(80 - w.current_hp_of(1))
@@ -241,7 +241,7 @@ func _test_executor_damage_event_amount_matches_actual_hp_removed() -> void:
 	var world: BattleWorldScript = ctx.world()
 	var sink: Array = pair[1]
 	var req = EffectRequestScript.new(
-		EffectKindScript.DAMAGE, 0, 1, 1000, -1, -1, -1)
+		EffectKindScript.DAMAGE, 0, 1, 1000, -1, -1, 0)
 	var exec = EffectExecutorScript.new()
 	exec.execute(ctx, req)
 	var hp_after: int = world.current_hp_of(1)
@@ -267,7 +267,7 @@ func _test_executor_does_not_mutate_unrelated_state() -> void:
 	var p_pos_before: Vector2i = world.position_of(0)
 	var p_atk_before: int = world.attack_of(0)
 	var req = EffectRequestScript.new(
-		EffectKindScript.DAMAGE, 0, 1, 50, -1, -1, -1)
+		EffectKindScript.DAMAGE, 0, 1, 50, -1, -1, 0)
 	var exec = EffectExecutorScript.new()
 	exec.execute(ctx, req)
 	_assert(world.current_hp_of(0) == p_hp_before, "player HP unchanged")
@@ -283,7 +283,7 @@ func _test_executor_damage_emits_battleevent_with_real_event_id() -> void:
 	var ctx = pair[0]
 	var sink: Array = pair[1]
 	var req = EffectRequestScript.new(
-		EffectKindScript.DAMAGE, 0, 1, 50, -1, -1, -1)
+		EffectKindScript.DAMAGE, 0, 1, 50, -1, -1, 0)
 	var exec = EffectExecutorScript.new()
 	exec.execute(ctx, req)
 	_assert(sink.size() >= 1, "at least one event emitted")
@@ -305,7 +305,7 @@ func _test_executor_damage_does_not_emit_attack_resolved() -> void:
 	var ctx = pair[0]
 	var sink: Array = pair[1]
 	var req = EffectRequestScript.new(
-		EffectKindScript.DAMAGE, 0, 1, 50, -1, -1, -1)
+		EffectKindScript.DAMAGE, 0, 1, 50, -1, -1, 0)
 	var exec = EffectExecutorScript.new()
 	exec.execute(ctx, req)
 	var saw_attack: bool = false
@@ -324,7 +324,7 @@ func _test_executor_damage_lethal_emits_unit_died_as_child() -> void:
 	var sink: Array = pair[1]
 	# Lethal damage.
 	var req = EffectRequestScript.new(
-		EffectKindScript.DAMAGE, 0, 1, 999, -1, -1, -1)
+		EffectKindScript.DAMAGE, 0, 1, 999, -1, -1, 0)
 	var exec = EffectExecutorScript.new()
 	exec.execute(ctx, req)
 	# Find DAMAGE_APPLIED and UNIT_DIED.
@@ -381,9 +381,9 @@ func _test_two_effects_share_one_emitter_sequence() -> void:
 	# Damage target first, then heal: ensures heal actually fires.
 	world.apply_damage(0, 50)
 	var req_d = EffectRequestScript.new(
-		EffectKindScript.DAMAGE, 0, 1, 30, -1, -1, -1)
+		EffectKindScript.DAMAGE, 0, 1, 30, -1, -1, 0)
 	var req_h = EffectRequestScript.new(
-		EffectKindScript.HEAL, 1, 0, 20, -1, -1, -1)
+		EffectKindScript.HEAL, 1, 0, 20, -1, -1, 0)
 	var exec = EffectExecutorScript.new()
 	exec.execute(ctx, req_d)
 	exec.execute(ctx, req_h)

@@ -179,7 +179,7 @@ func _make_world_and_ctx() -> Array:
 
 func _apply_attack_up(world, ctx, stacks_in_payload: int):
 	var req = EffectRequestScript.new(
-		EffectKindScript.APPLY_STATUS, 0, 0, 0, 1, -1, -1)
+		EffectKindScript.APPLY_STATUS, 0, 0, 0, -1, -1, 0)
 	req.definition_id = &"attack_up"
 	req.payload["stacks"] = stacks_in_payload
 	return EffectExecutorScript.new().execute(ctx, req)

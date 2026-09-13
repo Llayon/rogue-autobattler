@@ -303,7 +303,7 @@ func _test_heal_partial() -> void:
 	world.apply_damage(0, 30)
 	_assert(world.current_hp_of(0) == 50, "HP reduced to 50")
 	var req = EffectRequestScript.new(
-		EffectKindScript.HEAL, 0, 0, 20, 1, -1, -1)
+		EffectKindScript.HEAL, 0, 0, 20, -1, -1, 0)
 	var exec = EffectExecutorScript.new()
 	var result = exec.execute(ctx, req)
 	_assert(result.success, "heal succeeds")
@@ -323,7 +323,7 @@ func _test_heal_overheal_caps_at_max() -> void:
 	var world: BattleWorldScript = ctx.world()
 	world.apply_damage(0, 70)
 	var req = EffectRequestScript.new(
-		EffectKindScript.HEAL, 0, 0, 1000, 1, -1, -1)
+		EffectKindScript.HEAL, 0, 0, 1000, -1, -1, 0)
 	var exec = EffectExecutorScript.new()
 	exec.execute(ctx, req)
 	_assert(world.current_hp_of(0) == 80, "HP capped at max (got %d)" % world.current_hp_of(0))
@@ -335,7 +335,7 @@ func _test_heal_full_health_no_change() -> void:
 	var ctx = pair[0]
 	var world: BattleWorldScript = ctx.world()
 	var req = EffectRequestScript.new(
-		EffectKindScript.HEAL, 0, 0, 20, 1, -1, -1)
+		EffectKindScript.HEAL, 0, 0, 20, -1, -1, 0)
 	var exec = EffectExecutorScript.new()
 	var result = exec.execute(ctx, req)
 	_assert(result.success, "heal succeeds (no-op)")
@@ -349,7 +349,7 @@ func _test_heal_dead_target_returns_failure_no_resurrection() -> void:
 	var world: BattleWorldScript = ctx.world()
 	world.apply_damage(0, 1000)
 	var req = EffectRequestScript.new(
-		EffectKindScript.HEAL, 0, 0, 100, 1, -1, -1)
+		EffectKindScript.HEAL, 0, 0, 100, -1, -1, 0)
 	var exec = EffectExecutorScript.new()
 	var result = exec.execute(ctx, req)
 	_assert(not result.success, "heal on dead returns failure")
@@ -361,7 +361,7 @@ func _test_heal_invalid_target_returns_failure() -> void:
 	var pair: Array = _make_ctx()
 	var ctx = pair[0]
 	var req = EffectRequestScript.new(
-		EffectKindScript.HEAL, 0, 999, 50, 1, -1, -1)
+		EffectKindScript.HEAL, 0, 999, 50, -1, -1, 0)
 	var exec = EffectExecutorScript.new()
 	var result = exec.execute(ctx, req)
 	_assert(not result.success, "invalid target returns failure")
@@ -375,7 +375,7 @@ func _test_heal_emits_heal_event_with_actual_amount() -> void:
 	var sink: Array = pair[1]
 	world.apply_damage(0, 50)
 	var req = EffectRequestScript.new(
-		EffectKindScript.HEAL, 0, 0, 100, 1, -1, -1)
+		EffectKindScript.HEAL, 0, 0, 100, -1, -1, 0)
 	var exec = EffectExecutorScript.new()
 	exec.execute(ctx, req)
 	var saw_heal: bool = false
@@ -405,7 +405,7 @@ func _test_apply_status_to_live_target_emits_event() -> void:
 	var sink: Array = pair[1]
 	# Real attack_up.tres must exist in content.
 	var req = EffectRequestScript.new(
-		EffectKindScript.APPLY_STATUS, 0, 1, 0, 5, -1, -1)
+		EffectKindScript.APPLY_STATUS, 0, 1, 0, -1, -1, 0)
 	req.definition_id = &"attack_up"
 	var exec = EffectExecutorScript.new()
 	var result = exec.execute(ctx, req)
@@ -429,7 +429,7 @@ func _test_apply_status_to_dead_target_returns_failure() -> void:
 	var world: BattleWorldScript = ctx.world()
 	world.apply_damage(0, 1000)  # kill player
 	var req = EffectRequestScript.new(
-		EffectKindScript.APPLY_STATUS, 1, 0, 0, 5, -1, -1)
+		EffectKindScript.APPLY_STATUS, 1, 0, 0, -1, -1, 0)
 	req.definition_id = &"attack_up"
 	var exec = EffectExecutorScript.new()
 	var result = exec.execute(ctx, req)
@@ -445,7 +445,7 @@ func _test_apply_status_unknown_id_returns_failure() -> void:
 	var ctx = pair[0]
 	var world: BattleWorldScript = ctx.world()
 	var req = EffectRequestScript.new(
-		EffectKindScript.APPLY_STATUS, 0, 1, 0, 5, -1, -1)
+		EffectKindScript.APPLY_STATUS, 0, 1, 0, -1, -1, 0)
 	req.definition_id = &"not_a_real_status_xyz"
 	var exec = EffectExecutorScript.new()
 	var result = exec.execute(ctx, req)
@@ -464,14 +464,14 @@ func _test_remove_status_existing_emits_event() -> void:
 	var sink: Array = pair[1]
 	# Apply first.
 	var apply_req = EffectRequestScript.new(
-		EffectKindScript.APPLY_STATUS, 0, 1, 0, 5, -1, -1)
+		EffectKindScript.APPLY_STATUS, 0, 1, 0, -1, -1, 0)
 	apply_req.definition_id = &"attack_up"
 	var exec = EffectExecutorScript.new()
 	exec.execute(ctx, apply_req)
 	var sink_size_before: int = sink.size()
 	# Remove.
 	var rm_req = EffectRequestScript.new(
-		EffectKindScript.REMOVE_STATUS, 0, 1, 0, 5, -1, -1)
+		EffectKindScript.REMOVE_STATUS, 0, 1, 0, -1, -1, 0)
 	rm_req.definition_id = &"attack_up"
 	var result = exec.execute(ctx, rm_req)
 	_assert(result.success, "remove succeeds")
@@ -492,7 +492,7 @@ func _test_remove_status_missing_returns_failure_no_event() -> void:
 	var sink: Array = pair[1]
 	var sink_size_before: int = sink.size()
 	var rm_req = EffectRequestScript.new(
-		EffectKindScript.REMOVE_STATUS, 0, 1, 0, 5, -1, -1)
+		EffectKindScript.REMOVE_STATUS, 0, 1, 0, -1, -1, 0)
 	rm_req.definition_id = &"attack_up"
 	var exec = EffectExecutorScript.new()
 	var result = exec.execute(ctx, rm_req)
