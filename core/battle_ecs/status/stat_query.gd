@@ -92,8 +92,10 @@ static func blocks_actions(p_world, entity_id: int) -> bool:
 	if container == null:
 		return false
 	for inst in container.all():
-		# An instance with remaining == 0 has expired this
-		# tick (B3 decrement-first); treat as not blocking.
+		# Active-status predicate (B3.2 + B4.1):
+		#   remaining > 0  -> ACTIVE finite
+		#   remaining < 0  -> ACTIVE indefinite
+		#   remaining == 0 -> EXPIRED this tick (not blocking)
 		var rem: int = int(inst.remaining)
 		if rem == 0:
 			continue
