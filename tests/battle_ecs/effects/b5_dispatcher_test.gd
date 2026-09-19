@@ -263,19 +263,43 @@ func _test_events_per_tick_limit() -> void:
 	limits.max_reactions_per_root = 100000
 	limits.max_events_per_tick = 8
 	var d = TriggerDispatcherScript.new()
-	var result = d.process([damage], w, info["rng"], em, [], provider, limits)
+	# Build a fresh sink for this test so parity assertion
+	# can read all committed reaction events.
+	var sink: Array = []
+	var result = d.process([damage], w, info["rng"], em, sink, provider, limits)
+	# Spec B5.1: max_events_per_tick is the cap on unique
+	# committed events PROCESSED FOR TRIGGER DISCOVERY.
+	# It does NOT bound DispatchResult.events (those
+	# contain every committed reaction event at commit
+	# time, even when the dispatcher stops before further
+	# processing).
 	_assert(result.truncated,
-		"events_per_tick cap reached (truncated)")
-	_assert(result.reason == DispatchResultScript.REASON_MAX_EVENTS,
+		"events_per_tick cap reached (truncated=true)")
+	_assert(int(result.reason) == int(
+			DispatchResultScript.REASON_MAX_EVENTS),
 		"reason is MAX_EVENTS (got %d)" % int(result.reason))
-	var seen_ids: Dictionary = {}
+	_assert(len(result.events) >= 1,
+		"at least one committed reaction event remains visible")
+	# Discovery bound: seen-set size == max_events_per_tick
+	# exactly (the cap stops further processing).
+	_assert(len(d._seen) == int(limits.max_events_per_tick),
+		"dispatcher._seen.size() == max_events_per_tick (got %d, cap %d)" % [len(d._seen), int(limits.max_events_per_tick)])
+	# result.events has no duplicates (proves commit-time
+	# recording does not produce duplicate emitted
+	# BattleEvents).
 	var unique_count: int = 0
+	var unique_ids: Dictionary = {}
 	for ev in result.events:
-		if not seen_ids.has(int(ev.event_id)):
-			seen_ids[int(ev.event_id)] = true
+		var eid: int = int(ev.event_id)
+		if not unique_ids.has(eid):
+			unique_ids[eid] = true
 			unique_count += 1
-	_assert(unique_count <= 8,
-		"unique events in result <= max_events_per_tick (got %d)" % unique_count)
+	_assert(unique_count == len(result.events),
+		"result.events contains no duplicate event_ids (unique=%d total=%d)" % [unique_count, len(result.events)])
+	# Sink parity: sink contains at least result.events
+	# (caller may pre-fill; the dispatcher only APPENDS).
+	_assert(len(sink) >= len(result.events),
+		"sink contains all result.events (sink=%d result=%d)" % [len(sink), len(result.events)])
 
 
 func _test_no_event_redispatch() -> void:
