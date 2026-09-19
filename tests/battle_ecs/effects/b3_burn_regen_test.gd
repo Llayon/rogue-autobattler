@@ -128,7 +128,7 @@ func _test_real_burn_duration_3_two_fires_then_expire() -> void:
 	_assert(burn_inst != null, "burn seeded")
 	_assert(int(burn_inst.remaining) == 3, "remaining=3 initially")
 	# Tick 1: decrement to 2, fire.
-	var evs1 = PeriodicStatusProcessorScript.process_tick(w["world"], null, em)
+	var evs1 = PeriodicStatusProcessorScript.process_tick(w["world"], w["rng"], em)
 	_assert(int(burn_inst.remaining) == 2,
 		"after tick 1 burn remaining=2 (got %d)" % int(burn_inst.remaining))
 	_assert(_count_type(evs1, BattleEventTypeScript.STATUS_TICKED) == 1,
@@ -138,7 +138,7 @@ func _test_real_burn_duration_3_two_fires_then_expire() -> void:
 	_assert(_count_type(evs1, BattleEventTypeScript.STATUS_EXPIRED) == 0,
 		"tick 1: 0 STATUS_EXPIRED")
 	# Tick 2: decrement to 1, fire.
-	var evs2 = PeriodicStatusProcessorScript.process_tick(w["world"], null, em)
+	var evs2 = PeriodicStatusProcessorScript.process_tick(w["world"], w["rng"], em)
 	_assert(int(burn_inst.remaining) == 1,
 		"after tick 2 burn remaining=1")
 	_assert(_count_type(evs2, BattleEventTypeScript.STATUS_TICKED) == 1,
@@ -146,7 +146,7 @@ func _test_real_burn_duration_3_two_fires_then_expire() -> void:
 	_assert(_count_type(evs2, BattleEventTypeScript.DAMAGE_APPLIED) == 1,
 		"tick 2: 1 DAMAGE_APPLIED")
 	# Tick 3: decrement to 0, EXPIRED (no fire).
-	var evs3 = PeriodicStatusProcessorScript.process_tick(w["world"], null, em)
+	var evs3 = PeriodicStatusProcessorScript.process_tick(w["world"], w["rng"], em)
 	_assert(_count_type(evs3, BattleEventTypeScript.STATUS_EXPIRED) == 1,
 		"tick 3: 1 STATUS_EXPIRED")
 	_assert(_count_type(evs3, BattleEventTypeScript.STATUS_TICKED) == 0,
@@ -164,7 +164,7 @@ func _test_real_burn_total_damage_10() -> void:
 	_seed_status(w, 1, &"burn", 3, 0, 1)
 	var collected: Array = []
 	for _i in 3:
-		var evs = PeriodicStatusProcessorScript.process_tick(w["world"], null, em)
+		var evs = PeriodicStatusProcessorScript.process_tick(w["world"], w["rng"], em)
 		for ev in evs:
 			collected.append(ev)
 	var total: int = 0
@@ -188,7 +188,7 @@ func _test_real_regen_duration_5_four_heals_then_expire() -> void:
 	_assert(r_inst != null, "regen seeded")
 	# Tick 1..4: decrement, fire.
 	for i in range(1, 5):
-		var evs = PeriodicStatusProcessorScript.process_tick(w["world"], null, em)
+		var evs = PeriodicStatusProcessorScript.process_tick(w["world"], w["rng"], em)
 		_assert(int(r_inst.remaining) == 5 - i,
 			"after tick %d regen remaining=%d (got %d)" % [i, 5 - i, int(r_inst.remaining)])
 		_assert(_count_type(evs, BattleEventTypeScript.STATUS_TICKED) == 1,
@@ -196,7 +196,7 @@ func _test_real_regen_duration_5_four_heals_then_expire() -> void:
 		_assert(_count_type(evs, BattleEventTypeScript.HEAL_APPLIED) == 1,
 			"tick %d: 1 HEAL_APPLIED" % i)
 	# Tick 5: decrement to 0, EXPIRED (no fire).
-	var evs5 = PeriodicStatusProcessorScript.process_tick(w["world"], null, em)
+	var evs5 = PeriodicStatusProcessorScript.process_tick(w["world"], w["rng"], em)
 	_assert(_count_type(evs5, BattleEventTypeScript.STATUS_EXPIRED) == 1,
 		"tick 5: 1 STATUS_EXPIRED")
 	_assert(_count_type(evs5, BattleEventTypeScript.HEAL_APPLIED) == 0,
@@ -212,7 +212,7 @@ func _test_real_regen_max_hp_cap() -> void:
 	var w = _setup_world_with_low_hp(0, 98)
 	var em: BattleEventEmitterScript = w["emitter"]
 	_seed_status(w, 0, &"regen", 5, 0, 1)
-	var evs = PeriodicStatusProcessorScript.process_tick(w["world"], null, em)
+	var evs = PeriodicStatusProcessorScript.process_tick(w["world"], w["rng"], em)
 	var heal_evs: Array = _events_of_type(evs, BattleEventTypeScript.HEAL_APPLIED)
 	_assert(heal_evs.size() == 1, "1 HEAL_APPLIED event")
 	_assert(int(heal_evs[0].amount) == 2,
@@ -229,7 +229,7 @@ func _test_burn_stacks_2_damage_10() -> void:
 	var em: BattleEventEmitterScript = w["emitter"]
 	# stacks=2, source entity 0, target 1
 	_seed_status(w, 1, &"burn", 100, 0, 2)
-	var evs1 = PeriodicStatusProcessorScript.process_tick(w["world"], null, em)
+	var evs1 = PeriodicStatusProcessorScript.process_tick(w["world"], w["rng"], em)
 	var dmg_evs: Array = _events_of_type(evs1, BattleEventTypeScript.DAMAGE_APPLIED)
 	_assert(dmg_evs.size() == 1, "1 DAMAGE_APPLIED")
 	_assert(int(dmg_evs[0].amount) == 10,
@@ -247,7 +247,7 @@ func _test_reverse_insertion_burn_then_regen_burn_first() -> void:
 	var em: BattleEventEmitterScript = w["emitter"]
 	_seed_status(w, 0, &"burn", 100, 0, 1)
 	_seed_status(w, 0, &"regen", 100, 0, 1)
-	var evs = PeriodicStatusProcessorScript.process_tick(w["world"], null, em)
+	var evs = PeriodicStatusProcessorScript.process_tick(w["world"], w["rng"], em)
 	# The first periodic fire must be the LATER-inserted (regen).
 	# Find the first STATUS_TICKED event and inspect its tag.
 	var ticked: Array = _events_of_type(evs, BattleEventTypeScript.STATUS_TICKED)
@@ -265,7 +265,7 @@ func _test_reverse_insertion_regen_then_burn_regen_first() -> void:
 	var em: BattleEventEmitterScript = w["emitter"]
 	_seed_status(w, 0, &"regen", 100, 0, 1)
 	_seed_status(w, 0, &"burn", 100, 0, 1)
-	var evs = PeriodicStatusProcessorScript.process_tick(w["world"], null, em)
+	var evs = PeriodicStatusProcessorScript.process_tick(w["world"], w["rng"], em)
 	var ticked: Array = _events_of_type(evs, BattleEventTypeScript.STATUS_TICKED)
 	_assert(ticked.size() == 2, "2 STATUS_TICKED events")
 	_assert(String(ticked[0].tag) == "burn",
@@ -285,7 +285,7 @@ func _test_decrement_before_effect_no_periodic_on_expiry_tick() -> void:
 	var em: BattleEventEmitterScript = w["emitter"]
 	_seed_status(w, 1, &"burn", 3, 0, 1)
 	for i in range(3):
-		var evs = PeriodicStatusProcessorScript.process_tick(w["world"], null, em)
+		var evs = PeriodicStatusProcessorScript.process_tick(w["world"], w["rng"], em)
 		if i == 2:
 			_assert(_count_type(evs, BattleEventTypeScript.STATUS_TICKED) == 0,
 				"final tick: 0 STATUS_TICKED (decrement exhausted)")
@@ -312,13 +312,13 @@ func _test_regen_before_burn_reverse_order_balance() -> void:
 	_seed_status(w, 1, &"burn", 100, 0, 1)
 	_seed_status(w, 1, &"regen", 100, 0, 1)
 	# Single status tick.
-	var evs = PeriodicStatusProcessorScript.process_tick(w["world"], null, em)
+	var evs = PeriodicStatusProcessorScript.process_tick(w["world"], w["rng"], em)
 	# Regen fires first (heals 5), then burn fires (damage 5).
 	# After burn damage 5 the target is at HP 10 (healed to 15, then
 	# damaged by 5 -> 10) — still alive. So no UNIT_DIED. Then on
 	# tick 2 burn ticks again and damages 5 -> HP 5.
 	# Run a second tick to verify the second fire.
-	var evs2 = PeriodicStatusProcessorScript.process_tick(w["world"], null, em)
+	var evs2 = PeriodicStatusProcessorScript.process_tick(w["world"], w["rng"], em)
 	# Total damage across 2 ticks = 10. HP starts at 10, heals 5 to
 	# 15 each tick, damage 5 each tick -> HP after 2 ticks = 10.
 	_assert(int(w["world"].current_hp_of(1)) == 10,
@@ -351,7 +351,7 @@ func _test_no_op_regen_emits_status_ticked_but_no_heal_applied() -> void:
 	var em: BattleEventEmitterScript = w["emitter"]
 	_set_hp_in_world(w, 0, 100)  # at max
 	_seed_status(w, 0, &"regen", 100, 0, 1)
-	var evs = PeriodicStatusProcessorScript.process_tick(w["world"], null, em)
+	var evs = PeriodicStatusProcessorScript.process_tick(w["world"], w["rng"], em)
 	_assert(_count_type(evs, BattleEventTypeScript.STATUS_TICKED) == 1,
 		"1 STATUS_TICKED on no-op regen")
 	_assert(_count_type(evs, BattleEventTypeScript.HEAL_APPLIED) == 0,
@@ -366,7 +366,7 @@ func _test_interval_1_0_fires_every_tick() -> void:
 	var em: BattleEventEmitterScript = w["emitter"]
 	_seed_status(w, 1, &"burn", 5, 0, 1)  # duration=5, interval=1
 	for _i in 4:
-		var evs = PeriodicStatusProcessorScript.process_tick(w["world"], null, em)
+		var evs = PeriodicStatusProcessorScript.process_tick(w["world"], w["rng"], em)
 		_assert(_count_type(evs, BattleEventTypeScript.STATUS_TICKED) == 1,
 			"tick: 1 STATUS_TICKED (interval=1.0 fires every tick)")
 
@@ -384,7 +384,7 @@ func _test_interval_0_0_never_fires_repeated() -> void:
 	var w = _setup_world(100)
 	var em: BattleEventEmitterScript = w["emitter"]
 	_seed_status(w, 1, &"burn", 5, 0, 1)
-	var evs = PeriodicStatusProcessorScript.process_tick(w["world"], null, em)
+	var evs = PeriodicStatusProcessorScript.process_tick(w["world"], w["rng"], em)
 	var ticked: Array = _events_of_type(evs, BattleEventTypeScript.STATUS_TICKED)
 	_assert(ticked.size() == 1, "real burn (interval=1.0) fires one STATUS_TICKED")
 	# Confirm interval field is 1.0 (no surprise reinterpretation).
@@ -451,7 +451,7 @@ func _test_dead_target_no_later_statuses_in_same_phase() -> void:
 	_seed_status(w, 0, &"regen", 100, 1, 1)
 	_seed_status(w, 0, &"burn", 100, 1, 1)
 	# Process one tick. Reverse iteration order: burn, regen.
-	var evs = PeriodicStatusProcessorScript.process_tick(w["world"], null, em)
+	var evs = PeriodicStatusProcessorScript.process_tick(w["world"], w["rng"], em)
 	# Verify entity 0 is dead (burn dealt 5 damage to HP=5).
 	_assert(not w["world"].is_alive(0),
 		"entity 0 dead after burn (HP 5 -> 0)")
@@ -554,7 +554,7 @@ func _test_status_ticked_root_damage_child_shares_root() -> void:
 	var w = _setup_world(100)
 	var em: BattleEventEmitterScript = w["emitter"]
 	_seed_status(w, 1, &"burn", 100, 0, 1)
-	var evs = PeriodicStatusProcessorScript.process_tick(w["world"], null, em)
+	var evs = PeriodicStatusProcessorScript.process_tick(w["world"], w["rng"], em)
 	var ticked: Array = _events_of_type(evs, BattleEventTypeScript.STATUS_TICKED)
 	var dmg: Array = _events_of_type(evs, BattleEventTypeScript.DAMAGE_APPLIED)
 	_assert(ticked.size() == 1, "1 STATUS_TICKED")
@@ -578,7 +578,7 @@ func _test_status_ticked_root_heal_child_shares_root() -> void:
 	_set_hp_in_world(w, 0, 50)  # room to heal
 	var em: BattleEventEmitterScript = w["emitter"]
 	_seed_status(w, 0, &"regen", 100, 0, 1)
-	var evs = PeriodicStatusProcessorScript.process_tick(w["world"], null, em)
+	var evs = PeriodicStatusProcessorScript.process_tick(w["world"], w["rng"], em)
 	var ticked: Array = _events_of_type(evs, BattleEventTypeScript.STATUS_TICKED)
 	var heal: Array = _events_of_type(evs, BattleEventTypeScript.HEAL_APPLIED)
 	_assert(ticked.size() == 1, "1 STATUS_TICKED")
@@ -594,6 +594,8 @@ func _test_status_ticked_root_heal_child_shares_root() -> void:
 # === Helpers ===
 
 func _setup_world(max_hp: int) -> Dictionary:
+	# Single deterministic RNG fixture shared across all
+	# process_tick() calls in a test scenario.
 	var B = BattleUnitSetupScript
 	var S = BattleSetupScript
 	var p = B.new("p", &"warrior", 0, Vector2i(0, 1), max_hp, max_hp, 20, 5, 1)
@@ -603,7 +605,8 @@ func _setup_world(max_hp: int) -> Dictionary:
 	w.spawn_from_setup(s)
 	var em = BattleEventEmitterScript.new()
 	em.reset()
-	return {"world": w, "emitter": em}
+	var rng = DeterministicRngScript.new(0)
+	return {"world": w, "emitter": em, "rng": rng}
 
 
 func _setup_world_with_low_hp(entity_id: int, hp: int) -> Dictionary:
@@ -623,7 +626,8 @@ func _setup_world_with_low_hp(entity_id: int, hp: int) -> Dictionary:
 	w.apply_damage(entity_id, max_hp - hp)
 	var em = BattleEventEmitterScript.new()
 	em.reset()
-	return {"world": w, "emitter": em}
+	var rng = DeterministicRngScript.new(0)
+	return {"world": w, "emitter": em, "rng": rng}
 
 
 func _setup_world_with_set_hp(entity_id: int, hp: int) -> Dictionary:

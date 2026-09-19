@@ -169,7 +169,7 @@ func _test_indefinite_burn_periodic_still_fires_each_tick() -> void:
 	c.add(inst, "stackable", 99)
 	for i in range(3):
 		var evs = PeriodicStatusProcessorScript.process_tick(
-			w["world"], null, em)
+			w["world"], w["rng"], em)
 		var ticked: Array = _events_of_type(evs, BattleEventTypeScript.STATUS_TICKED)
 		_assert(ticked.size() == 1,
 			"indefinite burn tick %d: 1 STATUS_TICKED" % (i + 1))
@@ -196,7 +196,7 @@ func _test_real_attack_up_interval_0_decrements_but_no_periodic() -> void:
 	c.add(inst, "stackable", 99)
 	for _i in range(3):
 		var evs = PeriodicStatusProcessorScript.process_tick(
-			w["world"], null, em)
+			w["world"], w["rng"], em)
 		_assert(_events_of_type(evs, BattleEventTypeScript.STATUS_TICKED).size() == 0,
 			"interval=0.0: 0 STATUS_TICKED")
 		_assert(_events_of_type(evs, BattleEventTypeScript.DAMAGE_APPLIED).size() == 0,
@@ -221,7 +221,7 @@ func _test_real_attack_up_interval_0_expires_normally() -> void:
 	var inst = StatusInstanceScript.new(&"attack_up", 0, 1, 1, 1, 0)
 	c.add(inst, "stackable", 99)
 	var evs = PeriodicStatusProcessorScript.process_tick(
-		w["world"], null, em)
+		w["world"], w["rng"], em)
 	_assert(_events_of_type(evs, BattleEventTypeScript.STATUS_EXPIRED).size() == 1,
 		"attack_up expires after 1 tick")
 	_assert(c.has_status(&"attack_up") == false,
@@ -327,7 +327,7 @@ func _test_burn_keeps_firing_after_source_dies() -> void:
 	c.add(inst, "stackable", 99)
 	# Tick 1: burn fires.
 	var evs1 = PeriodicStatusProcessorScript.process_tick(
-		w["world"], null, em)
+		w["world"], w["rng"], em)
 	var dmg1: Array = _events_of_type(evs1, BattleEventTypeScript.DAMAGE_APPLIED)
 	_assert(dmg1.size() == 1, "tick 1: 1 DAMAGE_APPLIED")
 	# Kill source (entity 0).
@@ -336,7 +336,7 @@ func _test_burn_keeps_firing_after_source_dies() -> void:
 	_assert(w["world"].is_alive(1), "entity 1 (target) still alive")
 	# Tick 2: burn keeps firing despite dead source.
 	var evs2 = PeriodicStatusProcessorScript.process_tick(
-		w["world"], null, em)
+		w["world"], w["rng"], em)
 	var dmg2: Array = _events_of_type(evs2, BattleEventTypeScript.DAMAGE_APPLIED)
 	_assert(dmg2.size() == 1, "tick 2 (dead source): burn STILL fires 1 DAMAGE_APPLIED")
 
@@ -369,6 +369,8 @@ func _test_20_run_same_seed_identical_with_indefinite_and_attack_up() -> void:
 # === Helpers ===
 
 func _setup_world(max_hp: int) -> Dictionary:
+	# Single deterministic RNG fixture shared across all
+	# process_tick() calls in a test scenario.
 	var B = BattleUnitSetupScript
 	var S = BattleSetupScript
 	var p = B.new("p", &"warrior", 0, Vector2i(0, 1), max_hp, max_hp, 20, 5, 1)
@@ -378,7 +380,8 @@ func _setup_world(max_hp: int) -> Dictionary:
 	w.spawn_from_setup(s)
 	var em = BattleEventEmitterScript.new()
 	em.reset()
-	return {"world": w, "emitter": em}
+	var rng = DeterministicRngScript.new(0)
+	return {"world": w, "emitter": em, "rng": rng}
 
 
 func _make_mixed_sim() -> BattleSimulationScript:
