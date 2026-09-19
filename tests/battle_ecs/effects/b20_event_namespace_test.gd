@@ -70,6 +70,8 @@ func _test_event_type_registry_uniqueness_and_frozen_values() -> void:
 		"HEAL_APPLIED": 6,
 		"STATUS_APPLIED": 7,
 		"STATUS_REMOVED": 8,
+		"STATUS_TICKED": 9,
+		"STATUS_EXPIRED": 10,
 	}
 	for e in entries:
 		var name: String = String(e[0])
@@ -79,7 +81,7 @@ func _test_event_type_registry_uniqueness_and_frozen_values() -> void:
 			"frozen value %s == %d (got %d)" % [name, int(expected.get(name, -1)), v])
 		_assert(not values.has(v), "value %d unique (collision on %s)" % [v, name])
 		values[v] = true
-	_assert(values.size() == 9, "9 unique values total")
+	_assert(values.size() == 11, "11 unique values total")
 
 
 func _test_no_local_event_type_constants_in_phase3_effects() -> void:
