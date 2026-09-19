@@ -106,11 +106,11 @@ static func process_tick(
 				continue
 			if interval != 1.0:
 				continue
-			var is_harmful: bool = bool(def.is_harmful)
-			var dot_damage: float = float(def.dot_damage) if is_harmful else 0.0
-			var dot_heal: float = float(def.dot_heal) if not is_harmful else 0.0
+			var harmful: bool = bool(def.is_harmful)
+			var dot_damage: float = float(def.dot_damage) if harmful else 0.0
+			var dot_heal: float = float(def.dot_heal) if not harmful else 0.0
 			var periodic_amount: int = 0
-			if is_harmful:
+			if harmful:
 				periodic_amount = int(dot_damage * float(stacks))
 			else:
 				periodic_amount = int(dot_heal * float(stacks))
@@ -126,7 +126,7 @@ static func process_tick(
 			events.append(status_tick_root)
 			# Route the periodic effect through EffectExecutor
 			# using the canonical child_from_parent factory.
-			var effect_kind: int = EffectKindScript.DAMAGE if is_harmful else EffectKindScript.HEAL
+			var effect_kind: int = EffectKindScript.DAMAGE if harmful else EffectKindScript.HEAL
 			var req = EffectRequestScript.child_from_parent(
 				effect_kind,
 				status_tick_root,
