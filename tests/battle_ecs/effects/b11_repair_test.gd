@@ -24,8 +24,9 @@ func _initialize() -> void:
 	# === BLOCKER 1: Duration validation ===
 	await _test_duration_5p0_is_timed_5_ticks()
 	await _test_duration_1p0_is_timed_1_tick()
-	await _test_duration_5p5_is_invalid_fractional()
-	await _test_duration_1p25_is_invalid_fractional()
+	await _test_duration_5p5_is_timed_6_ticks_ceil()
+	await _test_duration_1p25_is_timed_2_ticks_ceil()
+	await _test_duration_1p5_is_timed_2_ticks_ceil_for_stun()
 	await _test_duration_0p0_is_instant_not_indefinite()
 	await _test_duration_neg1p0_is_invalid_negative()
 	await _test_duration_nan_is_invalid()
@@ -90,22 +91,37 @@ func _test_duration_1p0_is_timed_1_tick() -> void:
 	_assert(int(res.get("ticks", -1)) == 1, "ticks=1 (got %d)" % int(res.get("ticks", -1)))
 
 
-func _test_duration_5p5_is_invalid_fractional() -> void:
-	print("[du-3] duration_5p5_is_invalid_fractional")
+func _test_duration_5p5_is_timed_6_ticks_ceil() -> void:
+	print("[du-3] duration_5p5_is_timed_6_ticks_ceil")
+	# B4 fractional-duration policy: fractional > 0 rounds UP
+	# via ceil() — defensive (status stays AT LEAST the
+	# literal duration). 5.5 -> ceil = 6 ticks.
 	var res: Dictionary = StatusDefResolverScript.convert_duration(5.5)
-	_assert(bool(res.get("ok", false)) == false, "ok=false")
-	_assert(int(res.get("kind", -1)) == int(StatusDefResolverScript.KIND_INVALID),
-		"kind=KIND_INVALID (got %s)" % str(res.get("kind", "")))
-	_assert(String(res.get("reason", "")).find("fractional") >= 0,
-		"reason mentions fractional (got '%s')" % str(res.get("reason", "")))
+	_assert(bool(res.get("ok", false)) == true, "ok=true (fractional accepted)")
+	_assert(int(res.get("ticks", -1)) == 6,
+		"ticks=6 (ceil(5.5)) (got %d)" % int(res.get("ticks", -1)))
+	_assert(String(res.get("kind", "")) == String(StatusDefResolverScript.KIND_TIMED),
+		"kind=KIND_TIMED")
 
 
-func _test_duration_1p25_is_invalid_fractional() -> void:
-	print("[du-4] duration_1p25_is_invalid_fractional")
+func _test_duration_1p25_is_timed_2_ticks_ceil() -> void:
+	print("[du-4] duration_1p25_is_timed_2_ticks_ceil")
+	# B4 fractional-duration policy: 1.25 -> ceil = 2 ticks.
 	var res: Dictionary = StatusDefResolverScript.convert_duration(1.25)
-	_assert(bool(res.get("ok", false)) == false, "ok=false")
-	_assert(int(res.get("kind", -1)) == int(StatusDefResolverScript.KIND_INVALID),
-		"kind=KIND_INVALID")
+	_assert(bool(res.get("ok", false)) == true, "ok=true (fractional accepted)")
+	_assert(int(res.get("ticks", -1)) == 2,
+		"ticks=2 (ceil(1.25)) (got %d)" % int(res.get("ticks", -1)))
+
+
+func _test_duration_1p5_is_timed_2_ticks_ceil_for_stun() -> void:
+	print("[du-4b] duration_1p5_is_timed_2_ticks_ceil_for_stun")
+	# Real stun.tres uses duration=1.5. B4 fractional policy:
+	# ceil(1.5) = 2 ticks. This is the canonical Stun lifetime
+	# in Phase-3 (integer runtime).
+	var res: Dictionary = StatusDefResolverScript.convert_duration(1.5)
+	_assert(bool(res.get("ok", false)) == true, "ok=true (fractional accepted)")
+	_assert(int(res.get("ticks", -1)) == 2,
+		"ticks=2 (ceil(1.5)) (got %d)" % int(res.get("ticks", -1)))
 
 
 func _test_duration_0p0_is_instant_not_indefinite() -> void:

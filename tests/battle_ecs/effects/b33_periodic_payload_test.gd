@@ -406,8 +406,11 @@ func _test_baseline_no_progress_stalemate_termination() -> void:
 
 
 func _test_max_hp_regen_does_not_postpone_true_stalemate() -> void:
-	print("[STALE-REAL-2] max_hp_regen_does_not_postpone_true_stalemate")
-	# Same fixture, but apply real Regen to P1 at max HP.
+	print("[STALE-REAL-2] max_hp_indefinite_regen_does_not_postpone_true_stalemate")
+	# Same fixture, but apply INDEFINITE Regen to P1 at max HP.
+	# Indefinite (remaining=-1) is the only status kind that
+	# does NOT count as progress per B4-13 policy (only finite
+	# status countdown contributes to the progress signature).
 	# Both units still can't move/attack -> true stalemate.
 	# STATUS_TICKED must NOT count as progress, so the
 	# termination reason + tick must match the baseline.
@@ -420,24 +423,29 @@ func _test_max_hp_regen_does_not_postpone_true_stalemate() -> void:
 	var s = S.new(42, [p0, p1], [e0, e1], 1, 4)
 	var sim = BattleSimulationScript.new()
 	sim.initialize(s)
-	# Apply Regen to P1 at max HP via executor.
-	var req = EffectRequestScript.new(
-		EffectKindScript.APPLY_STATUS, 0, 0, 0, -1, -1, 0)
-	req.definition_id = &"regen"
-	var ctx = EffectContextScript.new(sim.world(), sim.rng(),
-		sim.emitter(), [])
-	EffectExecutorScript.new().execute(ctx, req)
+	# Apply INDEFINITE Regen to P1 at max HP. We inject the
+	# StatusInstance directly with remaining=-1 to make it
+	# indefinite, then verify STATUS_TICKED fires (B4-15
+	# regression for indefinite regen periodic behavior).
+	var c_p1 = sim.world().get_status_container(0)
+	if c_p1 == null:
+		c_p1 = sim.world().create_status_container(0)
+	var StatusInstanceScript = preload(
+		"res://core/battle_ecs/status/status_instance.gd")
+	var indef_inst = StatusInstanceScript.new(
+		&"regen", 0, 0, 1, -1, 0)
+	c_p1.add(indef_inst, "stackable", 99)
 	var events = sim.run_until_done(20)
 	var result = sim.get_result()
 	if result == null:
 		_assert(false, "result is null (simulation did not finish within 20 ticks)")
 		return
 	_assert(int(result.termination_reason) == int(BattleResultScript.TERMINATION_STALEMATE),
-		"max-HP regen: termination_reason=STALEMATE (got %d)" % int(result.termination_reason))
+		"max-HP indefinite regen: termination_reason=STALEMATE (got %d)" % int(result.termination_reason))
 	_assert(int(result.winner_team) == -1,
-		"max-HP regen: winner_team=-1 (DRAW)")
-	# STATUS_TICKED may exist but no HEAL_APPLIED (target is at
-	# max HP, so actual heal = 0).
+		"max-HP indefinite regen: winner_team=-1 (DRAW)")
+	# STATUS_TICKED may exist (indefinite regen still fires
+	# periodic) but no HEAL_APPLIED (target at max HP).
 	var tick_count: int = 0
 	var heal_count: int = 0
 	for e in events:
@@ -446,9 +454,9 @@ func _test_max_hp_regen_does_not_postpone_true_stalemate() -> void:
 		if int(e.type) == BattleEventTypeScript.HEAL_APPLIED:
 			heal_count += 1
 	_assert(tick_count > 0,
-		"max-HP regen sim DOES emit STATUS_TICKED events")
+		"indefinite regen DOES emit STATUS_TICKED events")
 	_assert(heal_count == 0,
-		"max-HP regen emits 0 HEAL_APPLIED (HP already at max)")
+		"indefinite regen emits 0 HEAL_APPLIED (HP already at max)")
 	# Compare tick_count with baseline (both terminate at
 	# STALEMATE so both should reach the same tick_count).
 	var sim_base = BattleSimulationScript.new()
