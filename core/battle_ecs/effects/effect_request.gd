@@ -88,6 +88,53 @@ static func root(
 	return r
 
 
+## B5.1 canonical CHILD-from-TEMPLATE factory.
+##
+## Derives ancestry from `p_parent_event` ONLY (never from
+## template). Preserves semantic fields from `p_template`:
+##   - definition_id (StringName)
+##   - payload (Dictionary, DEEP-COPIED via duplicate(true))
+##
+## Template is read-only from the dispatcher's perspective: a
+## provider mutating its original template after discovery
+## will NOT mutate the derived child request.
+##
+## Generic — no kind-specific branches. APPLY_STATUS,
+## REMOVE_STATUS, payload-driven effects, and future
+## content-defined kinds all flow through this single path.
+##
+## Returns null on:
+##   - p_template == null
+##   - p_parent_event == null / malformed
+##   - p_template has malformed ancestry (rooted or
+##     sentinel-collision — must be a legitimate reaction
+##     template).
+static func child_from_template(
+		p_template: EffectRequest,
+		p_parent_event) -> RefCounted:
+	if p_template == null or p_parent_event == null:
+		return null
+	# Always derive ancestry from parent_event (NOT from
+	# template). Templates supply semantics only.
+	var child = child_from_parent(
+		int(p_template.kind),
+		p_parent_event,
+		int(p_template.source_entity),
+		int(p_template.target_entity),
+		int(p_template.amount))
+	if child == null:
+		return null
+	# Preserve semantic payload. Deep-copy so subsequent
+	# provider mutations cannot leak into the executed
+	# request.
+	child.definition_id = p_template.definition_id
+	if p_template.payload != null:
+		child.payload = p_template.payload.duplicate(true)
+	else:
+		child.payload = {}
+	return child
+
+
 ## B2.3 canonical CHILD factory. Derives root_action_id,
 ## parent_event_id, and chain_depth FROM the parent BattleEvent.
 ## No caller-supplied child ancestry. If the parent is null or
