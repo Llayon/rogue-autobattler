@@ -195,9 +195,12 @@ func step_tick() -> Array:
 	var events: Array = []
 	# B3: periodic status phase runs BEFORE normal unit actions
 	# (legacy parity). Burns / Regen etc. tick here.
+	# B3.2: pass the simulation-owned RNG to the processor so
+	# periodic effect contexts receive exactly the same RNG
+	# object as the rest of the battle spine.
 	if _periodic_status_processor != null:
 		var status_events: Array = _periodic_status_processor.process_tick(
-			_world, _event_emitter)
+			_world, _rng, _event_emitter)
 		for e in status_events:
 			events.append(e)
 	# Refresh alive snapshot — a status-phase Burn may have

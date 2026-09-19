@@ -19,11 +19,18 @@ extends RefCounted
 ##     intervals FEATURE DEFER.
 ##   - No resurrection. Dead targets in same status phase do
 ##     NOT receive later Regen.
+##   - StatusInstance.remaining == -1 (indefinite) preserved: no
+##     decrement, no expiry. Periodic effect may still fire.
+##
+## B3.2 RNG ownership:
+##   The processor MUST NOT instantiate its own RNG.
+##   The caller passes the simulation-owned RNG (BattleSimulation._rng)
+##   via process_tick(world, rng, emitter). Periodic effect
+##   contexts use exactly that RNG instance. Periodic Burn/Regen
+##   draw no randomness today, but the contract must hold for
+##   chance-based triggers introduced later.
 ##
 ## NO Node. NO UI. NO global RNG. NO global event bus.
-## Usage: called once per tick from BattleSimulation BEFORE the
-## action phase. The processor uses the simulation-owned
-## BattleEventEmitter.
 
 const StatusContainerScript = preload("res://core/battle_ecs/status/status_container.gd")
 const StatusDefResolverScript = preload("res://core/battle_ecs/status/status_def_resolver.gd")
@@ -31,17 +38,18 @@ const EffectKindScript = preload("res://core/battle_ecs/effects/effect_kind.gd")
 const EffectRequestScript = preload("res://core/battle_ecs/effects/effect_request.gd")
 const BattleEventTypeScript = preload("res://core/battle_ecs/battle_event_type.gd")
 const BattleEventEmitterScript = preload("res://core/battle_ecs/events/battle_event_emitter.gd")
-const DeterministicRngScript = preload("res://core/rng/deterministic_rng.gd")
 const EffectContextScript = preload("res://core/battle_ecs/effects/effect_context.gd")
 const EffectExecutorScript = preload("res://core/battle_ecs/effects/effect_executor.gd")
 
-## Process one status phase tick. Operates directly on the
-## passed-in dependencies.
+## Process one status phase tick. Operates on the passed-in
+## dependencies (world, simulation-owned RNG, simulation-owned
+## emitter). NO RNG is constructed inside this function.
 ##
 ## Returns the array of BattleEvents emitted during this phase,
 ## in emission order.
 static func process_tick(
 		p_world,
+		p_rng,
 		p_emitter: BattleEventEmitterScript) -> Array:
 	var events: Array = []
 	if p_world == null or p_emitter == null:
@@ -74,14 +82,16 @@ static func process_tick(
 				continue
 			var status_id = inst.status_id
 			var stacks = int(inst.stacks)
-			# 1. DECREMENT first.
-			var new_remaining: int = int(inst.remaining) - 1
-			inst.remaining = new_remaining
-			if new_remaining <= 0:
+			# 1. DECREMENT first. StatusInstance.tick(1) preserves
+			# the indefinite contract (remaining < 0 -> no
+			# decrement, returns false). Timed statuses: 3->2,
+			# 2->1, 1->0 (expired).
+			var expired: bool = inst.tick(1)
+			if expired:
 				# 2a. EXPIRED — remove from container + emit
 				# STATUS_EXPIRED root event.
 				container.remove(status_id)
-				var expired = p_emitter.emit(
+				var expired_event = p_emitter.emit(
 					BattleEventTypeScript.STATUS_EXPIRED,
 					int(inst.source_entity),
 					int(entity_id),
@@ -89,7 +99,7 @@ static func process_tick(
 					String(p_world.source_run_unit_id_of(int(entity_id))),
 					0,
 					String(status_id))
-				events.append(expired)
+				events.append(expired_event)
 				# Do NOT emit periodic effect on the expiry tick.
 				continue
 			# 2b. STILL ACTIVE — consider periodic effect.
@@ -136,7 +146,7 @@ static func process_tick(
 			if req == null:
 				continue
 			var per_events: Array = _execute_periodic_effect(
-				p_world, p_emitter, effect_kind, req)
+				p_world, p_rng, p_emitter, effect_kind, req)
 			for ev in per_events:
 				events.append(ev)
 			# After a Burn tick, re-check liveness: a heal cannot
@@ -151,17 +161,17 @@ static func process_tick(
 ## EffectExecutor path so we use the SAME semantics as the
 ## action-phase Damage/Heal effects (capping, no resurrection,
 ## UNIT_DIED on lethal).
+##
+## Uses the caller-provided RNG (simulation-owned) to construct
+## the EffectContext — no private RNG construction.
 static func _execute_periodic_effect(
 		p_world,
+		p_rng,
 		p_emitter: BattleEventEmitterScript,
 		p_effect_kind: int,
 		p_req) -> Array:
-	# Build a minimal EffectContext. B3 periodic path has no
-	# random draws (DOT/HOT are fixed amounts); the RNG exists
-	# only to satisfy the context shape.
-	var rng = DeterministicRngScript.new(0)
 	var sink: Array = []
-	var ctx = EffectContextScript.new(p_world, rng, p_emitter, sink)
+	var ctx = EffectContextScript.new(p_world, p_rng, p_emitter, sink)
 	var exec = EffectExecutorScript.new()
 	var result = exec.execute(ctx, p_req)
 	if result == null:
