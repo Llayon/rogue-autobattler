@@ -48,6 +48,7 @@ const BattleSetupScript = preload("res://core/battle_ecs/battle_setup.gd")
 const BattleResultScript = preload("res://core/battle_ecs/battle_result.gd")
 const BattleEventScript = preload("res://core/battle_ecs/battle_event.gd")
 const BattleEventTypeScript = preload("res://core/battle_ecs/battle_event_type.gd")
+const StatQueryScript = preload("res://core/battle_ecs/status/stat_query.gd")
 const BattleEventEmitterScript = preload("res://core/battle_ecs/events/battle_event_emitter.gd")
 const BalanceScript = preload("res://core/balance.gd")
 
@@ -255,6 +256,17 @@ func rng() -> RefCounted:
 ## Includes positions so movement counts as progress
 ## (BLOCKER 1D fix). String-based for stable comparison
 ## (Dictionary.hash() is randomized in Godot 4).
+##
+## B4: also includes active FINITE-status remaining for each
+## alive entity. This means a Stun with remaining=2 then
+## remaining=1 produces a different signature and the
+## no-progress counter is reset on each transition. Indefinite
+## statuses (remaining < 0) do NOT contribute, so a max-HP
+## indefinite Regen still permits true stalemate.
+##
+## Order: per entity, by status insertion order. Per status:
+## entity_id + status_id + remaining + stacks. Excludes
+## statuses with remaining == 0 (already expired this tick).
 func _progress_signature() -> String:
 	var sig: String = ""
 	for id in _world.alive_ids_by_team(0):
@@ -265,7 +277,28 @@ func _progress_signature() -> String:
 		var id_i: int = int(id)
 		var p: Vector2i = _world.position_of(id_i)
 		sig += "E%d:%d,%d:%d;" % [id_i, int(p.x), int(p.y), int(_world.current_hp_of(id_i))]
+	# B4 active-status contribution (finite only).
+	for id in _world.alive_ids_by_team(0):
+		sig += _status_signature_segment(int(id))
+	for id in _world.alive_ids_by_team(1):
+		sig += _status_signature_segment(int(id))
 	return sig
+
+
+## Per-entity active-status contribution to progress signature.
+## Only finite statuses (remaining > 0) are included.
+func _status_signature_segment(entity_id: int) -> String:
+	var container = _world.get_status_container(entity_id)
+	if container == null:
+		return ""
+	var seg: String = ""
+	for inst in container.all():
+		var rem: int = int(inst.remaining)
+		if rem <= 0:
+			continue  # indefinite OR already-expired-this-tick
+		seg += "S%d:%s:%d:%d;" % [
+			entity_id, String(inst.status_id), rem, int(inst.stacks)]
+	return seg
 
 
 func _has_progressed(events: Array) -> bool:
@@ -291,6 +324,9 @@ func _drive_basic_attacks() -> Array:
 	# Vertical-slice scheduler: one acting entity per side per
 	# tick (lowest-ID living, deterministic). Per BLOCKER 1:
 	# if out of range, move one cell toward target.
+	# B4: gate each acting entity on StatQuery.blocks_actions.
+	# If the selected actor is blocked, skip its action this
+	# tick. The opposing actor still gets its own attempt.
 	var events: Array = []
 	var player_ids: Array = _world.alive_ids_by_team(0)
 	var enemy_ids: Array = _world.alive_ids_by_team(1)
@@ -298,7 +334,10 @@ func _drive_basic_attacks() -> Array:
 		return events
 	var attacker_id: int = int(player_ids[0])
 	var target_id: int = _world.nearest_enemy_id(attacker_id, enemy_ids)
-	if target_id >= 0:
+	# B4: gate on blocks_actions. A blocked entity performs no
+	# normal action (no UNIT_MOVED, no ATTACK_RESOLVED).
+	if target_id >= 0 and not StatQueryScript.blocks_actions(
+			_world, attacker_id):
 		events.append_array(_resolve_or_move(attacker_id, target_id))
 	enemy_ids = _world.alive_ids_by_team(1)
 	player_ids = _world.alive_ids_by_team(0)
@@ -306,7 +345,8 @@ func _drive_basic_attacks() -> Array:
 		return events
 	var e_attacker: int = int(enemy_ids[0])
 	var e_target: int = _world.nearest_enemy_id(e_attacker, player_ids)
-	if e_target >= 0:
+	if e_target >= 0 and not StatQueryScript.blocks_actions(
+			_world, e_attacker):
 		events.append_array(_resolve_or_move(e_attacker, e_target))
 	return events
 

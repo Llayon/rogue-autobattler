@@ -85,6 +85,32 @@ static func has(status_id: StringName) -> bool:
 ##   NaN / INF:
 ##     -> { ok=false, kind=KIND_INVALID, ticks=0,
 ##           reason="non-finite duration rejected" }
+## B4 / Phase-3 fractional-duration conversion policy.
+##
+## Context:
+##   Legacy BattleRunner.step(dt) used dt = 1.0/20.0 = 0.05s
+##   per simulation tick. A StatusDef.duration of 1.5 (e.g.
+##   content/effects/stun.tres) would last 30 legacy updates.
+##   Phase 3 uses 1.0 unit per simulation tick (no dt).
+##
+## Policy:
+##   - integer (e.g. 3.0, 5.0): ticks = int(duration)
+##   - fractional > 0 (e.g. 1.5): ticks = ceil(duration)
+##     Rationale: defensive rounding. Guarantees the integer
+##     runtime ticks is AT LEAST the literal duration, so the
+##     status cannot expire earlier than the content claims.
+##     ceil(1.5) = 2 ticks >= 1.5; the status remains active
+##     one extra tick rather than ending one short.
+##   - 0.0: INSTANT (deferred).
+##   - < 0: INVALID.
+##   - NaN / INF: INVALID.
+##
+## This avoids the round/ceil/floor "guess" anti-pattern by
+## picking the most defensive (longest-favoring) conversion.
+## The legacy 30-tick behavior is not preserved here because
+## Phase-3's clock does not model elapsed time at the same
+## resolution; the B4 migration is content-driven, not
+## time-driven.
 static func convert_duration(p_duration: float) -> Dictionary:
 	# NaN / INF detection (NaN compares false to everything, including itself).
 	if not (p_duration == p_duration):
@@ -100,9 +126,15 @@ static func convert_duration(p_duration: float) -> Dictionary:
 			"ticks": 0,
 			"reason": "status duration=0 is INSTANT; execution deferred to a later Phase",
 		}
-	# Accept ONLY exact integer floats.
 	if p_duration != floor(p_duration):
-		return _invalid("fractional duration rejected for Phase 3")
+		# B4: fractional durations use defensive ceil() per
+		# the documented B4 fractional-duration policy above.
+		return {
+			"ok": true,
+			"kind": KIND_TIMED,
+			"ticks": int(ceil(p_duration)),
+			"reason": "",
+		}
 	return {
 		"ok": true,
 		"kind": KIND_TIMED,

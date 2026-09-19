@@ -63,6 +63,48 @@ func is_stunned(entity_id: int) -> bool:
 	return int(inst.remaining) != 0
 
 
+## B4: blocks_actions(world, entity_id) -> bool
+##
+## Pure query: returns true iff the entity currently has at
+## least one active StatusInstance whose StatusDef has
+## blocks_actions == true. Composition-based: multiple
+## blocking statuses all count; the entity stays blocked
+## while ANY one is active.
+##
+## Rules:
+##   - reads active StatusInstances via the entity's
+##     StatusContainer.
+##   - resolves each StatusDef via StatusDefResolver.
+##   - deterministic, no mutation, no Node/UI/global state.
+##   - unknown status_id resolves to def=null -> skip
+##     (fail safely, not blocked).
+##   - empty container -> false.
+##   - not alive -> false (dead entities have no actions).
+##
+## This is the canonical scheduler-gating query used by
+## BattleSimulation.step_tick (B4-3).
+static func blocks_actions(p_world, entity_id: int) -> bool:
+	if p_world == null or entity_id < 0:
+		return false
+	if not p_world.is_alive(entity_id):
+		return false
+	var container = p_world.get_status_container(entity_id)
+	if container == null:
+		return false
+	for inst in container.all():
+		# An instance with remaining == 0 has expired this
+		# tick (B3 decrement-first); treat as not blocking.
+		var rem: int = int(inst.remaining)
+		if rem == 0:
+			continue
+		var def: Resource = StatusDefResolverScript.resolve(inst.status_id)
+		if def == null:
+			continue
+		if bool(def.blocks_actions):
+			return true
+	return false
+
+
 ## Internal: aggregate one stat field (attack_modifier or
 ## defense_modifier) across all of the entity's statuses using
 ## StatusDef semantics.
