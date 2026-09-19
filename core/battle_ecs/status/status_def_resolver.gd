@@ -1,6 +1,9 @@
 extends RefCounted
 ## Phase 3 / B1.1 / StatusDefResolver — resolves a StatusDef by its
-## content id, using the existing ContentDB indexing path.
+## content id, using the typed lookup in ContentDB (B3.1).
+## Use get_by_id_for_type("effects", id) so that cross-type
+## duplicates (e.g. &"regen" in both abilities/ and effects/)
+## resolve to the StatusDef, not the AbilityDef.
 ##
 ## Architectural rules (B1):
 ##   - StatusDef is content definition (immutable Resource).
@@ -43,7 +46,8 @@ static func resolve(status_id: StringName) -> Resource:
 	if status_id == &"":
 		return null
 	ContentDBScript.ensure_loaded()
-	var res: Resource = ContentDBScript.get_by_id(status_id)
+	var res: Resource = ContentDBScript.get_by_id_for_type(
+		"effects", status_id)
 	if res == null:
 		return null
 	# Confirm the resource is a StatusDef (defensive: caller

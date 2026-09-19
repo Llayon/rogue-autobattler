@@ -272,6 +272,22 @@ func alive_ids_by_team(team: int) -> Array:
 	return out
 
 
+## B3: returns ALL alive entity IDs in deterministic numeric
+## allocation order. Player units first (their IDs were
+## allocated first), then enemy units, both in spawn order.
+## This is the canonical entity iteration order for the
+## periodic status phase. Do NOT use Dictionary iteration.
+func alive_ids_in_order() -> Array:
+	var out: Array = []
+	for id in _player_ids_ordered:
+		if is_alive(int(id)):
+			out.append(int(id))
+	for id in _enemy_ids_ordered:
+		if is_alive(int(id)):
+			out.append(int(id))
+	return out
+
+
 ## True iff `cell` is occupied by any alive entity.
 func is_cell_occupied(cell: Vector2i) -> bool:
 	for id in _positions.keys():

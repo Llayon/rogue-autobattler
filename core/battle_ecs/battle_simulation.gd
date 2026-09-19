@@ -63,6 +63,9 @@ var _result: RefCounted = null
 # BattleEventEmitter. All event_id / root_action_id allocation
 # flows through it.
 var _event_emitter: RefCounted = null
+# B3: periodic status phase processor (Burn / Regen timing).
+# Optional — null means no periodic processing wired in.
+var _periodic_status_processor: RefCounted = null
 var _max_ticks: int = 0
 var _no_progress_count: int = 0
 var _last_progress_sig: String = ""
@@ -95,6 +98,7 @@ func initialize(setup: BattleSetup) -> bool:
 	_finished = false
 	_result = null
 	_tick_count = 0
+	_periodic_status_processor = null  # B3: fresh default below
 	_no_progress_count = 0
 	_last_progress_sig = ""
 	_termination_reason = BattleResultScript.TERMINATION_NATURAL
@@ -106,6 +110,10 @@ func initialize(setup: BattleSetup) -> bool:
 	_event_emitter = BattleEventEmitterScript.new()
 	_event_emitter.reset()
 	_event_emitter.set_tick(0)
+	# B3: default to the standard periodic status processor.
+	var PeriodicStatusProcessorScript = preload(
+		"res://core/battle_ecs/status/periodic_status_processor.gd")
+	_periodic_status_processor = PeriodicStatusProcessorScript.new()
 	# HIGH 6 fix: own a true snapshot copy of the setup so
 	# caller mutation of the original BattleSetup after
 	# initialize() cannot retroactively alter an in-progress
@@ -185,7 +193,18 @@ func step_tick() -> Array:
 	# tick value automatically.
 	_event_emitter.set_tick(_tick_count)
 	var events: Array = []
-	events.append_array(_drive_basic_attacks())
+	# B3: periodic status phase runs BEFORE normal unit actions
+	# (legacy parity). Burns / Regen etc. tick here.
+	if _periodic_status_processor != null:
+		var status_events: Array = _periodic_status_processor.process_tick(
+			_world, _event_emitter)
+		for e in status_events:
+			events.append(e)
+	# Refresh alive snapshot — a status-phase Burn may have
+	# killed a unit. The action phase must not act on dead units.
+	var natural_after_status: bool = _world.one_side_empty()
+	if not natural_after_status:
+		events.append_array(_drive_basic_attacks())
 	var natural: bool = _world.one_side_empty()
 	var budget: bool = _max_ticks > 0 and _tick_count >= _max_ticks
 	var progressed: bool = _has_progressed(events)
@@ -248,9 +267,16 @@ func _progress_signature() -> String:
 
 func _has_progressed(events: Array) -> bool:
 	# Progress = at least one DAMAGE_APPLIED / UNIT_DIED /
-	# UNIT_MOVED event OR alive state changed.
+	# UNIT_MOVED / STATUS_EXPIRED event OR alive state changed.
+	# STATUS_TICKED by itself does NOT count (it's just
+	# telemetry for a tick that may be no-op).
+	# HEAL_APPLIED changes HP and is caught by the state
+	# signature below.
 	for e in events:
-		if e.type == 3 or e.type == 1 or e.type == 5:
+		if int(e.type) == BattleEventTypeScript.DAMAGE_APPLIED \
+				or int(e.type) == BattleEventTypeScript.UNIT_DIED \
+				or int(e.type) == BattleEventTypeScript.UNIT_MOVED \
+				or int(e.type) == BattleEventTypeScript.STATUS_EXPIRED:
 			return true
 	var current: String = _progress_signature()
 	return current != _last_progress_sig
