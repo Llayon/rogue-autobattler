@@ -41,9 +41,55 @@ const BattleEventEmitterScript = preload("res://core/battle_ecs/events/battle_ev
 const EffectContextScript = preload("res://core/battle_ecs/effects/effect_context.gd")
 const EffectExecutorScript = preload("res://core/battle_ecs/effects/effect_executor.gd")
 
+## B3.3 / Periodic payload classification.
+## DOT vs HOT is determined from dot_damage / dot_heal PAYLOAD
+## (the legacy source of truth in core/battle/status_list.gd),
+## NOT from StatusDef.is_harmful (which is a UI/classification
+## flag and is NOT the periodic effect kind).
+##
+## Cases:
+##   PERIODIC_NONE:        dot_damage == 0 AND dot_heal == 0
+##   PERIODIC_DAMAGE:      dot_damage >  0 AND dot_heal == 0
+##   PERIODIC_HEAL:        dot_damage == 0 AND dot_heal >  0
+##   PERIODIC_DUAL:        dot_damage >  0 AND dot_heal >  0
+##   PERIODIC_INVALID:     either value < 0 (malformed content)
+const PERIODIC_NONE: int = 0
+const PERIODIC_DAMAGE: int = 1
+const PERIODIC_HEAL: int = 2
+const PERIODIC_DUAL: int = 3
+const PERIODIC_INVALID: int = 4
+
+
+## Classify the periodic payload of a StatusDef. Returns one of
+## the PERIODIC_* constants. Pure function — no allocation,
+## no side effects, no rng draws. Used for unit-level
+## classification tests and by PeriodicStatusProcessor.
+static func classify_periodic_payload(
+		p_dot_damage,
+		p_dot_heal) -> int:
+	var dd: int = int(p_dot_damage)
+	var dh: int = int(p_dot_heal)
+	if dd < 0 or dh < 0:
+		return PERIODIC_INVALID
+	if dd == 0 and dh == 0:
+		return PERIODIC_NONE
+	if dd > 0 and dh == 0:
+		return PERIODIC_DAMAGE
+	if dd == 0 and dh > 0:
+		return PERIODIC_HEAL
+	if dd > 0 and dh > 0:
+		return PERIODIC_DUAL
+	# Unreachable for non-negative integers.
+	return PERIODIC_INVALID
+
+
 ## Process one status phase tick. Operates on the passed-in
 ## dependencies (world, simulation-owned RNG, simulation-owned
 ## emitter). NO RNG is constructed inside this function.
+##
+## RNG invariant:
+##   rng == null -> early-return empty result, no mutation.
+##   Same RNG object must reach every periodic EffectContext.
 ##
 ## Returns the array of BattleEvents emitted during this phase,
 ## in emission order.
@@ -52,7 +98,7 @@ static func process_tick(
 		p_rng,
 		p_emitter: BattleEventEmitterScript) -> Array:
 	var events: Array = []
-	if p_world == null or p_emitter == null:
+	if p_world == null or p_rng == null or p_emitter == null:
 		return events
 	# Snapshot alive entities in deterministic allocation order.
 	var entities: Array = p_world.alive_ids_in_order()
@@ -116,14 +162,27 @@ static func process_tick(
 				continue
 			if interval != 1.0:
 				continue
-			var harmful: bool = bool(def.is_harmful)
-			var dot_damage: float = float(def.dot_damage) if harmful else 0.0
-			var dot_heal: float = float(def.dot_heal) if not harmful else 0.0
+			var dot_damage: int = int(def.dot_damage)
+			var dot_heal: int = int(def.dot_heal)
+			var kind: int = classify_periodic_payload(
+				dot_damage, dot_heal)
+			if kind == PERIODIC_NONE:
+				# Duration still decrements (already done above);
+				# no periodic effect, no STATUS_TICKED.
+				continue
+			if kind == PERIODIC_DUAL:
+				# FEATURE DEFER: dual-payload periodic not
+				# supported in B3. Skip silently.
+				continue
+			if kind == PERIODIC_INVALID:
+				# Malformed content. Skip silently.
+				continue
+			# PERIODIC_DAMAGE or PERIODIC_HEAL.
 			var periodic_amount: int = 0
-			if harmful:
-				periodic_amount = int(dot_damage * float(stacks))
+			if kind == PERIODIC_DAMAGE:
+				periodic_amount = dot_damage * stacks
 			else:
-				periodic_amount = int(dot_heal * float(stacks))
+				periodic_amount = dot_heal * stacks
 			# Emit STATUS_TICKED root.
 			var status_tick_root = p_emitter.emit(
 				BattleEventTypeScript.STATUS_TICKED,
@@ -136,7 +195,9 @@ static func process_tick(
 			events.append(status_tick_root)
 			# Route the periodic effect through EffectExecutor
 			# using the canonical child_from_parent factory.
-			var effect_kind: int = EffectKindScript.DAMAGE if harmful else EffectKindScript.HEAL
+			var effect_kind: int = EffectKindScript.DAMAGE \
+				if kind == PERIODIC_DAMAGE \
+				else EffectKindScript.HEAL
 			var req = EffectRequestScript.child_from_parent(
 				effect_kind,
 				status_tick_root,
