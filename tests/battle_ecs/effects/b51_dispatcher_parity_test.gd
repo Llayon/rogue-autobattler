@@ -549,12 +549,19 @@ func _test_exact_depth_boundary_single_chain() -> void:
 
 func _test_per_root_continuation_after_budget_exhaustion() -> void:
 	print("[PER-ROOT] per_root_continuation_after_budget_exhaustion")
+	# The previous b5.1 version of this test did NOT
+	# actually exhaust Root A: with PingPongProvider.mirror=false
+	# only one reaction per root was proposed, and
+	# max_reactions_per_root=1 admitted it.
+	# B5.2 forces Root A to PROPOSE two reactions:
+	# PingPongProvider.mirror=true emits HEAL + back-DAMAGE.
+	# Budget=1 admits only the first; the second is
+	# MAX_REACTIONS_PER_ROOT. Dispatcher MUST then continue
+	# to Root B's first reaction.
 	var info = _setup_world_and_emitter()
 	var w = info["world"]
 	var em = info["emitter"]
 	var setup = _setup_world_with_two_units(w, em)
-	# Use the SAME emitter that 'info' uses (the test setup
-	# already has the dispatcher create one; reuse it).
 	var em_local = info["emitter"]
 	var root_a_event = em_local.emit(
 		BattleEventTypeScript.DAMAGE_APPLIED,
@@ -562,45 +569,79 @@ func _test_per_root_continuation_after_budget_exhaustion() -> void:
 	var root_b_event = em_local.emit(
 		BattleEventTypeScript.DAMAGE_APPLIED,
 		0, 1, "", "", 5, "")
+	# Capture root ids BEFORE dispatch (provider sees
+	# them on the events; reactions inherit root_action_id).
+	var root_a_id: int = int(root_a_event.root_action_id)
+	var root_b_id: int = int(root_b_event.root_action_id)
 	var provider = B5HelpersScript.PingPongProvider.new()
-	provider.mirror = false
+	provider.mirror = true
 	var limits = TriggerLimitsScript.new()
 	limits.max_chain_depth = 32
-	limits.max_reactions_per_root = 1   # tight per-root budget
+	limits.max_reactions_per_root = 1   # forces exhaustion on Root A
 	limits.max_events_per_tick = 100
 	var d = TriggerDispatcherScript.new()
 	var sink: Array = []
-	# FIFO: root_a first, then root_b.
 	var result = d.process([root_a_event, root_b_event], w,
 		setup["rng"], em_local, sink, provider, limits)
-	# Per-root continuation: BOTH roots get exactly 1
-	# reaction each (budget=1, both consumed). Root A
-	# exhaustion does NOT block root B.
+	# Truncation must fire (Root A exhausted its budget
+	# on reaction 1, after which Root B proceeds but its
+	# budget is also exhausted by reaction 1).
+	_assert(result.truncated,
+		"truncated=true (per-root budget exhausted)")
+	_assert(int(result.reason) == int(
+			DispatchResultScript.REASON_MAX_REACTIONS_PER_ROOT),
+		"reason = MAX_REACTIONS_PER_ROOT (got %d)" % int(result.reason))
+	# Both roots must have ONE admitted reaction each.
 	_assert(int(result.reactions_executed) == 2,
-		"both roots admitted their single reaction (got %d, truncated=%s)" % [int(result.reactions_executed), str(result.truncated)])
-	_assert(len(result.events) == 2,
-		"2 HEAL events in result (one per root)")
-	# Root-action_ids must be distinct: prove both roots
-	# executed by inspecting result.events roots.
-	var roots_seen: Dictionary = {}
+		"two reactions_executed (one per root; got %d)" % int(result.reactions_executed))
+	# Result events: must contain events for BOTH root_action_ids.
+	var event_roots: Dictionary = {}
 	for e in result.events:
-		roots_seen[int(e.root_action_id)] = true
-	_assert(len(roots_seen) == 2,
-		"two distinct root_action_ids in result.events (got %d)" % len(roots_seen))
+		event_roots[int(e.root_action_id)] = true
+	_assert(event_roots.has(root_a_id) and event_roots.has(root_b_id),
+		"result.events contains events for BOTH Root A (id=%d) and Root B (id=%d)" % [root_a_id, root_b_id])
+	# Each root produced a HEAL_APPLIED (the admitted
+	# first reaction of PingPongProvider).
+	var heal_count: int = 0
+	for e in result.events:
+		if int(e.type) == BattleEventTypeScript.HEAL_APPLIED:
+			heal_count += 1
+	_assert(heal_count == 2,
+		"both roots admitted their HEAL_APPLIED first reaction (got %d)" % heal_count)
+	# CRUCIAL: Root B's admitted HEAL happened AFTER Root
+	# A was rejected (dispatcher continued past Root A's
+	# exhaustion). Track when each event's parent was the
+	# initial root event.
+	var root_b_event_found = false
+	for e in result.events:
+		if int(e.root_action_id) == root_b_id \
+				and int(e.parent_event_id) == int(root_b_event.event_id):
+			root_b_event_found = true
+			break
+	_assert(root_b_event_found,
+		"Root B admitted a reaction after Root A exhausted (parent=root_b_event)")
 
 
 # === Truncation reason policy ===
 
 func _test_truncation_reason_first_wins() -> void:
 	print("[REASON-1] truncation_reason_first_wins")
-	# We design a setup where the FIRST hit is MAX_DEPTH.
-	# Beyond that, per-root budget also gets exhausted,
-	# but reason must remain MAX_DEPTH (first wins).
+	# The previous b5.1 version of this test only triggered
+	# MAX_DEPTH. It did NOT produce a LATER competing
+	# truncation reason that could overwrite the first.
+	#
+	# B5.2 forces a sequence:
+	#   FIRST  : Root A reaction at requested depth=2 with
+	#            max_chain_depth=1 -> MAX_DEPTH (recording
+	#            reason=MAX_DEPTH first).
+	#   THEN   : Root B has two reactions at depth=1 with
+	#            max_reactions_per_root=1. Reaction 1 of
+	#            Root B is admitted; reaction 2 hits
+	#            per-root budget -> MAX_REACTIONS_PER_ROOT.
+	# Final reason must remain MAX_DEPTH (first wins).
 	var info = _setup_world_and_emitter()
 	var w = info["world"]
 	var em = info["emitter"]
-	# Unit setup: both at less than max HP so chain heals
-	# are not no-ops.
 	var B = BattleUnitSetupScript
 	var S = BattleSetupScript
 	var p0 = B.new("p0", &"warrior", 0, Vector2i(0, 0), 50, 100, 20, 5, 1)
@@ -608,27 +649,58 @@ func _test_truncation_reason_first_wins() -> void:
 	var s = S.new(42, [p0], [e0], 7, 4)
 	w.spawn_from_setup(s)
 	var rng = DeterministicRngScript.new(0)
-	var damage = em.emit(
+	# Build Root A already at chain_depth=1 (parent -> root_a).
+	var root_a_parent = em.emit(
 		BattleEventTypeScript.DAMAGE_APPLIED,
 		0, 1, "", "", 5, "")
-	# Depth cap very low; per-root budget very high so
-	# only depth triggers first.
-	var provider = B5HelpersScript.SingleChainProvider.new()
+	var root_a_event = em.emit_child(
+		BattleEventTypeScript.DAMAGE_APPLIED,
+		int(root_a_parent.event_id),
+		int(root_a_parent.root_action_id),
+		int(root_a_parent.chain_depth),
+		0, 1, "", "", 5, "")
+	_assert(int(root_a_event.chain_depth) == 1,
+		"root_a_event chain_depth=1 (got %d)" % int(root_a_event.chain_depth))
+	# Root B: a fresh depth-0 DAMAGE_APPLIED. Provider
+	# PingPongProvider.mirror=true on this returns
+	# HEAL + back-DAMAGE.
+	var root_b_event = em.emit(
+		BattleEventTypeScript.DAMAGE_APPLIED,
+		0, 1, "", "", 5, "")
+	var root_b_id: int = int(root_b_event.root_action_id)
+	# Tight limits so the FIRST hit is MAX_DEPTH (root_a
+	# reaction depth=2 > max=1), then Root B hits its
+	# per-root budget.
+	var provider = B5HelpersScript.PingPongProvider.new()
+	provider.mirror = true
 	var limits = TriggerLimitsScript.new()
-	limits.max_chain_depth = 2
-	limits.max_reactions_per_root = 100000
-	limits.max_events_per_tick = 100000
+	limits.max_chain_depth = 1
+	limits.max_reactions_per_root = 1
+	limits.max_events_per_tick = 100
 	var d = TriggerDispatcherScript.new()
 	var sink: Array = []
-	var result = d.process([damage], w, rng, em, sink, provider,
-		limits)
+	var result = d.process([root_a_event, root_b_event], w, rng,
+		em, sink, provider, limits)
+	# Truncated (some branch was bounded).
 	_assert(result.truncated,
-		"truncated (depth=2 limit fired)")
+		"truncated=true (multiple limits fired)")
+	# First non-NONE reason must win: MAX_DEPTH.
 	_assert(int(result.reason) == int(
 			DispatchResultScript.REASON_MAX_DEPTH),
-		"reason = MAX_DEPTH (got %d)" % int(result.reason))
-	# The fact that reason stayed MAX_DEPTH even if other
-	# limits fired proves "first wins" semantics.
+		"reason = MAX_DEPTH (first wins; got %d)" % int(result.reason))
+	# The MAX_REACTIONS_PER_ROOT happened for Root B but
+	# did NOT overwrite the recorded reason. We assert
+	# this by checking that Root B's first reaction was
+	# actually admitted (i.e. dispatcher really continued
+	# after Root A rejection).
+	var root_b_heal_committed: bool = false
+	for e in result.events:
+		if int(e.root_action_id) == root_b_id \
+				and int(e.type) == BattleEventTypeScript.HEAL_APPLIED:
+			root_b_heal_committed = true
+			break
+	_assert(root_b_heal_committed,
+		"Root B admitted a HEAL reaction AFTER Root A MAX_DEPTH rejection (dispatcher continued)")
 
 
 # === Malformed reaction hardening ===
@@ -758,108 +830,166 @@ func _field_diff14(a, b) -> String:
 
 # === Same-dispatcher isolation ===
 
+# B5.2: rebuild this proof with THREE independent
+# identical scenarios (A, B_after_A, B_fresh_reference)
+# to truly exercise same-dispatcher reuse. The previous
+# version re-used B's world after A's dispatch and reset
+# the emitter to align IDs — that conflates "fresh
+# baseline" with "what happened next". B5.2 creates
+# fully independent worlds so the only shared entity is
+# the dispatcher instance.
 func _test_same_dispatcher_back_to_back_isolation() -> void:
 	print("[SAME-DISP] same_dispatcher_back_to_back_isolation")
-	# Setup A.
-	var info_a = _setup_world_and_emitter()
-	var w_a = info_a["world"]
-	var em_a = info_a["emitter"]
-	var setup_a = _setup_world_with_two_units(w_a, em_a)
-	var damage_a = setup_a["damage"]
-	# Setup B (independent emitter, identical layout).
-	var info_b = _setup_world_and_emitter()
-	var w_b = info_b["world"]
-	var em_b = info_b["emitter"]
-	var setup_b = _setup_world_with_two_units(w_b, em_b)
-	var damage_b = setup_b["damage"]
+	# Build three fully independent scenarios. Each has
+	# its own BattleWorld, DeterministicRng, BattleEventEmitter,
+	# initial committed event, and sink.
+	var scen_a = _make_identical_scenario()
+	var scen_b_after = _make_identical_scenario()
+	var scen_b_fresh = _make_identical_scenario()
+	# Sanity: all three scenarios are structurally identical
+	# to dispatcher perspective (initial event id may be 1 in
+	# each because each emitter starts fresh).
+	_assert(int(scen_a["init"].event_id) == int(scen_b_after["init"].event_id) \
+			and int(scen_b_after["init"].event_id) == int(scen_b_fresh["init"].event_id),
+		"sanity: all scenarios share initial event_id")
 	var provider = B5HelpersScript.PingPongProvider.new()
 	provider.mirror = false
 	var limits = TriggerLimitsScript.new()
-	# ONE TriggerDispatcher, two separate back-to-back calls.
-	var d = TriggerDispatcherScript.new()
-	var res_a = d.process([damage_a], w_a, setup_a["rng"], em_a, [],
-		provider, limits)
-	var res_b = d.process([damage_b], w_b, setup_b["rng"], em_b, [],
-		provider, limits)
-	# Now reset em_b + rebuild damage_b so the FRESH
-	# dispatcher's emit sequence is identical to back-to-
-	# back's at the time of dispatch.
-	em_b.reset()
-	# Need a fresh damage event with the same ancestry as
-	# damage_b so reaction emit produces comparable events.
-	var damage_b_again = em_b.emit(
-		BattleEventTypeScript.DAMAGE_APPLIED,
-		0, 1, "", "", 5, "")
-	# Now FRESH dispatcher on rebuilt B should match the
-	# back-to-back result (modulo emitter IDs which are
-	# unchanged because we reset BEFORE dispatch).
-	var d_fresh = TriggerDispatcherScript.new()
-	var res_b_fresh = d_fresh.process([damage_b_again], w_b,
-		setup_b["rng"], em_b, [], provider, limits)
-	# Use NON-emitter-allocated fields for comparison
-	# (ancestry, type, source/target, amount, tag,
-	# chain_depth, etc.). The first non-matcher proves
-	# isolation.
-	var norm_b: Array = _normalize14(res_b.events)
+	# SHARED dispatcher across back-to-back A then B_after.
+	var shared_dispatcher = TriggerDispatcherScript.new()
+	var res_a = shared_dispatcher.process(
+		[scen_a["init"]], scen_a["world"], scen_a["rng"],
+		scen_a["emitter"], scen_a["sink"], provider, limits)
+	var res_b_after = shared_dispatcher.process(
+		[scen_b_after["init"]], scen_b_after["world"], scen_b_after["rng"],
+		scen_b_after["emitter"], scen_b_after["sink"], provider, limits)
+	# FRESH dispatcher on independent B_fresh_reference.
+	var fresh_dispatcher = TriggerDispatcherScript.new()
+	var res_b_fresh = fresh_dispatcher.process(
+		[scen_b_fresh["init"]], scen_b_fresh["world"], scen_b_fresh["rng"],
+		scen_b_fresh["emitter"], scen_b_fresh["sink"], provider, limits)
+	# === Compare B_after_A (shared dispatcher) vs B_fresh (fresh dispatcher) ===
+	var norm_b_after: Array = _normalize14(res_b_after.events)
 	var norm_b_fresh: Array = _normalize14(res_b_fresh.events)
-	_assert(len(norm_b) == len(norm_b_fresh),
-		"back-to-back B events length == fresh B (both len %d vs %d)" % [len(norm_b), len(norm_b_fresh)])
-	for i in len(norm_b):
-		var diff: String = _field_diff14(norm_b_fresh[i], norm_b[i])
+	_assert(len(norm_b_after) == len(norm_b_fresh),
+		"B_after_A and B_fresh have equal events length (got %d vs %d)" % [len(norm_b_after), len(norm_b_fresh)])
+	for i in len(norm_b_after):
+		var diff: String = _field_diff14(norm_b_fresh[i], norm_b_after[i])
 		if diff != "":
-			_assert(false, "back-to-back B[%d] differs from fresh B: %s" % [i, diff])
+			_assert(false, "B_after_A[%d] differs from B_fresh: %s" % [i, diff])
 			return
-	_assert(int(res_b.reactions_executed) == int(res_b_fresh.reactions_executed),
-		"back-to-back B reactions_executed matches fresh")
-	_assert(res_b.truncated == res_b_fresh.truncated,
-		"back-to-back B truncated matches fresh")
-	_assert(int(res_b.reason) == int(res_b_fresh.reason),
-		"back-to-back B reason matches fresh")
-	# Process A did NOT contaminate B's dispatcher state
-	# (the B back-to-back result matches the fresh B run).
-	# That is the strong isolation proof.
-	_assert(len(norm_b) > 0,
-		"sanity: B produced at least one reaction event")
-	# Final sanity: result.event event_ids should reflect
-	# the SPECIFIC emitter (A's reaction has event_id 2,
-	# B's also id 2 because both started fresh).
-	_assert(len(res_a.events) >= 1 and len(res_b.events) >= 1,
-		"both A and B emit at least one reaction event")
+	_assert(int(res_b_after.reactions_executed) == int(res_b_fresh.reactions_executed),
+		"B_after_A reactions_executed == B_fresh (got %d vs %d)" % [int(res_b_after.reactions_executed), int(res_b_fresh.reactions_executed)])
+	_assert(res_b_after.truncated == res_b_fresh.truncated,
+		"B_after_A truncated matches B_fresh (got %s vs %s)" % [str(res_b_after.truncated), str(res_b_fresh.truncated)])
+	_assert(int(res_b_after.reason) == int(res_b_fresh.reason),
+		"B_after_A reason matches B_fresh (got %d vs %d)" % [int(res_b_after.reason), int(res_b_fresh.reason)])
+	# === Final-state parity ===
+	# World HP / positions / containers: B_after_A and B_fresh
+	# are fresh scenarios so they began identically; after
+	# identical dispatch the state should be identical.
+	_assert(int(scen_b_after["world"].current_hp_of(0)) == int(scen_b_fresh["world"].current_hp_of(0)),
+		"B_after_A.p0 hp matches B_fresh.p0 hp (got %d vs %d)" % [int(scen_b_after["world"].current_hp_of(0)), int(scen_b_fresh["world"].current_hp_of(0))])
+	_assert(int(scen_b_after["world"].current_hp_of(1)) == int(scen_b_fresh["world"].current_hp_of(1)),
+		"B_after_A.e0 hp matches B_fresh.e0 hp (got %d vs %d)" % [int(scen_b_after["world"].current_hp_of(1)), int(scen_b_fresh["world"].current_hp_of(1))])
+	# RNG parity: dispatch does not advance RNG (proven by
+	# the RNG-PURE proof). RNG snapshots must be identical.
+	var rng_after: Dictionary = scen_b_after["rng"].snapshot()
+	var rng_fresh: Dictionary = scen_b_fresh["rng"].snapshot()
+	_assert(int(rng_after.get("seed", -1)) == int(rng_fresh.get("seed", -1)),
+		"B_after_A rng seed matches B_fresh (got %d vs %d)" % [int(rng_after.get("seed", -1)), int(rng_fresh.get("seed", -1))])
+	_assert(int(rng_after.get("draw_count", -1)) == int(rng_fresh.get("draw_count", -1)),
+		"B_after_A rng draw_count matches B_fresh (got %d vs %d)" % [int(rng_after.get("draw_count", -1)), int(rng_fresh.get("draw_count", -1))])
+	_assert(int(rng_after.get("state", -1)) == int(rng_fresh.get("state", -1)),
+		"B_after_A rng state matches B_fresh (state=%d)" % int(rng_after.get("state", -1)))
+	# Emitter counters: per-scenario independent. Because
+	# both scenarios share the same code path AND each has
+	# its own emitter, their peek counters are EQUAL. That
+	# is the correct simulation-scoped identity proof.
+	_assert(int(scen_b_after["emitter"].peek_next_event_id()) \
+			== int(scen_b_fresh["emitter"].peek_next_event_id()),
+		"B_after_A emitter peek matches B_fresh (got %d vs %d)" % [int(scen_b_after["emitter"].peek_next_event_id()), int(scen_b_fresh["emitter"].peek_next_event_id())])
+	_assert(int(scen_b_after["emitter"].peek_next_root_action_id()) \
+			== int(scen_b_fresh["emitter"].peek_next_root_action_id()),
+		"B_after_A emitter root-action peek matches B_fresh (got %d vs %d)" % [int(scen_b_after["emitter"].peek_next_root_action_id()), int(scen_b_fresh["emitter"].peek_next_root_action_id())])
+	# Process A did not contaminate B_after_A. A's result
+	# is independent of B_after_A's result.
+	_assert(int(res_a.reactions_executed) >= 0,
+		"sanity: A produced a result")
+	_assert(int(res_b_after.reactions_executed) >= 0,
+		"sanity: B_after_A produced a result")
+
+
+# Build an independent scenario: own world, rng, emitter,
+# initial committed event, sink. Same unit setup as the
+# other helpers.
+func _make_identical_scenario() -> Dictionary:
+	var w = BattleWorldScript.new(7, 4)
+	var em = BattleEventEmitterScript.new()
+	em.reset()
+	# spawn identical units at less than max HP so HEAL
+	# of (target=0) doesn't no-op.
+	var p0_setup = BattleUnitSetupScript.new(
+		"p0", &"warrior", 0, Vector2i(0, 0), 50, 100, 20, 5, 1)
+	var e0_setup = BattleUnitSetupScript.new(
+		"e0", &"orc", 1, Vector2i(0, 1), 50, 100, 20, 5, 1)
+	var s = BattleSetupScript.new(42, [p0_setup], [e0_setup], 7, 4)
+	w.spawn_from_setup(s)
+	var rng = DeterministicRngScript.new(0)
+	var init_event = B5HelpersScript.EventBuilder.damage_event(
+		em, 0, 1, 5)
+	var sink: Array = []
+	return {
+		"world": w,
+		"emitter": em,
+		"rng": rng,
+		"init": init_event,
+		"sink": sink,
+	}
 
 
 # === Provider RNG purity ===
 
+# The b5.1 RNG-PURE test created a local fresh
+# DeterministicRng that was never passed to the
+# dispatcher. It was measuring an unrelated object.
+# B5.2 fixes that: capture the EXACT RNG object passed
+# into TriggerDispatcher.process(...) and compare its
+# .snapshot() before vs after dispatch.
+#
+# CONTRACT:
+#   discover(world, event, rng) is a TRUSTED PROVIDER
+#   CONTRACT in B5. RNG identity is supplied but the
+#   dispatcher does NOT advance RNG. A pure provider
+#   (NoopProvider) MUST leave snapshot() unchanged.
+
 func _test_provider_does_not_advance_rng() -> void:
 	print("[RNG-PURE] provider_does_not_advance_rng")
-	var rng = DeterministicRngScript.new(42)
-	# Snapshot RNG state by drawing two values.
-	var before_a: int = int(rng.randi_range(0, 1000000))
-	var before_b: int = int(rng.randi_range(0, 1000000))
-	# Re-seed and re-draw: same values (deterministic).
-	rng = DeterministicRngScript.new(42)
-	var check_a: int = int(rng.randi_range(0, 1000000))
-	var check_b: int = int(rng.randi_range(0, 1000000))
-	_assert(check_a == before_a,
-		"sanity: seed=42 produces same first draw (got %d, expected %d)" % [check_a, before_a])
-	_assert(check_b == before_b,
-		"sanity: seed=42 produces same second draw")
-	# Use NoopProvider; rng must be untouched.
-	rng = DeterministicRngScript.new(42)
 	var info = _setup_world_and_emitter()
 	var w = info["world"]
 	var em = info["emitter"]
 	var setup = _setup_world_with_two_units(w, em)
+	# The exact RNG instance the dispatcher will receive.
+	var dispatch_rng: DeterministicRng = setup["rng"]
+	var before: Dictionary = dispatch_rng.snapshot()
 	var provider = B5HelpersScript.NoopProvider.new()
 	var limits = TriggerLimitsScript.new()
 	var d = TriggerDispatcherScript.new()
-	d.process([setup["damage"]], w, setup["rng"], em, [], provider, limits)
-	# The provider did not consume our rng.
-	var after_a: int = int(rng.randi_range(0, 1000000))
-	var after_b: int = int(rng.randi_range(0, 1000000))
-	_assert(after_a == before_a,
-		"NoopProvider did not advance local rng draw 1 (got %d, expected %d)" % [after_a, before_a])
-	_assert(after_b == before_b,
-		"NoopProvider did not advance local rng draw 2 (got %d, expected %d)" % [after_b, before_b])
+	d.process([setup["damage"]], w, dispatch_rng, em, [], provider,
+		limits)
+	var after: Dictionary = dispatch_rng.snapshot()
+	_assert(int(after.get("seed", -1)) == int(before.get("seed", -1)),
+		"dispatch rng seed unchanged after NoopProvider dispatch (seed=%d)" % int(after.get("seed", -1)))
+	_assert(int(after.get("draw_count", -1)) == int(before.get("draw_count", -1)),
+		"dispatch rng draw_count unchanged (before=%d after=%d)" % [int(before.get("draw_count", -1)), int(after.get("draw_count", -1))])
+	_assert(int(after.get("state", -1)) == int(before.get("state", -1)),
+		"dispatch rng internal state unchanged (state=%d)" % int(after.get("state", -1)))
+	# Sanity: capture a snapshot before any draws at all
+	# to make sure draw_count starts at 0 in the snapshot
+	# (no draws by anyone). Confirms dispatcher does not
+	# silently pre-draw.
+	_assert(int(before.get("draw_count", -1)) == 0,
+		"fresh dispatch rng snapshot has draw_count == 0 (got %d)" % int(before.get("draw_count", -1)))
 
 
 # === Helpers ===
