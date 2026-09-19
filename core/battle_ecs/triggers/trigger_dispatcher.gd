@@ -1,22 +1,3 @@
-class_name DispatchResult extends RefCounted
-## B5 / Phase-3 / DispatchResult — return value of
-## TriggerDispatcher.process().
-##
-## Engine/debug information, NOT a BattleEvent. The
-## committed-event gameplay semantics stay on the
-## BattleEventEmitter side.
-
-const REASON_NONE: int = 0
-const REASON_MAX_DEPTH: int = 1
-const REASON_MAX_EVENTS: int = 2
-const REASON_MAX_REACTIONS_PER_ROOT: int = 3
-
-var events: Array = []                  # new committed reaction events
-var reactions_executed: int = 0
-var truncated: bool = false
-var reason: int = REASON_NONE
-
-
 class_name TriggerDispatcher extends RefCounted
 ## B5 / Phase-3 / TriggerDispatcher — bounded FIFO event
 ## dispatcher.
@@ -50,6 +31,7 @@ const EffectContextScript = preload("res://core/battle_ecs/effects/effect_contex
 const EffectExecutorScript = preload("res://core/battle_ecs/effects/effect_executor.gd")
 const EffectRequestScript = preload("res://core/battle_ecs/effects/effect_request.gd")
 const TriggerLimitsScript = preload("res://core/battle_ecs/triggers/trigger_limits.gd")
+const DispatchResultScript = preload("res://core/battle_ecs/triggers/dispatch_result.gd")
 
 var _queue: Array = []                       # BattleEvent
 var _seen: Dictionary = {}                  # event_id -> true
@@ -73,14 +55,19 @@ func process(
 		p_emitter,
 		p_sink: Array,
 		p_provider,
-		p_limits: Resource) -> DispatchResult:
+		p_limits: Resource) -> RefCounted:
 	_reset()
 	if p_limits == null:
 		p_limits = TriggerLimitsScript.new()
-	var result := DispatchResult.new()
-	# Seed the queue with initial events (in order).
+	var result := DispatchResultScript.new()
+	# Seed the queue with initial events (in order). Track
+	# how many events are seeded so we can distinguish
+	# initial-events (NOT in result) from reaction-events
+	# (IN result).
+	var seeded_count: int = 0
 	for ev in p_initial_events:
 		_enqueue(ev)
+		seeded_count += 1
 	# FIFO loop.
 	var ctx = EffectContextScript.new(p_world, p_rng, p_emitter, p_sink)
 	var executor = EffectExecutorScript.new()
@@ -88,7 +75,7 @@ func process(
 	while _queue.size() > 0:
 		if events_processed >= int(p_limits.max_events_per_tick):
 			result.truncated = true
-			result.reason = DispatchResult.REASON_MAX_EVENTS
+			result.reason = DispatchResultScript.REASON_MAX_EVENTS
 			break
 		var ev = _queue.pop_front()
 		var ev_id: int = int(ev.event_id)
@@ -96,20 +83,22 @@ func process(
 			continue
 		_seen[ev_id] = true
 		events_processed += 1
+		# Record reaction events only (per spec). Initial
+		# input events were already committed by the caller
+		# before dispatch and are excluded from result.events.
+		if events_processed > seeded_count:
+			result.events.append(ev)
 		# Discovery (pure).
 		var reactions: Array = p_provider.discover(p_world, ev, p_rng)
 		for reaction in reactions:
 			var outcome: int = _execute_reaction(
 				reaction, ev, p_world, p_rng, p_emitter, p_sink,
 				executor, p_limits)
-			if outcome == DispatchResult.REASON_NONE:
+			if outcome == DispatchResultScript.REASON_NONE:
 				result.reactions_executed += 1
 				continue
 			result.truncated = true
 			result.reason = outcome
-			# Outer while loop continues with other queued
-			# events (different root). Per-root budget only
-			# affects further reactions of THIS root.
 	return result
 
 
@@ -135,7 +124,7 @@ func _execute_reaction(
 	var root_id: int = int(p_triggering_event.root_action_id)
 	var used: int = int(_reaction_budget.get(root_id, 0))
 	if used >= int(p_limits.max_reactions_per_root):
-		return DispatchResult.REASON_MAX_REACTIONS_PER_ROOT
+		return DispatchResultScript.REASON_MAX_REACTIONS_PER_ROOT
 	_reaction_budget[root_id] = used + 1
 
 	# Build EffectRequest derived from the actual triggering
@@ -158,18 +147,18 @@ func _execute_reaction(
 		# Refund the budget slot (no reaction was actually
 		# executed).
 		_reaction_budget[root_id] = used
-		return DispatchResult.REASON_MAX_DEPTH
+		return DispatchResultScript.REASON_MAX_DEPTH
 
 	# Execute via simulation-owned resources.
 	var ctx = EffectContextScript.new(p_world, p_rng, p_emitter, p_sink)
 	var exec_result = p_executor.execute(ctx, req)
 	if exec_result == null:
 		_reaction_budget[root_id] = used
-		return DispatchResult.REASON_NONE
+		return DispatchResultScript.REASON_NONE
 	# Failed-effect rule: no event -> no trigger input.
 	# EffectResult.events only contains actually-committed
 	# events (EffectExecutor enforces that already). We just
 	# enqueue whatever is in result.events.
 	for emitted in exec_result.events:
 		_enqueue(emitted)
-	return DispatchResult.REASON_NONE
+	return DispatchResultScript.REASON_NONE
