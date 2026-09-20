@@ -51,6 +51,14 @@ const BattleEventTypeScript = preload("res://core/battle_ecs/battle_event_type.g
 const StatQueryScript = preload("res://core/battle_ecs/status/stat_query.gd")
 const BattleEventEmitterScript = preload("res://core/battle_ecs/events/battle_event_emitter.gd")
 const BalanceScript = preload("res://core/balance.gd")
+const TriggerDispatcherScript = preload(
+	"res://core/battle_ecs/triggers/trigger_dispatcher.gd")
+const TriggerLimitsScript = preload(
+	"res://core/battle_ecs/triggers/trigger_limits.gd")
+const TriggerProviderScript = preload(
+	"res://core/battle_ecs/triggers/trigger_provider.gd")
+const TriggerDispatchSessionScript = preload(
+	"res://core/battle_ecs/triggers/trigger_dispatch_session.gd")
 
 const _MAX_NO_PROGRESS_TICKS: int = 2
 
@@ -72,6 +80,22 @@ var _no_progress_count: int = 0
 var _last_progress_sig: String = ""
 var _valid: bool = false
 var _termination_reason: int = BattleResultScript.TERMINATION_NATURAL
+# B6: trigger spine. BattleSimulation owns exactly ONE
+# TriggerDispatcher + ONE TriggerProvider reference + ONE
+# TriggerLimits configuration. Defaults to a no-op
+# provider so B1-B5 traces are preserved when no real
+# trigger content is configured. set_trigger_provider()
+# and set_trigger_limits() configure content; initialize()
+# resets defaults so prior battles do not leak.
+var _trigger_dispatcher: RefCounted = null
+var _trigger_provider: RefCounted = null
+var _trigger_limits: Resource = null
+# Per-tick session. reset to null between ticks.
+var _trigger_session: RefCounted = null
+# DEBUG accessor for last session's result (committed
+# reaction events after one tick). Null after first
+# initialize(). Test-only convenience.
+var _last_tick_trigger_result: RefCounted = null
 
 
 ## Returns the simulation-owned BattleEventEmitter. Effects
@@ -104,6 +128,12 @@ func initialize(setup: BattleSetup) -> bool:
 	_last_progress_sig = ""
 	_termination_reason = BattleResultScript.TERMINATION_NATURAL
 	_max_ticks = 0  # reset caller-overridden tick budget
+	# B6: reset trigger spine to safe defaults per battle.
+	_trigger_dispatcher = TriggerDispatcherScript.new()
+	_trigger_provider = TriggerProviderScript.new()    # no-op
+	_trigger_limits = TriggerLimitsScript.new()        # 32/10000/256
+	_trigger_session = null
+	_last_tick_trigger_result = null
 	# B2.0: own exactly one BattleEventEmitter. reset() makes
 	# the next event_id start at 1 and the next root_action_id
 	# start at 1. No previous battle counter leaks across
@@ -153,6 +183,18 @@ func set_max_ticks(p_max_ticks: int) -> void:
 	_max_ticks = maxi(0, int(p_max_ticks))
 
 
+## B6 trigger configuration. Call BEFORE initialize() has
+## been called or AFTER (re-applies on initialize() reset
+## anyway). Stored references are reset to defaults on
+## initialize() so prior battles do not leak configuration.
+func set_trigger_provider(p_provider) -> void:
+	_trigger_provider = p_provider
+
+
+func set_trigger_limits(p_limits: Resource) -> void:
+	_trigger_limits = p_limits
+
+
 ## MEDIUM 7: Caller safety helper. Loops step_tick until the
 ## simulation finishes OR until the local `max_ticks` cap is
 ## reached. This cap is a CALLER-side safety bound (independent
@@ -183,37 +225,88 @@ func run_until_done(max_ticks: int = 10000) -> Array:
 
 ## Advance one tick. Returns events emitted during this tick
 ## (possibly empty). Once finished, returns [].
+##
+## B6 TICK ORDER (B6-3 / B6-4 / B6-5 / B6-6):
+##   1. set emitter tick
+##   2. begin fresh TriggerDispatchSession (snapshotted limits)
+##   3. periodic status phase commits events
+##   4. dispatch reactions to status-phase events
+##   5. refresh alive snapshot (Burn may have killed a unit)
+##   6. if both sides alive: player action commits events
+##   7. dispatch reactions to player action events (same
+##      session -> cumulative MAX_EVENTS, root budget,
+##      seen-set across phases this tick)
+##   8. refresh alive snapshot (a reaction may have killed)
+##   9. if both sides alive: enemy action commits events
+##   10. dispatch reactions to enemy action events (same
+##       session)
+##  11. progress / termination checks
+##  12. BATTLE_ENDED if necessary
 func step_tick() -> Array:
 	if not _valid:
 		return []
 	if _finished:
 		return []
 	_tick_count += 1
-	# B2.0: update the emitter's tick BEFORE any event is emitted
-	# during this tick. The emitter tags every event with this
-	# tick value automatically.
 	_event_emitter.set_tick(_tick_count)
 	var events: Array = []
-	# B3: periodic status phase runs BEFORE normal unit actions
-	# (legacy parity). Burns / Regen etc. tick here.
-	# B3.2: pass the simulation-owned RNG to the processor so
-	# periodic effect contexts receive exactly the same RNG
-	# object as the rest of the battle spine.
+	# B6-2 / B6-3: fresh session per tick. The session
+	# snapshots TriggerLimits numeric values so the
+	# in-progress tick cannot be affected by external
+	# mutation of the underlying Resource.
+	_trigger_session = _trigger_dispatcher.begin_session(
+		_trigger_limits)
+	var triggered_events: Array = []
+	var status_events: Array = []
+	# === 1. periodic status phase ===
 	if _periodic_status_processor != null:
-		var status_events: Array = _periodic_status_processor.process_tick(
+		status_events = _periodic_status_processor.process_tick(
 			_world, _rng, _event_emitter)
 		for e in status_events:
 			events.append(e)
-	# Refresh alive snapshot — a status-phase Burn may have
-	# killed a unit. The action phase must not act on dead units.
+	# === 2. dispatch reactions to status-phase events ===
+	if status_events.size() > 0:
+		var r1: RefCounted = _trigger_dispatcher.process(
+			status_events, _world, _rng, _event_emitter, events,
+			_trigger_provider, null, _trigger_session)
+		_last_tick_trigger_result = r1
+		for re in r1.events:
+			triggered_events.append(re)
+			events.append(re)
+	# === 3-4. player normal action ===
 	var natural_after_status: bool = _world.one_side_empty()
 	if not natural_after_status:
-		events.append_array(_drive_basic_attacks())
+		var player_action_events: Array = _drive_team_action(0)
+		for e in player_action_events:
+			events.append(e)
+		# Dispatch reactions to player action events.
+		if player_action_events.size() > 0:
+			var r2: RefCounted = _trigger_dispatcher.process(
+				player_action_events, _world, _rng, _event_emitter, events,
+				_trigger_provider, null, _trigger_session)
+			_last_tick_trigger_result = r2
+			for re in r2.events:
+				triggered_events.append(re)
+				events.append(re)
+	# === 5-6. enemy normal action (only if not yet natural) ===
+	var natural_after_player: bool = _world.one_side_empty()
+	if not natural_after_player:
+		var enemy_action_events: Array = _drive_team_action(1)
+		for e in enemy_action_events:
+			events.append(e)
+		# Dispatch reactions to enemy action events.
+		if enemy_action_events.size() > 0:
+			var r3: RefCounted = _trigger_dispatcher.process(
+				enemy_action_events, _world, _rng, _event_emitter, events,
+				_trigger_provider, null, _trigger_session)
+			_last_tick_trigger_result = r3
+			for re in r3.events:
+				triggered_events.append(re)
+				events.append(re)
+	# === termination / progress ===
 	var natural: bool = _world.one_side_empty()
 	var budget: bool = _max_ticks > 0 and _tick_count >= _max_ticks
 	var progressed: bool = _has_progressed(events)
-	# Stalemate detection: 2 consecutive ticks with no progress
-	# AND no natural termination -> force-finish as DRAW.
 	if not progressed and not natural and not budget:
 		_no_progress_count += 1
 		if _no_progress_count >= _MAX_NO_PROGRESS_TICKS:
@@ -231,6 +324,72 @@ func step_tick() -> Array:
 	if _finished:
 		_result = _build_result()
 		events.append(_make_battle_ended_event())
+	_trigger_session = null
+	return events
+
+
+## B6-4: drive one team's normal action. Returns the
+## committed action events in emission order. Skipped if
+## the team is empty or the selected actor is blocked.
+##
+## If the team is empty or there are no living enemies,
+## returns [] (no action this tick).
+##
+## Status: replaces the player+enemy coupling in
+## `_drive_basic_attacks` so that immediate reactions
+## between player and enemy actions do not require a
+## second `step_tick`.
+func _drive_team_action(team_id: int) -> Array:
+	var events: Array = []
+	if team_id == 0:
+		var player_ids: Array = _world.alive_ids_by_team(0)
+		var enemy_ids: Array = _world.alive_ids_by_team(1)
+		if player_ids.is_empty() or enemy_ids.is_empty():
+			return events
+		var attacker_id: int = int(player_ids[0])
+		var target_id: int = _world.nearest_enemy_id(attacker_id, enemy_ids)
+		if target_id >= 0 and not StatQueryScript.blocks_actions(
+				_world, attacker_id):
+			events.append_array(_resolve_or_move(attacker_id, target_id))
+	else:
+		var enemy_ids2: Array = _world.alive_ids_by_team(1)
+		var player_ids2: Array = _world.alive_ids_by_team(0)
+		if enemy_ids2.is_empty() or player_ids2.is_empty():
+			return events
+		var attacker_id2: int = int(enemy_ids2[0])
+		var target_id2: int = _world.nearest_enemy_id(attacker_id2, player_ids2)
+		if target_id2 >= 0 and not StatQueryScript.blocks_actions(
+				_world, attacker_id2):
+			events.append_array(_resolve_or_move(attacker_id2, target_id2))
+	return events
+
+
+## Backward-compat wrapper retained for any caller that
+## still prefers the combined player+enemy function name.
+## Behaves exactly like the pre-B6 _drive_basic_attacks:
+## player then enemy, no inter-action reaction emission.
+func _drive_basic_attacks() -> Array:
+	# Per B6: do NOT route through _drive_team_action here
+	# because that emits per-action events suitable for
+	# immediate dispatch. _drive_basic_attacks is the
+	# legacy path. New code should call step_tick().
+	var events: Array = []
+	var player_ids: Array = _world.alive_ids_by_team(0)
+	var enemy_ids: Array = _world.alive_ids_by_team(1)
+	if not (player_ids.is_empty() or enemy_ids.is_empty()):
+		var attacker_id: int = int(player_ids[0])
+		var target_id: int = _world.nearest_enemy_id(attacker_id, enemy_ids)
+		if target_id >= 0 and not StatQueryScript.blocks_actions(
+				_world, attacker_id):
+			events.append_array(_resolve_or_move(attacker_id, target_id))
+		var enemy_ids2: Array = _world.alive_ids_by_team(1)
+		var player_ids2: Array = _world.alive_ids_by_team(0)
+		if not (enemy_ids2.is_empty() or player_ids2.is_empty()):
+			var e_attacker: int = int(enemy_ids2[0])
+			var e_target: int = _world.nearest_enemy_id(e_attacker, player_ids2)
+			if e_target >= 0 and not StatQueryScript.blocks_actions(
+					_world, e_attacker):
+				events.append_array(_resolve_or_move(e_attacker, e_target))
 	return events
 
 
@@ -319,37 +478,6 @@ func _has_progressed(events: Array) -> bool:
 
 
 # === Internal helpers ===
-
-func _drive_basic_attacks() -> Array:
-	# Vertical-slice scheduler: one acting entity per side per
-	# tick (lowest-ID living, deterministic). Per BLOCKER 1:
-	# if out of range, move one cell toward target.
-	# B4: gate each acting entity on StatQuery.blocks_actions.
-	# If the selected actor is blocked, skip its action this
-	# tick. The opposing actor still gets its own attempt.
-	var events: Array = []
-	var player_ids: Array = _world.alive_ids_by_team(0)
-	var enemy_ids: Array = _world.alive_ids_by_team(1)
-	if player_ids.is_empty() or enemy_ids.is_empty():
-		return events
-	var attacker_id: int = int(player_ids[0])
-	var target_id: int = _world.nearest_enemy_id(attacker_id, enemy_ids)
-	# B4: gate on blocks_actions. A blocked entity performs no
-	# normal action (no UNIT_MOVED, no ATTACK_RESOLVED).
-	if target_id >= 0 and not StatQueryScript.blocks_actions(
-			_world, attacker_id):
-		events.append_array(_resolve_or_move(attacker_id, target_id))
-	enemy_ids = _world.alive_ids_by_team(1)
-	player_ids = _world.alive_ids_by_team(0)
-	if enemy_ids.is_empty() or player_ids.is_empty():
-		return events
-	var e_attacker: int = int(enemy_ids[0])
-	var e_target: int = _world.nearest_enemy_id(e_attacker, player_ids)
-	if e_target >= 0 and not StatQueryScript.blocks_actions(
-			_world, e_attacker):
-		events.append_array(_resolve_or_move(e_attacker, e_target))
-	return events
-
 
 ## If attacker is in attack range of target, attack; otherwise
 ## move one cell toward target and emit UNIT_MOVED. Returns all
