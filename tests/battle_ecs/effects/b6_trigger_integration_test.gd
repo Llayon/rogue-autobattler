@@ -71,6 +71,12 @@ func _initialize() -> void:
 	await _test_no_op_provider_full_event_ordering_invariant()
 	# === Determinism (B6-12) ===
 	await _test_20_run_deterministic_with_provider()
+	# === B6-repair: de-dup + exact trace proofs ===
+	await _test_stun_exact_trace()
+	await _test_lethal_exact_trace()
+	await _test_status_phase_exact_trace()
+	await _test_reinitialize_proof_with_invocation_count()
+	await _test_full_14_field_20_run_determinism()
 	print("\n=== B6 focused tests: %d passed, %d failed ===\n" % [_passed, _failed])
 	if _failed > 0:
 		quit(1)
@@ -661,6 +667,515 @@ func _test_20_run_deterministic_with_provider() -> void:
 			if not ok:
 				return
 	_assert(true, "20 runs identical (RNG/H/events/positions/dmg)")
+
+
+func _test_stun_exact_trace() -> void:
+	print("[STUN-EXACT] stun_reaction_exact_trace")
+	# Player survives; enemy survives player's base damage;
+	# player DAMAGE_APPLIED triggers real APPLY_STATUS stun
+	# on the enemy target. Require exact trace:
+	#   player ATTACK_RESOLVED
+	#   player DAMAGE_APPLIED
+	#   STATUS_APPLIED(tag=stun)
+	# Enemy ATTACK_RESOLVED / UNIT_MOVED must be ABSENT.
+	# All event_ids unique.
+	var sim = BattleSimulationScript.new()
+	var provider = B6ApplyStunProvider.new()
+	var s = BattleSetupScript.new(42,
+		[BattleUnitSetupScript.new(
+			"p0", &"warrior", 0, Vector2i(0, 0), 100, 100, 50, 5, 1)],
+		[BattleUnitSetupScript.new(
+			"e0", &"orc", 1, Vector2i(0, 1), 100, 100, 20, 5, 1)],
+		7, 4)
+	sim.initialize(s)
+	sim.set_trigger_provider(provider)
+	var events: Array = sim.step_tick()
+	# Counts in the returned trace.
+	var p_attack = 0
+	var p_damage = 0
+	var stun_count = 0
+	for e in events:
+		var t: int = int(e.type)
+		if t == BattleEventTypeScript.ATTACK_RESOLVED:
+			p_attack += 1
+		elif t == BattleEventTypeScript.DAMAGE_APPLIED:
+			p_damage += 1
+		elif t == BattleEventTypeScript.STATUS_APPLIED \
+				and String(e.tag) == "stun":
+			stun_count += 1
+	_assert(p_attack == 1,
+		"player ATTACK_RESOLVED count == 1 (got %d)" % p_attack)
+	_assert(p_damage == 1,
+		"player DAMAGE_APPLIED count == 1 (got %d)" % p_damage)
+	_assert(stun_count == 1,
+		"STATUS_APPLIED(stun) count == 1 EXACTLY (got %d)" % stun_count)
+	# Enemy produced no action events at all (stun blocks).
+	for e in events:
+		_assert(not (int(e.source_entity) == 1 \
+				and int(e.type) == BattleEventTypeScript.ATTACK_RESOLVED),
+			"enemy ATTACK_RESOLVED absent (got one)")
+		_assert(not (int(e.source_entity) == 1 \
+				and int(e.type) == BattleEventTypeScript.UNIT_MOVED),
+			"enemy UNIT_MOVED absent (got one)")
+	# Ordering: ATTACK_RESOLVED < DAMAGE_APPLIED < STATUS_APPLIED(stun).
+	var idx_attack: int = -1
+	var idx_damage: int = -1
+	var idx_stun: int = -1
+	for i in events.size():
+		var e = events[i]
+		var t: int = int(e.type)
+		if t == BattleEventTypeScript.ATTACK_RESOLVED and idx_attack < 0:
+			idx_attack = i
+		elif t == BattleEventTypeScript.DAMAGE_APPLIED and idx_damage < 0:
+			idx_damage = i
+		elif t == BattleEventTypeScript.STATUS_APPLIED \
+				and String(e.tag) == "stun" and idx_stun < 0:
+			idx_stun = i
+	_assert(idx_attack >= 0 and idx_damage > idx_attack \
+			and idx_stun > idx_damage,
+		"ordering: ATTACK_RESOLVED (%d) < DAMAGE_APPLIED (%d) < STATUS_APPLIED(stun) (%d)" % [
+			idx_attack, idx_damage, idx_stun])
+	# Unique event_id check.
+	_assert_unique_event_ids(events, "stun reaction tick")
+
+
+func _test_lethal_exact_trace() -> void:
+	print("[LETHAL-EXACT] lethal_reaction_exact_trace")
+	# Base player attack MUST NOT kill enemy; reaction
+	# DAMAGE=999 must perform the kill. Then expect:
+	#   player ATTACK_RESOLVED (1)
+	#   base DAMAGE_APPLIED (1)
+	#   reaction DAMAGE_APPLIED (1)
+	#   UNIT_DIED (1)
+	#   BATTLE_ENDED (1) final
+	# Enemy action events absent.
+	# Reaction ancestry derives from base DAMAGE_APPLIED
+	# (parent_event_id == base damage event id).
+	var sim = BattleSimulationScript.new()
+	var provider = B6LethalProvider.new()
+	provider.target_to_kill = 1
+	# Enemy HP=100 so base attack (50 dmg normal) does NOT
+	# kill. Reaction DAMAGE=999 kills.
+	var s = BattleSetupScript.new(42,
+		[BattleUnitSetupScript.new(
+			"p0", &"warrior", 0, Vector2i(0, 0), 100, 100, 50, 5, 1)],
+		[BattleUnitSetupScript.new(
+			"e0", &"orc", 1, Vector2i(0, 1), 100, 100, 20, 5, 1)],
+		7, 4)
+	sim.initialize(s)
+	sim.set_trigger_provider(provider)
+	var events: Array = sim.step_tick()
+	# Counts.
+	var p_attack = 0
+	var dmg_count = 0
+	var died_count = 0
+	var ended_count = 0
+	for e in events:
+		var t: int = int(e.type)
+		if t == BattleEventTypeScript.ATTACK_RESOLVED:
+			p_attack += 1
+		elif t == BattleEventTypeScript.DAMAGE_APPLIED:
+			dmg_count += 1
+		elif t == BattleEventTypeScript.UNIT_DIED:
+			died_count += 1
+		elif t == BattleEventTypeScript.BATTLE_ENDED:
+			ended_count += 1
+	_assert(p_attack == 1,
+		"player ATTACK_RESOLVED == 1 (got %d)" % p_attack)
+	_assert(dmg_count == 2,
+		"DAMAGE_APPLIED total == 2 (base + reaction, got %d)" % dmg_count)
+	_assert(died_count == 1,
+		"UNIT_DIED == 1 (got %d)" % died_count)
+	_assert(ended_count == 1,
+		"BATTLE_ENDED == 1 (got %d)" % ended_count)
+	# Enemy produced no action.
+	for e in events:
+		_assert(not (int(e.source_entity) == 1 \
+				and int(e.type) == BattleEventTypeScript.ATTACK_RESOLVED),
+			"enemy ATTACK_RESOLVED absent after lethal reaction")
+	# Causal ordering: ATTACK_RESOLVED < base DAMAGE_APPLIED
+	# < reaction DAMAGE_APPLIED < UNIT_DIED < BATTLE_ENDED.
+	var idx_atk: int = -1
+	var idx_dmg_base: int = -1
+	var idx_dmg_rx: int = -1
+	var idx_died: int = -1
+	var idx_end: int = -1
+	for i in events.size():
+		var e = events[i]
+		var t: int = int(e.type)
+		var src: int = int(e.source_entity)
+		match t:
+			BattleEventTypeScript.ATTACK_RESOLVED:
+				if idx_atk < 0:
+					idx_atk = i
+			BattleEventTypeScript.DAMAGE_APPLIED:
+				if src == 0 and idx_dmg_base < 0:
+					idx_dmg_base = i
+				elif src == 0 and idx_dmg_rx < 0 \
+						and idx_dmg_base >= 0:
+					idx_dmg_rx = i
+			BattleEventTypeScript.UNIT_DIED:
+				if idx_died < 0:
+					idx_died = i
+			BattleEventTypeScript.BATTLE_ENDED:
+				if idx_end < 0:
+					idx_end = i
+	_assert(idx_atk >= 0 and idx_dmg_base > idx_atk \
+			and idx_dmg_rx > idx_dmg_base \
+			and idx_died > idx_dmg_rx \
+			and idx_end == events.size() - 1,
+		"causal order: atk(%d) < dmg_base(%d) < dmg_rx(%d) < died(%d) < ended(%d last=%d)" % [
+			idx_atk, idx_dmg_base, idx_dmg_rx, idx_died, idx_end,
+			events.size() - 1])
+	# Reaction ancestry derives from base DAMAGE_APPLIED
+	# (parent_event_id == base damage event id, root_action_id
+	# matches). Verify on the reaction DAMAGE_APPLIED.
+	var base_dmg_ev = null
+	var reaction_dmg_ev = null
+	for e in events:
+		if int(e.type) == BattleEventTypeScript.DAMAGE_APPLIED:
+			if int(e.source_entity) == 0 and base_dmg_ev == null:
+				base_dmg_ev = e
+			elif int(e.source_entity) == 0:
+				reaction_dmg_ev = e
+	_assert(reaction_dmg_ev != null,
+		"reaction DAMAGE_APPLIED event captured")
+	if reaction_dmg_ev != null and base_dmg_ev != null:
+		_assert(int(reaction_dmg_ev.parent_event_id) == int(base_dmg_ev.event_id),
+			"reaction ancestry derives from base DAMAGE_APPLIED (parent_event_id=%d == %d)" % [
+				int(reaction_dmg_ev.parent_event_id), int(base_dmg_ev.event_id)])
+	# Unique event_ids.
+	_assert_unique_event_ids(events, "lethal reaction tick")
+	# BATTLE_ENDED is the final event.
+	if events.size() > 0:
+		_assert(int(events[events.size() - 1].type) \
+				== BattleEventTypeScript.BATTLE_ENDED,
+			"BATTLE_ENDED is the final event")
+
+
+func _test_status_phase_exact_trace() -> void:
+	print("[STATUS-EXACT] status_phase_reaction_exact_trace")
+	# Use real Burn on entity 1 (low-HP enemy) so the
+	# periodic processor commits STATUS_TICKED + DAMAGE_APPLIED
+	# at tick 1. The provider reacts to STATUS_TICKED with a
+	# HEAL reaction. Require exact ordering and exact count.
+	var sim = BattleSimulationScript.new()
+	var provider = B6ApplyStunProvider.new()
+	provider.on_status_ticked = "heal"
+	var s = BattleSetupScript.new(42,
+		[BattleUnitSetupScript.new(
+			"p0", &"warrior", 0, Vector2i(0, 0), 100, 100, 50, 5, 1)],
+		[BattleUnitSetupScript.new(
+			"e0", &"orc", 1, Vector2i(0, 1), 100, 100, 20, 5, 1)],
+		7, 4)
+	sim.initialize(s)
+	sim.set_trigger_provider(provider)
+	# Inject a real Burn onto entity 1 BEFORE the first tick.
+	var burn_req = EffectRequestScript.new(
+		EffectKindScript.APPLY_STATUS, 0, 1, 0, -1, -1, 0)
+	burn_req.definition_id = &"burn"
+	# Use executor directly (battle_simulation.run keeps its own
+	# sink closed; here we only need the status to exist before
+	# status-phase runs).
+	var EffectExecutorScript = preload(
+		"res://core/battle_ecs/effects/effect_executor.gd")
+	var EffectContextScript = preload(
+		"res://core/battle_ecs/effects/effect_context.gd")
+	var sink: Array = []
+	var ex_ctx = EffectContextScript.new(sim.world(), sim.rng(), sim.emitter(), sink)
+	EffectExecutorScript.new().execute(ex_ctx, burn_req)
+	# First tick: status-phase commits STATUS_TICKED +
+	# DAMAGE_APPLIED for entity 1. Provider reacts to
+	# STATUS_TICKED with HEAL_APPLIED.
+	var events: Array = sim.step_tick()
+	var ticked_count = 0
+	var heal_count = 0
+	for e in events:
+		var t: int = int(e.type)
+		if t == BattleEventTypeScript.STATUS_TICKED:
+			ticked_count += 1
+		elif t == BattleEventTypeScript.HEAL_APPLIED:
+			heal_count += 1
+	_assert(ticked_count == 1,
+		"STATUS_TICKED == 1 (got %d)" % ticked_count)
+	_assert(heal_count == 1,
+		"HEAL_APPLIED reaction count == 1 EXACTLY (got %d)" % heal_count)
+	# Ordering: STATUS_TICKED < periodic DAMAGE_APPLIED <
+	# reaction HEAL_APPLIED.
+	var idx_tick: int = -1
+	var idx_periodic_dmg: int = -1
+	var idx_heal: int = -1
+	var idx_action: int = -1
+	for i in events.size():
+		var e = events[i]
+		var t: int = int(e.type)
+		if t == BattleEventTypeScript.STATUS_TICKED and idx_tick < 0:
+			idx_tick = i
+		elif t == BattleEventTypeScript.DAMAGE_APPLIED \
+				and int(e.source_entity) == 0 \
+				and idx_periodic_dmg < 0:
+			# Periodic DOT's source is periodic processor
+			# which sets source_entity based on the affected
+			# unit. Accept any DAMAGE_APPLIED whose
+			# parent_event_id == STATUS_TICKED's id.
+			idx_periodic_dmg = i
+		elif t == BattleEventTypeScript.HEAL_APPLIED and idx_heal < 0:
+			idx_heal = i
+		elif t == BattleEventTypeScript.ATTACK_RESOLVED and idx_action < 0:
+			idx_action = i
+	_assert(idx_tick >= 0 and idx_periodic_dmg > idx_tick \
+			and idx_heal > idx_periodic_dmg,
+		"ordering: STATUS_TICKED(%d) < periodic_DAMAGE(%d) < reaction_HEAL(%d)" % [
+			idx_tick, idx_periodic_dmg, idx_heal])
+	# If a normal action phase exists, reaction HEAL must
+	# precede it.
+	if idx_action >= 0:
+		_assert(idx_heal < idx_action,
+			"reaction HEAL_APPLIED(%d) < normal action(%d)" % [idx_heal, idx_action])
+	_assert_unique_event_ids(events, "status reaction tick")
+
+
+func _test_reinitialize_proof_with_invocation_count() -> void:
+	print("[REINIT-INVOC] reinitialize_proof_with_invocation_count")
+	# Use B6InvocationCountingProvider (counter). Battle A
+	# fires the provider. Battle B (no re-apply) does NOT
+	# invoke the provider; counters stay frozen. Limits
+	# reset to defaults (32 / 10000 / 256). Re-apply the
+	# provider and it fires again.
+	var sim = BattleSimulationScript.new()
+	var counting = B6InvocationCountingProvider.new()
+	var s_a = BattleSetupScript.new(42,
+		[BattleUnitSetupScript.new(
+			"p0", &"warrior", 0, Vector2i(0, 0), 50, 100, 20, 5, 1)],
+		[BattleUnitSetupScript.new(
+			"e0", &"orc", 1, Vector2i(0, 1), 50, 100, 20, 5, 1)],
+		7, 4)
+	sim.initialize(s_a)
+	sim.set_trigger_provider(counting)
+	# Non-default limits to prove reset later.
+	var custom_limits = TriggerLimitsScript.new()
+	custom_limits.max_chain_depth = 3
+	custom_limits.max_events_per_tick = 7
+	custom_limits.max_reactions_per_root = 5
+	sim.set_trigger_limits(custom_limits)
+	sim.step_tick()
+	_assert(int(counting.invocations) > 0,
+		"Battle A: counting provider invoked > 0 (got %d)" % int(counting.invocations))
+	var count_after_a: int = int(counting.invocations)
+	# Battle B: re-initialize with new setup, NO re-apply.
+	var s_b = BattleSetupScript.new(42,
+		[BattleUnitSetupScript.new(
+			"p0", &"warrior", 0, Vector2i(0, 0), 50, 100, 20, 5, 1)],
+		[BattleUnitSetupScript.new(
+			"e0", &"orc", 1, Vector2i(0, 1), 50, 100, 20, 5, 1)],
+		7, 4)
+	sim.initialize(s_b)
+	sim.step_tick()
+	# Provider NOT re-applied -> invocation count unchanged.
+	_assert(int(counting.invocations) == count_after_a,
+		"Battle B: counting provider invocation frozen (was %d, now %d)" % [
+			count_after_a, int(counting.invocations)])
+	# Limits reset to defaults.
+	var def = TriggerLimitsScript.new()
+	_assert(int(sim._trigger_limits.max_chain_depth) == int(def.max_chain_depth),
+		"limits reset: max_chain_depth=%d (got %d)" % [
+			int(def.max_chain_depth), int(sim._trigger_limits.max_chain_depth)])
+	_assert(int(sim._trigger_limits.max_events_per_tick) == int(def.max_events_per_tick),
+		"limits reset: max_events_per_tick=%d (got %d)" % [
+			int(def.max_events_per_tick), int(sim._trigger_limits.max_events_per_tick)])
+	_assert(int(sim._trigger_limits.max_reactions_per_root) \
+			== int(def.max_reactions_per_root),
+		"limits reset: max_reactions_per_root=%d (got %d)" % [
+			int(def.max_reactions_per_root),
+			int(sim._trigger_limits.max_reactions_per_root)])
+	# Re-apply provider and step -> counter grows.
+	sim.set_trigger_provider(counting)
+	sim.step_tick()
+	_assert(int(counting.invocations) > count_after_a,
+		"after re-apply, provider fires again (was %d, now %d)" % [
+			count_after_a, int(counting.invocations)])
+
+
+func _normalize_event_14(e) -> Dictionary:
+	return {
+		"event_id": int(e.event_id),
+		"type": int(e.type),
+		"tick": int(e.tick),
+		"source_entity": int(e.source_entity),
+		"target_entity": int(e.target_entity),
+		"source_run_unit_id": String(e.source_run_unit_id),
+		"target_run_unit_id": String(e.target_run_unit_id),
+		"amount": int(e.amount),
+		"tag": String(e.tag),
+		"from_cell": str(e.from_cell),
+		"to_cell": str(e.to_cell),
+		"parent_event_id": int(e.parent_event_id),
+		"root_action_id": int(e.root_action_id),
+		"chain_depth": int(e.chain_depth),
+	}
+
+
+func _normalize_trace_14(events: Array) -> Array:
+	var out: Array = []
+	for e in events:
+		out.append(_normalize_event_14(e))
+	return out
+
+
+func _dict_eq14(a: Dictionary, b: Dictionary) -> bool:
+	for k in a.keys():
+		if not b.has(k):
+			return false
+		if str(a[k]) != str(b[k]):
+			return false
+	return true
+
+
+func _test_full_14_field_20_run_determinism() -> void:
+	print("[DET-14-20] full_14_field_20_run_determinism")
+	# 20 identical BattleSimulation runs with a test
+	# reaction provider. Compare complete 14-field trace
+	# between runs. Also compare final HP / positions /
+	# BattleResult / RNG snapshot / emitter counters /
+	# provider invocation count. Per-run uniqueness check.
+	var first_norm: Array = []
+	var first_hp_p0: int = -1
+	var first_hp_e0: int = -1
+	var first_pos_p0: String = ""
+	var first_pos_e0: String = ""
+	var first_result: Dictionary = {}
+	var first_rng: Dictionary = {}
+	var first_emit_id: int = -1
+	var first_emit_root: int = -1
+	var first_invocations: int = -1
+	for run in 20:
+		var sim = BattleSimulationScript.new()
+		var provider = B6TestRecordingProvider.new()
+		provider.expected_target = 1
+		provider.expected_source = 0
+		provider.allow_until_tick = 3
+		sim.set_trigger_provider(provider)
+		var s = BattleSetupScript.new(42,
+			[BattleUnitSetupScript.new(
+				"p0", &"warrior", 0, Vector2i(0, 0), 100, 100, 50, 5, 1)],
+			[BattleUnitSetupScript.new(
+				"e0", &"orc", 1, Vector2i(0, 1), 100, 100, 20, 5, 1)],
+			7, 4)
+		sim.initialize(s)
+		var events: Array = []
+		while not sim.is_finished() and int(sim._tick_count) < 5:
+			events.append_array(sim.step_tick())
+		# Per-run uniqueness.
+		var seen: Dictionary = {}
+		for e in events:
+			var id: int = int(e.event_id)
+			if seen.has(id):
+				_assert(false, "run %d duplicated event_id=%d" % [run, id])
+				return
+			seen[id] = true
+		# Normalize trace.
+		var norm: Array = _normalize_trace_14(events)
+		var hp_p0: int = int(sim.world().current_hp_of(0))
+		var hp_e0: int = int(sim.world().current_hp_of(1))
+		var pos_p0: String = str(sim.world().position_of(0))
+		var pos_e0: String = str(sim.world().position_of(1))
+		var rng: Dictionary = sim.rng().snapshot()
+		var emit_id: int = int(sim.emitter().peek_next_event_id())
+		var emit_root: int = int(sim.emitter().peek_next_root_action_id())
+		var result_d: Dictionary = {
+			"outcome": int(sim.get_result().outcome),
+			"winner_team": int(sim.get_result().winner_team),
+			"termination_reason": int(sim.get_result().termination_reason),
+			"tick_count": int(sim.get_result().tick_count),
+		}
+		var invocations: int = int(provider.invocations)
+		if run == 0:
+			first_norm = norm
+			first_hp_p0 = hp_p0
+			first_hp_e0 = hp_e0
+			first_pos_p0 = pos_p0
+			first_pos_e0 = pos_e0
+			first_result = result_d
+			first_rng = rng
+			first_emit_id = emit_id
+			first_emit_root = emit_root
+			first_invocations = invocations
+			continue
+		# Compare trace (length + every normalized event).
+		if norm.size() != first_norm.size():
+			_assert(false, "run %d trace length differs (got %d, base %d)" % [
+				run, norm.size(), first_norm.size()])
+			return
+		for i in norm.size():
+			if not _dict_eq14(norm[i], first_norm[i]):
+				_assert(false, "run %d event[%d] 14-field mismatch" % [run, i])
+				return
+		# Compare final HPs / positions / result / RNG / emitter.
+		_assert(hp_p0 == first_hp_p0,
+			"run %d p0 HP %d != base %d" % [run, hp_p0, first_hp_p0])
+		_assert(hp_e0 == first_hp_e0,
+			"run %d e0 HP %d != base %d" % [run, hp_e0, first_hp_e0])
+		_assert(pos_p0 == first_pos_p0,
+			"run %d p0 pos %s != base %s" % [run, pos_p0, first_pos_p0])
+		_assert(pos_e0 == first_pos_e0,
+			"run %d e0 pos %s != base %s" % [run, pos_e0, first_pos_e0])
+		for k in first_result.keys():
+			if int(result_d.get(k, -1)) != int(first_result[k]):
+				_assert(false, "run %d result[%s] %d != base %d" % [
+					run, k, int(result_d.get(k, -1)),
+					int(first_result[k])])
+				return
+		_assert(int(rng.get("seed", -1)) == int(first_rng.get("seed", -2)),
+			"run " + str(run) + " RNG seed mismatch")
+		_assert(int(rng.get("draw_count", -1)) \
+				== int(first_rng.get("draw_count", -2)),
+			"run " + str(run) + " RNG draw_count mismatch")
+		var _state_a: String = str(rng.get("state", ""))
+		var _state_b: String = str(first_rng.get("state", ""))
+		_assert(_state_a == _state_b,
+			"run " + str(run) + " RNG state mismatch")
+		_assert(emit_id == first_emit_id,
+			"run %d emitter peek_next_event_id %d != %d" % [run, emit_id, first_emit_id])
+		_assert(emit_root == first_emit_root,
+			"run %d emitter peek_next_root_action_id %d != %d" % [
+				run, emit_root, first_emit_root])
+		_assert(invocations == first_invocations,
+			"run %d provider invocations %d != base %d" % [
+				run, invocations, first_invocations])
+	_assert(true, "20 runs identical across 14 fields + HP/pos/RNG/emitter/provider + no dup ids")
+
+
+# B6-repair: Top-level helper. Detects if any returned
+# event_id appears more than once across the entire tick
+# trace. B6-repair HIGH was that reaction events were
+# appended to the step_tick output both by the dispatcher's
+# EffectContext sink AND by a post-dispatch append loop,
+# producing event_id duplicates. This helper is the main
+# regression proof for the de-dup fix.
+func _assert_unique_event_ids(events: Array, label: String) -> void:
+	var counts: Dictionary = {}
+	for e in events:
+		var id: int = int(e.event_id)
+		counts[id] = int(counts.get(id, 0)) + 1
+	var dups: Array = []
+	for id in counts.keys():
+		if int(counts[id]) > 1:
+			dups.append(id)
+	_assert(dups.size() == 0,
+		"%s (duplicate ids found: %s)" % [label, str(dups)] \
+			if dups.size() > 0 \
+			else "%s (all %d ids unique)" % [label, events.size()])
+
+
+# Provider that just counts every discover() call. Used by
+# _test_reinitialize_isolation_with_invocation_count to
+# prove the prior-battle provider does NOT leak into the
+# new battle after re-initialize() without re-apply.
+class B6InvocationCountingProvider extends TriggerProviderScript:
+	var invocations: int = 0
+	func discover(p_world, p_event, p_rng) -> Array:
+		invocations += 1
+		return []
 
 
 # === Test-only providers ===
