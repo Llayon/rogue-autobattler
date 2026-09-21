@@ -1073,9 +1073,20 @@ func _test_full_14_field_20_run_determinism() -> void:
 		_assert(sim.initialize(s), "run %d initialize ok" % run)
 		# CANONICAL ORDER: provider applied AFTER initialize.
 		sim.set_trigger_provider(provider)
+		# Real simulation termination bound (real
+		# BattleSimulation rule, not a test-loop escape).
+		# set_max_ticks must be AFTER initialize() because
+		# that resets per-battle configuration.
+		sim.set_max_ticks(5)
 		var events: Array = []
-		while not sim.is_finished() and int(sim._tick_count) < 5:
+		while not sim.is_finished():
 			events.append_array(sim.step_tick())
+		# Emergency safety assertion: max_ticks guarantees
+		# termination by tick 5; if not, fail loudly.
+		_assert(sim.is_finished(),
+			"run %d: simulation did not terminate (set_max_ticks=5 should have ended by tick 5)" % run)
+		_assert(sim.get_result() != null,
+			"run %d: get_result() is null after termination" % run)
 		# Per-run uniqueness.
 		var seen: Dictionary = {}
 		for e in events:
@@ -1111,21 +1122,17 @@ func _test_full_14_field_20_run_determinism() -> void:
 		var rng: Dictionary = sim.rng().snapshot()
 		var emit_id: int = int(sim.emitter().peek_next_event_id())
 		var emit_root: int = int(sim.emitter().peek_next_root_action_id())
-		var result_d: Dictionary = {}
-		if sim.is_finished() and sim.get_result() != null:
-			result_d = {
-				"outcome": int(sim.get_result().outcome),
-				"winner_team": int(sim.get_result().winner_team),
-				"termination_reason": int(sim.get_result().termination_reason),
-				"tick_count": int(sim.get_result().tick_count),
-			}
-		else:
-			# Battle did not terminate within tick budget.
-			# Capture a stable placeholder so two such runs
-			# still compare equal against each other (and the
-			# baseline run 0).
-			result_d = {"outcome": -1, "winner_team": -2,
-				"termination_reason": -3, "tick_count": int(sim._tick_count)}
+		# REAL BattleResult (no synthetic placeholder). Every
+		# run now terminates either naturally or by tick
+		# budget; sim.get_result() is always a real
+		# BattleResult with non-sentinel values.
+		var result = sim.get_result()
+		var result_d: Dictionary = {
+			"outcome": int(result.outcome),
+			"winner_team": int(result.winner_team),
+			"termination_reason": int(result.termination_reason),
+			"tick_count": int(result.tick_count),
+		}
 		var invocations: int = int(provider.invocations)
 		if run == 0:
 			first_norm = norm
