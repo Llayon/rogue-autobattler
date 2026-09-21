@@ -1038,6 +1038,16 @@ func _test_full_14_field_20_run_determinism() -> void:
 	# between runs. Also compare final HP / positions /
 	# BattleResult / RNG snapshot / emitter counters /
 	# provider invocation count. Per-run uniqueness check.
+	#
+	# B6-repair: canonical lifecycle order is
+	# `initialize(setup) THEN set_trigger_provider(provider)`.
+	# Applying it BEFORE initialize() silently resets to
+	# the no-op default. Therefore this test must:
+	#   (a) Use initialize THEN set_trigger_provider.
+	#   (b) Verify the configured provider actually fired
+	#       (HEAL_APPLIED count > 0 in the trace), proving
+	#       this is real reaction determinism, NOT no-op
+	#       determinism.
 	var first_norm: Array = []
 	var first_hp_p0: int = -1
 	var first_hp_e0: int = -1
@@ -1054,14 +1064,15 @@ func _test_full_14_field_20_run_determinism() -> void:
 		provider.expected_target = 1
 		provider.expected_source = 0
 		provider.allow_until_tick = 3
-		sim.set_trigger_provider(provider)
 		var s = BattleSetupScript.new(42,
 			[BattleUnitSetupScript.new(
 				"p0", &"warrior", 0, Vector2i(0, 0), 100, 100, 50, 5, 1)],
 			[BattleUnitSetupScript.new(
 				"e0", &"orc", 1, Vector2i(0, 1), 100, 100, 20, 5, 1)],
 			7, 4)
-		sim.initialize(s)
+		_assert(sim.initialize(s), "run %d initialize ok" % run)
+		# CANONICAL ORDER: provider applied AFTER initialize.
+		sim.set_trigger_provider(provider)
 		var events: Array = []
 		while not sim.is_finished() and int(sim._tick_count) < 5:
 			events.append_array(sim.step_tick())
@@ -1073,6 +1084,24 @@ func _test_full_14_field_20_run_determinism() -> void:
 				_assert(false, "run %d duplicated event_id=%d" % [run, id])
 				return
 			seen[id] = true
+		# Confirm provider actually fired (HEAL_APPLIED > 0).
+		# Without this check, a regression that wipes the
+		# provider would silently keep passing on no-op
+		# determinism traces.
+		var heal_count: int = 0
+		for e in events:
+			if int(e.type) == BattleEventTypeScript.HEAL_APPLIED:
+				heal_count += 1
+		if run == 0:
+			_assert(int(provider.invocations) > 0,
+				"run 0: provider was invoked > 0 (got %d)" % int(provider.invocations))
+			_assert(heal_count > 0,
+				"run 0 trace contains HEAL_APPLIED > 0 (got %d) — proves reaction determinism NOT no-op determinism" % heal_count)
+		else:
+			_assert(int(provider.invocations) > 0,
+				"run %d: provider was invoked > 0 (got %d)" % [run, int(provider.invocations)])
+			_assert(heal_count > 0,
+				"run %d: HEAL_APPLIED count > 0 (got %d)" % [run, heal_count])
 		# Normalize trace.
 		var norm: Array = _normalize_trace_14(events)
 		var hp_p0: int = int(sim.world().current_hp_of(0))
@@ -1082,12 +1111,21 @@ func _test_full_14_field_20_run_determinism() -> void:
 		var rng: Dictionary = sim.rng().snapshot()
 		var emit_id: int = int(sim.emitter().peek_next_event_id())
 		var emit_root: int = int(sim.emitter().peek_next_root_action_id())
-		var result_d: Dictionary = {
-			"outcome": int(sim.get_result().outcome),
-			"winner_team": int(sim.get_result().winner_team),
-			"termination_reason": int(sim.get_result().termination_reason),
-			"tick_count": int(sim.get_result().tick_count),
-		}
+		var result_d: Dictionary = {}
+		if sim.is_finished() and sim.get_result() != null:
+			result_d = {
+				"outcome": int(sim.get_result().outcome),
+				"winner_team": int(sim.get_result().winner_team),
+				"termination_reason": int(sim.get_result().termination_reason),
+				"tick_count": int(sim.get_result().tick_count),
+			}
+		else:
+			# Battle did not terminate within tick budget.
+			# Capture a stable placeholder so two such runs
+			# still compare equal against each other (and the
+			# baseline run 0).
+			result_d = {"outcome": -1, "winner_team": -2,
+				"termination_reason": -3, "tick_count": int(sim._tick_count)}
 		var invocations: int = int(provider.invocations)
 		if run == 0:
 			first_norm = norm
