@@ -107,17 +107,6 @@ func record_truncation(p_reason: int) -> void:
 		truncated = true
 
 
-## Mark an event_id as processed (legacy API retained
-## for non-session callers / debug). Increments
-## events_processed unguarded by the cap test.
-## Prefer try_mark() for tick-session scoped callers.
-func mark_seen(p_event_id: int) -> void:
-	var id: int = int(p_event_id)
-	if _seen.has(id):
-		return
-	_seen[id] = true
-
-
 ## Number of unique event_ids currently tracked.
 func seen_size() -> int:
 	return len(_seen)

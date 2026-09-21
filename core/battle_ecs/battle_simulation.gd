@@ -92,10 +92,13 @@ var _trigger_provider: RefCounted = null
 var _trigger_limits: Resource = null
 # Per-tick session. reset to null between ticks.
 var _trigger_session: RefCounted = null
-# DEBUG accessor for last session's result (committed
-# reaction events after one tick). Null after first
-# initialize(). Test-only convenience.
-var _last_tick_trigger_result: RefCounted = null
+# Diagnostic accessor for the latest individual
+# TriggerDispatcher.process() result during step_tick.
+# Each phase (status / player / enemy) overwrites it, so it
+# reflects ONLY the most recent single dispatch call. NOT a
+# whole-tick aggregate. Null after first initialize().
+# Test-only convenience.
+var _last_trigger_dispatch_result: RefCounted = null
 
 
 ## Returns the simulation-owned BattleEventEmitter. Effects
@@ -133,7 +136,7 @@ func initialize(setup: BattleSetup) -> bool:
 	_trigger_provider = TriggerProviderScript.new()    # no-op
 	_trigger_limits = TriggerLimitsScript.new()        # 32/10000/256
 	_trigger_session = null
-	_last_tick_trigger_result = null
+	_last_trigger_dispatch_result = null
 	# B2.0: own exactly one BattleEventEmitter. reset() makes
 	# the next event_id start at 1 and the next root_action_id
 	# start at 1. No previous battle counter leaks across
@@ -183,10 +186,15 @@ func set_max_ticks(p_max_ticks: int) -> void:
 	_max_ticks = maxi(0, int(p_max_ticks))
 
 
-## B6 trigger configuration. Call BEFORE initialize() has
-## been called or AFTER (re-applies on initialize() reset
-## anyway). Stored references are reset to defaults on
-## initialize() so prior battles do not leak configuration.
+## B6 trigger configuration lifecycle. CANONICAL CALLER
+## SEQUENCE:
+##   sim.initialize(setup)
+##   sim.set_trigger_provider(provider)
+##   sim.set_trigger_limits(limits)
+##   sim.step_tick()
+## initialize() resets _trigger_provider to no-op and
+## _trigger_limits to 32/10000/256 defaults. Configuration
+## applied BEFORE initialize() is discarded. Apply AFTER.
 func set_trigger_provider(p_provider) -> void:
 	_trigger_provider = p_provider
 
@@ -256,7 +264,6 @@ func step_tick() -> Array:
 	# mutation of the underlying Resource.
 	_trigger_session = _trigger_dispatcher.begin_session(
 		_trigger_limits)
-	var triggered_events: Array = []
 	var status_events: Array = []
 	# === 1. periodic status phase ===
 	if _periodic_status_processor != null:
@@ -265,14 +272,14 @@ func step_tick() -> Array:
 		for e in status_events:
 			events.append(e)
 	# === 2. dispatch reactions to status-phase events ===
+	# `events` is the EffectContext sink; reaction events
+	# are committed into it directly by the dispatcher.
+	# We do NOT post-append r1.events / r2.events / r3.events
+	# here because that would duplicate the same event_id.
 	if status_events.size() > 0:
-		var r1: RefCounted = _trigger_dispatcher.process(
+		_last_trigger_dispatch_result = _trigger_dispatcher.process(
 			status_events, _world, _rng, _event_emitter, events,
 			_trigger_provider, null, _trigger_session)
-		_last_tick_trigger_result = r1
-		for re in r1.events:
-			triggered_events.append(re)
-			events.append(re)
 	# === 3-4. player normal action ===
 	var natural_after_status: bool = _world.one_side_empty()
 	if not natural_after_status:
@@ -281,13 +288,9 @@ func step_tick() -> Array:
 			events.append(e)
 		# Dispatch reactions to player action events.
 		if player_action_events.size() > 0:
-			var r2: RefCounted = _trigger_dispatcher.process(
+			_last_trigger_dispatch_result = _trigger_dispatcher.process(
 				player_action_events, _world, _rng, _event_emitter, events,
 				_trigger_provider, null, _trigger_session)
-			_last_tick_trigger_result = r2
-			for re in r2.events:
-				triggered_events.append(re)
-				events.append(re)
 	# === 5-6. enemy normal action (only if not yet natural) ===
 	var natural_after_player: bool = _world.one_side_empty()
 	if not natural_after_player:
@@ -296,13 +299,9 @@ func step_tick() -> Array:
 			events.append(e)
 		# Dispatch reactions to enemy action events.
 		if enemy_action_events.size() > 0:
-			var r3: RefCounted = _trigger_dispatcher.process(
+			_last_trigger_dispatch_result = _trigger_dispatcher.process(
 				enemy_action_events, _world, _rng, _event_emitter, events,
 				_trigger_provider, null, _trigger_session)
-			_last_tick_trigger_result = r3
-			for re in r3.events:
-				triggered_events.append(re)
-				events.append(re)
 	# === termination / progress ===
 	var natural: bool = _world.one_side_empty()
 	var budget: bool = _max_ticks > 0 and _tick_count >= _max_ticks
