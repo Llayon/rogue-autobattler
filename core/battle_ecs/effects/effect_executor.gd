@@ -16,6 +16,7 @@ const DamageEffectScript = preload("res://core/battle_ecs/effects/damage_effect.
 const HealEffectScript = preload("res://core/battle_ecs/effects/heal_effect.gd")
 const ApplyStatusEffectScript = preload("res://core/battle_ecs/effects/apply_status_effect.gd")
 const RemoveStatusEffectScript = preload("res://core/battle_ecs/effects/remove_status_effect.gd")
+const PerformAttackEffectScript = preload("res://core/battle_ecs/effects/perform_attack_effect.gd")
 const EffectResultScript = preload("res://core/battle_ecs/effects/effect_result.gd")
 
 
@@ -35,5 +36,5 @@ func execute(ctx, req) -> RefCounted:
 	if k == EffectKindScript.MOVE:
 		return EffectResultScript.failed("move not implemented", [], false)
 	if k == EffectKindScript.PERFORM_ATTACK:
-		return EffectResultScript.failed("perform_attack not implemented", [], false)
+		return PerformAttackEffectScript.execute(ctx, req)
 	return EffectResultScript.failed("unknown effect kind: %d" % k, [], false)

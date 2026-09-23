@@ -35,6 +35,8 @@ const PerformAttackEffectScript = preload(
 	"res://core/battle_ecs/effects/perform_attack_effect.gd")
 const StatQueryScript = preload(
 	"res://core/battle_ecs/status/stat_query.gd")
+const StatusInstanceScript = preload(
+	"res://core/battle_ecs/status/status_instance.gd")
 const ContentDBScript = preload(
 	"res://core/utils/content_db.gd")
 
@@ -139,7 +141,7 @@ func _test_root_attack_exact_trace() -> void:
 	var hp_before: int = int(fx.world.current_hp_of(1))
 	var result = _root_attack(fx)
 	_assert(bool(result) == true, "result returned")
-	_assert(bool(result.succeeded) == true,
+	_assert(result.success == true,
 		"root attack succeeded")
 	_assert(result.events.size() == 2,
 		"root non-lethal events.size()==2 (got %d)" % result.events.size())
@@ -200,7 +202,7 @@ func _test_lethal_root_exact_trace() -> void:
 	# Enemy has 5 HP so 50-atk vs 5-def kills it.
 	var fx = _make_fixture(100, 5, 50, 5, 0)
 	var result = _root_attack(fx)
-	_assert(bool(result.succeeded) == true,
+	_assert(result.success == true,
 		"lethal root attack succeeded")
 	_assert(result.events.size() == 3,
 		"lethal events.size()==3 (got %d)" % result.events.size())
@@ -243,15 +245,21 @@ func _test_full_validation_matrix() -> void:
 	_run_expect_fail("source == target",
 		fx, EffectRequestScript.root(
 			EffectKindScript.PERFORM_ATTACK, 0, 0, 0))
+	# Build a fixture with TWO enemies and a third enemy for
+	# "same team": place a teammate of the player so we can
+	# request PerformAttack against him.
+	var fx_same_team = _make_fixture_with_teammate()
 	_run_expect_fail("same team",
-		fx, EffectRequestScript.root(
-			EffectKindScript.PERFORM_ATTACK, 0, -1, 0))
-	# NOTE: out-of-range + stunned-source need specific setups.
-	# Add a third entity far away for out-of-range.
+		fx_same_team, EffectRequestScript.root(
+			EffectKindScript.PERFORM_ATTACK, 0, 2, 0))
+	# out-of-range: enemy 1 far from player at (6, 3) vs
+	# player at (0,0). Range 5 → Manhattan or cell distance
+	# > 5.
 	_run_expect_fail("out of range",
 		_make_fixture_with_distant_enemy(),
 		EffectRequestScript.root(
 			EffectKindScript.PERFORM_ATTACK, 0, 2, 0))
+	# stunned source: real Stun applied to player 0.
 	_run_expect_fail("stunned source",
 		_make_stunned_fixture(),
 		EffectRequestScript.root(
@@ -268,8 +276,8 @@ func _run_expect_fail(label: String, fx: _Fixture, req) -> void:
 	var alive_after: bool = bool(fx.world.is_alive(1))
 	var emit_after: int = int(fx.emitter.peek_next_event_id())
 	var root_after: int = int(fx.emitter.peek_next_root_action_id())
-	_assert(bool(result.succeeded) == false,
-		"%s: result.succeeded == false" % label)
+	_assert(result.success == false,
+		"%s: result.success == false" % label)
 	_assert(result.events.size() == 0,
 		"%s: empty events (got %d)" % [label, result.events.size()])
 	_assert(hp_after == hp_before,
@@ -327,12 +335,35 @@ func _make_stunned_fixture() -> _Fixture:
 		"e0", &"orc", 1, Vector2i(0, 1), 100, 100, 20, 5, 1)
 	var s = BattleSetupScript.new(42, [p0], [e0], 7, 4)
 	w.spawn_from_setup(s)
-	# Apply real Stun to player so blocks_actions(0) == true.
-	var burn_id: int = int(w.get_status_container(0) != null)  # placeholder
-	# We need the content_id for "stun"; use any StatusDef id
-	# already registered in ContentDB. Easiest: directly inject
-	# the StatusInstance via the world's API.
-	w._test_apply_stun_for_b61(0)
+	# Inject real Stun on player 0 via StatusContainer.
+	# _init(p_status_id, p_source_entity, p_target_entity,
+	#        p_stacks=1, p_duration=-1, p_magnitude=0)
+	var container = w.create_status_container(0)
+	var inst = StatusInstanceScript.new(
+		&"stun", 0, 0, 1, 2, 0)
+	container.add(inst, "unique", 1)
+	var rng = DeterministicRngScript.new(0)
+	var fx = _Fixture.new()
+	fx.world = w
+	fx.emitter = em
+	fx.rng = rng
+	fx.reset_counters()
+	return fx
+
+
+func _make_fixture_with_teammate() -> _Fixture:
+	# Same-team test: player (id=0) attacks player 2 (teammate).
+	var w = BattleWorldScript.new(7, 4)
+	var em = BattleEventEmitterScript.new()
+	em.reset()
+	var p0 = BattleUnitSetupScript.new(
+		"p0", &"warrior", 0, Vector2i(0, 0), 100, 100, 50, 5, 1)
+	var e0 = BattleUnitSetupScript.new(
+		"e0", &"orc", 1, Vector2i(0, 3), 100, 100, 20, 5, 1)
+	var p1 = BattleUnitSetupScript.new(
+		"p1", &"ally", 0, Vector2i(0, 1), 100, 100, 20, 5, 1)
+	var s = BattleSetupScript.new(42, [p0, p1], [e0], 7, 4)
+	w.spawn_from_setup(s)
 	var rng = DeterministicRngScript.new(0)
 	var fx = _Fixture.new()
 	fx.world = w
