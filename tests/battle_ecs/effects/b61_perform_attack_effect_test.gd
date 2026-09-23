@@ -140,7 +140,7 @@ func _test_root_attack_exact_trace() -> void:
 	var fx = _make_fixture(100, 100, 50, 5, 0)
 	var hp_before: int = int(fx.world.current_hp_of(1))
 	var result = _root_attack(fx)
-	_assert(bool(result) == true, "result returned")
+	_assert(result != null, "result returned")
 	_assert(result.success == true,
 		"root attack succeeded")
 	_assert(result.events.size() == 2,
@@ -202,6 +202,7 @@ func _test_lethal_root_exact_trace() -> void:
 	# Enemy has 5 HP so 50-atk vs 5-def kills it.
 	var fx = _make_fixture(100, 5, 50, 5, 0)
 	var result = _root_attack(fx)
+	_assert(result != null, "result returned")
 	_assert(result.success == true,
 		"lethal root attack succeeded")
 	_assert(result.events.size() == 3,

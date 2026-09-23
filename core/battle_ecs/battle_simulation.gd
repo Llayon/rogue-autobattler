@@ -50,6 +50,13 @@ const BattleEventScript = preload("res://core/battle_ecs/battle_event.gd")
 const BattleEventTypeScript = preload("res://core/battle_ecs/battle_event_type.gd")
 const StatQueryScript = preload("res://core/battle_ecs/status/stat_query.gd")
 const BattleEventEmitterScript = preload("res://core/battle_ecs/events/battle_event_emitter.gd")
+# B6.1: route all normal attacks through the canonical
+# PERFORM_ATTACK effect. Same emitter instance as
+# step_tick reactions, same executor semantics.
+const EffectKindScript = preload("res://core/battle_ecs/effects/effect_kind.gd")
+const EffectRequestScript = preload("res://core/battle_ecs/effects/effect_request.gd")
+const EffectExecutorScript = preload("res://core/battle_ecs/effects/effect_executor.gd")
+const EffectContextScript = preload("res://core/battle_ecs/effects/effect_context.gd")
 const BalanceScript = preload("res://core/balance.gd")
 const TriggerDispatcherScript = preload(
 	"res://core/battle_ecs/triggers/trigger_dispatcher.gd")
@@ -338,57 +345,67 @@ func step_tick() -> Array:
 ## `_drive_basic_attacks` so that immediate reactions
 ## between player and enemy actions do not require a
 ## second `step_tick`.
+##
+## B6.1: every alive action resolves via a single canonical
+## PERFORM_ATTACK EffectRequest through EffectExecutor. There
+## is ONE production mutation path for attacks.
+##
+## Sink ownership: the effect receives a LOCAL action sink.
+## We then append those events to the step_tick output
+## exactly once. The EffectContext sink is the SINGLE
+## insertion path for reaction events per B6-repair.
+##
+## Movement (out-of-range) is NOT moved through PERFORM_ATTACK.
+## It uses `_resolve_or_move` directly as the scheduler's
+## job; PERFORM_ATTACK itself rejects out-of-range cleanly.
 func _drive_team_action(team_id: int) -> Array:
 	var events: Array = []
+	var attacker_id: int = -1
+	var target_id: int = -1
+	var p_ids: Array = _world.alive_ids_by_team(0)
+	var e_ids: Array = _world.alive_ids_by_team(1)
 	if team_id == 0:
-		var player_ids: Array = _world.alive_ids_by_team(0)
-		var enemy_ids: Array = _world.alive_ids_by_team(1)
-		if player_ids.is_empty() or enemy_ids.is_empty():
+		if p_ids.is_empty() or e_ids.is_empty():
 			return events
-		var attacker_id: int = int(player_ids[0])
-		var target_id: int = _world.nearest_enemy_id(attacker_id, enemy_ids)
-		if target_id >= 0 and not StatQueryScript.blocks_actions(
-				_world, attacker_id):
-			events.append_array(_resolve_or_move(attacker_id, target_id))
+		attacker_id = int(p_ids[0])
+		target_id = _world.nearest_enemy_id(attacker_id, e_ids)
 	else:
-		var enemy_ids2: Array = _world.alive_ids_by_team(1)
-		var player_ids2: Array = _world.alive_ids_by_team(0)
-		if enemy_ids2.is_empty() or player_ids2.is_empty():
+		if e_ids.is_empty() or p_ids.is_empty():
 			return events
-		var attacker_id2: int = int(enemy_ids2[0])
-		var target_id2: int = _world.nearest_enemy_id(attacker_id2, player_ids2)
-		if target_id2 >= 0 and not StatQueryScript.blocks_actions(
-				_world, attacker_id2):
-			events.append_array(_resolve_or_move(attacker_id2, target_id2))
+		attacker_id = int(e_ids[0])
+		target_id = _world.nearest_enemy_id(attacker_id, p_ids)
+	if target_id < 0:
+		return events
+	if StatQueryScript.blocks_actions(_world, attacker_id):
+		return events
+	# Out-of-range → scheduler moves one cell toward target
+	# (movement is a scheduler responsibility; PERFORM_ATTACK
+	# itself rejects out-of-range).
+	if not _world.in_attack_range(attacker_id, target_id):
+		return _resolve_or_move(attacker_id, target_id)
+	# In range — the canonical path: root PERFORM_ATTACK
+	# through EffectExecutor. amount=0 enforced; damage is
+	# computed inside PerformAttackEffect from the live
+	# BattleWorld stats.
+	var req = EffectRequestScript.root(
+		EffectKindScript.PERFORM_ATTACK,
+		attacker_id, target_id, 0)
+	var action_sink: Array = []
+	var ctx = EffectContextScript.new(
+		_world, _rng, _event_emitter, action_sink)
+	EffectExecutorScript.new().execute(ctx, req)
+	events.append_array(action_sink)
 	return events
 
 
 ## Backward-compat wrapper retained for any caller that
 ## still prefers the combined player+enemy function name.
-## Behaves exactly like the pre-B6 _drive_basic_attacks:
-## player then enemy, no inter-action reaction emission.
+## B6.1: delegates to the canonical _drive_team_action path
+## twice (player then enemy). New code should call step_tick().
 func _drive_basic_attacks() -> Array:
-	# Per B6: do NOT route through _drive_team_action here
-	# because that emits per-action events suitable for
-	# immediate dispatch. _drive_basic_attacks is the
-	# legacy path. New code should call step_tick().
 	var events: Array = []
-	var player_ids: Array = _world.alive_ids_by_team(0)
-	var enemy_ids: Array = _world.alive_ids_by_team(1)
-	if not (player_ids.is_empty() or enemy_ids.is_empty()):
-		var attacker_id: int = int(player_ids[0])
-		var target_id: int = _world.nearest_enemy_id(attacker_id, enemy_ids)
-		if target_id >= 0 and not StatQueryScript.blocks_actions(
-				_world, attacker_id):
-			events.append_array(_resolve_or_move(attacker_id, target_id))
-		var enemy_ids2: Array = _world.alive_ids_by_team(1)
-		var player_ids2: Array = _world.alive_ids_by_team(0)
-		if not (enemy_ids2.is_empty() or player_ids2.is_empty()):
-			var e_attacker: int = int(enemy_ids2[0])
-			var e_target: int = _world.nearest_enemy_id(e_attacker, player_ids2)
-			if e_target >= 0 and not StatQueryScript.blocks_actions(
-					_world, e_attacker):
-				events.append_array(_resolve_or_move(e_attacker, e_target))
+	events.append_array(_drive_team_action(0))
+	events.append_array(_drive_team_action(1))
 	return events
 
 
@@ -510,64 +527,23 @@ func _resolve_or_move(attacker_id: int, target_id: int) -> Array:
 	return [moved_event]
 
 
-## BLOCKER 2 fix: damage formula uses the established pure-defense
-## scaling from Balance.compute_damage. No crit / dodge / variance
-## / statuses / effects for this slice. Variance + crit + dodge
-## are explicitly deferred (NORMATIVE FEATURE DEFER).
-func _compute_damage(attacker_id: int, target_id: int) -> int:
-	var atk: int = _world.attack_of(attacker_id)
-	var dfs: int = _world.defense_of(target_id)
-	if atk <= 0:
-		return 1
-	var eff_def: int = dfs  # is_magic=false in this slice
-	return BalanceScript.compute_damage(atk, eff_def, false, 0.0, 1.0)
+## B6.1: damage formula is computed inside PerformAttackEffect
+## (canonical path). This wrapper was the OLD second
+## production mutation path; retired as part of B6.1 to
+## guarantee ONE attack mutation path. Kept as a no-op
+## briefly to preserve function lookup stability during
+## the refactor window; will be removed in a follow-up.
+func _compute_damage(_attacker_id: int, _target_id: int) -> int:
+	return 0
 
 
-func _resolve_attack(attacker_id: int, target_id: int) -> Array:
-	var events: Array = []
-	if not _world.is_alive(attacker_id) or not _world.is_alive(target_id):
-		return events
-	if not _world.in_attack_range(attacker_id, target_id):
-		return events
-	var dmg: int = _compute_damage(attacker_id, target_id)
-	# B2.0: ATTACK_RESOLVED is the root event for the entire
-	# attack action. Subsequent DAMAGE_APPLIED (and optional
-	# UNIT_DIED) become children under the same root_action_id.
-	var attack_event = _event_emitter.emit(
-		BattleEventTypeScript.ATTACK_RESOLVED,
-		attacker_id,
-		target_id,
-		_world.source_run_unit_id_of(attacker_id),
-		_world.source_run_unit_id_of(target_id),
-		dmg)
-	events.append(attack_event)
-	var dealt: int = _world.apply_damage(target_id, dmg)
-	# DAMAGE_APPLIED as a child of ATTACK_RESOLVED.
-	var dmg_event = _event_emitter.emit_child(
-		BattleEventTypeScript.DAMAGE_APPLIED,
-		int(attack_event.event_id),
-		int(attack_event.root_action_id),
-		int(attack_event.chain_depth),
-		attacker_id,
-		target_id,
-		_world.source_run_unit_id_of(attacker_id),
-		_world.source_run_unit_id_of(target_id),
-		dealt)
-	events.append(dmg_event)
-	if not _world.is_alive(target_id):
-		# UNIT_DIED as a child of DAMAGE_APPLIED.
-		var died_event = _event_emitter.emit_child(
-			BattleEventTypeScript.UNIT_DIED,
-			int(dmg_event.event_id),
-			int(dmg_event.root_action_id),
-			int(dmg_event.chain_depth),
-			attacker_id,
-			target_id,
-			_world.source_run_unit_id_of(attacker_id),
-			_world.source_run_unit_id_of(target_id),
-			dealt)
-		events.append(died_event)
-	return events
+## B6.1 retired — _resolve_attack is no longer called by
+## _drive_team_action (which routes through PerformAttackEffect
+## via EffectExecutor). This stub remains to preserve
+## function lookup during the refactor window and will be
+## removed in a follow-up.
+func _resolve_attack(_attacker_id: int, _target_id: int) -> Array:
+	return []
 
 
 ## B2.0: BATTLE_ENDED is its own root event under the chosen

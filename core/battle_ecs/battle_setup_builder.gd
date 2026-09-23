@@ -25,8 +25,9 @@ class_name BattleSetupBuilder extends RefCounted
 ## Enemies get empty source_run_unit_id ("").
 ##
 ## Damage/variance/crit/dodge intentionally omitted — see
-## BattleSimulation._compute_damage() and the legacy comparison
-## test classification (NORMATIVE FEATURE DEFER).
+## PerformAttackEffect (B6.1 canonical attack path) and
+## the legacy comparison test classification (NORMATIVE
+## FEATURE DEFER).
 
 const BattleUnitSetupScript = preload("res://core/battle_ecs/battle_unit_setup.gd")
 const BattleSetupScript = preload("res://core/battle_ecs/battle_setup.gd")
