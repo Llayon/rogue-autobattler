@@ -37,6 +37,16 @@ var attack_base: int = 0
 var defense_base: int = 0
 var attack_range: int = 1
 
+# === Phase 3 / B6.2a / Static reaction ownership snapshot ===
+## Ordered list of stable content IDs. Empty means no reactions.
+## These are StringNames, NOT Resource references. Caller may
+## freely mutate the source array after construction without
+## affecting this snapshot.
+##
+## Constructed via the FINAL optional constructor argument so
+## existing callsites do not shift positional meaning.
+var reaction_ids: Array[StringName] = []
+
 
 func _init(
 		p_source_run_unit_id: String = "",
@@ -47,7 +57,8 @@ func _init(
 		p_max_hp: int = 0,
 		p_attack_base: int = 0,
 		p_defense_base: int = 0,
-		p_attack_range: int = 1) -> void:
+		p_attack_range: int = 1,
+		p_reaction_ids: Array = []) -> void:
 	source_run_unit_id = String(p_source_run_unit_id)
 	definition_id = p_definition_id
 	team = int(p_team)
@@ -57,3 +68,10 @@ func _init(
 	attack_base = int(p_attack_base)
 	defense_base = int(p_defense_base)
 	attack_range = maxi(1, int(p_attack_range))
+	# B6.2a: defensive copy. Caller array aliasing must NOT
+	# leak forward into BattleSetup / BattleWorld. We allocate
+	# a fresh Array[StringName] and copy every entry as
+	# StringName, preserving order.
+	reaction_ids.clear()
+	for rid in p_reaction_ids:
+		reaction_ids.append(StringName(rid))

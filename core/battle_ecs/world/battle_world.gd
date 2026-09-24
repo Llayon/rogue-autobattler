@@ -46,6 +46,7 @@ var _defense: Dictionary = {}        # int -> int
 var _attack_range: Dictionary = {}   # int -> int
 var _definition_ids: Dictionary = {} # int -> StringName
 var _source_run_unit_ids: Dictionary = {}  # int -> String (one identity per entity)
+var _reaction_ids: Dictionary = {}  # int -> Array[StringName] (Phase 3 / B6.2a static reaction ownership snapshot)
 
 # Phase 3: per-entity StatusContainer storage.
 # int -> StatusContainer (or null if no statuses yet).
@@ -101,6 +102,13 @@ func _spawn_one(u: BattleUnitSetup) -> int:
 	_attack_range[id] = maxi(1, int(u.attack_range))
 	_definition_ids[id] = u.definition_id
 	_source_run_unit_ids[id] = u.source_run_unit_id
+	# B6.2a: copy BattleUnitSetup.reaction_ids into a FRESH
+	# per-entity Array[StringName]. Caller may mutate the source
+	# BattleUnitSetup row array without affecting this snapshot.
+	var rid_copy: Array[StringName] = []
+	for rid in u.reaction_ids:
+		rid_copy.append(StringName(rid))
+	_reaction_ids[id] = rid_copy
 	# starting_hp <= 0 spawns as not-alive so it never attacks
 	# and never acquires a target.
 	_alive[id] = int(u.starting_hp) > 0
@@ -166,6 +174,19 @@ func source_run_unit_id_of(id: int) -> String:
 ## only canonical answer; no parallel dict.
 func target_run_unit_id_of(id: int) -> String:
 	return source_run_unit_id_of(id)
+
+
+## B6.2a: returns the entity's reaction_ids snapshot.
+## Defensive copy — caller mutation of the returned array
+## MUST NOT affect world canonical storage.
+## Unknown entity: empty Array.
+func reaction_ids_of(id: int) -> Array:
+	if not _reaction_ids.has(id):
+		return []
+	var out: Array = []
+	for rid in _reaction_ids[id]:
+		out.append(StringName(rid))
+	return out
 
 
 ## Applies damage to entity. Returns the actual amount applied
@@ -261,6 +282,7 @@ func remove_entity(id: int) -> void:
 	_attack_range.erase(id)
 	_definition_ids.erase(id)
 	_source_run_unit_ids.erase(id)
+	_reaction_ids.erase(id)
 	# Phase 3: clear status container on entity removal.
 	_status_containers.erase(id)
 	var i: int = _player_ids_ordered.find(id)

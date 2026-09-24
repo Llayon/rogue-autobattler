@@ -96,6 +96,9 @@ static func build(
 		var atk: int = int(round(float(def.attack) * atk_mul)) + bonus_atk
 		var dfs: int = int(round(float(def.defense) * 1.0)) + bonus_def
 		var cell: Vector2i = Vector2i(int(i), p_grid_height - 1)
+		# B6.2a: snapshot of def.reaction_ids into BattleUnitSetup.
+		# Array() duplicates the array so the caller def is not
+		# aliased into the battle snapshot.
 		var unit_setup: BattleUnitSetupScript = BattleUnitSetupScript.new(
 				String(u.instance_id),
 				def.id,
@@ -105,7 +108,8 @@ static func build(
 				max_hp,
 				atk,
 				dfs,
-				int(def.attack_range))
+				int(def.attack_range),
+				Array(def.reaction_ids))
 		player_units.append(unit_setup)
 	# HIGH 7 fix: explicit deterministic RNG for enemy wave
 	# picks. The seed is derived deterministically from the
@@ -147,6 +151,7 @@ static func _build_enemy_wave(round_index: int, grid_width: int, rng) -> Array:
 		var scaled: Resource = enemy_def.duplicate()
 		scaled.max_hp = int(round(float(scaled.max_hp) * hp_mult))
 		var cell: Vector2i = Vector2i(int(i), 0)
+		# B6.2a: snapshot of scaled.reaction_ids into BattleUnitSetup.
 		var unit_setup: BattleUnitSetupScript = BattleUnitSetupScript.new(
 				"",
 				scaled.id,
@@ -156,6 +161,7 @@ static func _build_enemy_wave(round_index: int, grid_width: int, rng) -> Array:
 				int(scaled.max_hp),
 				int(scaled.attack),
 				int(scaled.defense),
-				int(scaled.attack_range))
+				int(scaled.attack_range),
+				Array(scaled.reaction_ids))
 		result.append(unit_setup)
 	return result

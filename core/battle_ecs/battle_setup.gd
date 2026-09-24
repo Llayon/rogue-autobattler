@@ -57,7 +57,8 @@ static func _clone_unit_array(src: Array) -> Array:
 			int(u.max_hp),
 			int(u.attack_base),
 			int(u.defense_base),
-			int(u.attack_range))
+			int(u.attack_range),
+			Array(u.reaction_ids))
 		out.append(copy)
 	return out
 
@@ -119,4 +120,20 @@ func _validate_one(u: BattleUnitSetup, expected_team: int, occupied: Dictionary,
 		if seen_source_ids.has(u.source_run_unit_id):
 			return "duplicate source_run_unit_id '%s' (must be unique across setup)" % u.source_run_unit_id
 		seen_source_ids[u.source_run_unit_id] = int(u.team)
+	# B6.2a: per-unit reaction_ids validation. Empty &'' is
+	# rejected; duplicate IDs within ONE unit are rejected;
+	# caller order is preserved (no silent reordering).
+	# Unknown IDs are ACCEPTED here so that BattleSetup
+	# validation does not gain a hidden ContentDB dependency.
+	if not u.reaction_ids.is_empty():
+		var seen_reactions: Dictionary = {}
+		for rid in u.reaction_ids:
+			var rid_sn: StringName = StringName(rid)
+			if rid_sn == &"":
+				return "unit %s has empty reaction_id" \
+					% String(u.definition_id)
+			if seen_reactions.has(rid_sn):
+				return "unit %s has duplicate reaction_id '%s'" \
+					% [String(u.definition_id), String(rid_sn)]
+			seen_reactions[rid_sn] = true
 	return ""
