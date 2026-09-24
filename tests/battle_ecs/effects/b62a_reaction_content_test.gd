@@ -145,9 +145,26 @@ func _test_reactiondef_legacy_compatibility() -> void:
 		_assert(int(r2.effect_kind) == -1,
 			"shield_block effect_kind == -1 (Phase-3 inert)")
 	# Legacy fields still present (no removal of legacy schema).
+	# Specific compatibility checks (not tautology):
+	# attack_of_opportunity.trigger is explicitly set to
+	# &"unit_move_start" in its .tres file (the legacy GameBus
+	# signal name for "this unit starts moving"); shield_block
+	# falls back to the default &"unit_attacked" because its
+	# .tres does not override trigger. shield_block.trigger_chance
+	# is authored as 0.3 (the canonical Shield Block chance).
 	if r1 != null:
-		_assert(String(r1.trigger) == String(r1.trigger),
-			"attack_of_opportunity trigger field present (legacy)")
+		_assert(String(r1.trigger) == "unit_move_start",
+			"attack_of_opportunity.trigger == 'unit_move_start' "
+			+ "(got '%s')" % String(r1.trigger))
+		_assert(int(r1.trigger_chance) >= 0.0,
+			"attack_of_opportunity.trigger_chance is non-negative")
+	if r2 != null:
+		_assert(String(r2.trigger) == "unit_attacked",
+			"shield_block.trigger == 'unit_attacked' (default legacy; "
+			+ "got '%s')" % String(r2.trigger))
+		_assert(abs(float(r2.trigger_chance) - 0.3) < 0.001,
+			"shield_block.trigger_chance ~= 0.3 (got %s)"
+			% str(r2.trigger_chance))
 	# Owner/target selectors have valid sentinel defaults.
 	if r1 != null:
 		_assert(int(r1.owner_selector) >= 0,

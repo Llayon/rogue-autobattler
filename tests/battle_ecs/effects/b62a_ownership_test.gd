@@ -31,7 +31,12 @@ const BattleWorldScript = preload(
 	"res://core/battle_ecs/world/battle_world.gd")
 const DeterministicRngScript = preload(
 	"res://core/rng/deterministic_rng.gd")
-const UnitDefScript = preload("res://core/data/unit_def.gd")
+const RunDomainStateScript = preload(
+	"res://core/progression/run_domain_state.gd")
+const RunUnitScript = preload(
+	"res://core/progression/run_unit.gd")
+const ContentDBScript = preload(
+	"res://core/utils/content_db.gd")
 
 var _passed: int = 0
 var _failed: int = 0
@@ -217,54 +222,134 @@ func _test_battle_setup_validate_unknown_id_accepted_structurally() -> void:
 
 
 # ============================================================
-# 7) BattleSetupBuilder snapshots UnitDef.reaction_ids.
+# 7) BattleSetupBuilder.build() snapshots UnitDef.reaction_ids.
 #    Mutating UnitDef.reaction_ids after build must NOT alter
-#    the produced BattleSetup.
+#    the produced BattleSetup. Uses the REAL builder path with
+#    real loaded ContentDB definitions (warrior unit +
+#    deterministic round-1 enemy pick). Restores all mutated
+#    content definitions before returning.
 # ============================================================
 func _test_battle_setup_builder_unitdef_mutation_isolated() -> void:
 	print("[B62A-BSB] builder_unitdef_mutation_isolated")
-	# Construct two UnitDefs with reaction_ids.
-	var def_warrior: Resource = UnitDefScript.new()
-	def_warrior.id = &"warrior"
-	def_warrior.max_hp = 100
-	def_warrior.attack = 50
-	def_warrior.defense = 5
-	def_warrior.attack_range = 1
-	def_warrior.reaction_ids = ([&"counterattack", &"taunt"]
+	# Ensure ContentDB is loaded.
+	ContentDBScript.ensure_loaded()
+	# Resolve real player def from ContentDB. Save original
+	# reaction_ids so we can restore them on every path.
+	var warrior_def = ContentDBScript.get_by_id_for_type(
+		"units", &"warrior")
+	_assert(warrior_def != null,
+		"warrior UnitDef loaded from ContentDB (units)")
+	if warrior_def == null:
+		return
+	var original_player_ids: Array[StringName] = \
+		Array(warrior_def.reaction_ids) as Array[StringName]
+	# We'll snapshot enemy defs lazily (after build inspects
+	# which definition was actually picked).
+	var picked_enemy_def = null
+	var original_enemy_ids: Array[StringName] = []
+	# Set the warrior def to a known reaction_ids before build.
+	warrior_def.reaction_ids = ([&"reaction_a", &"reaction_b"]
 		as Array[StringName])
-	var def_orc: Resource = UnitDefScript.new()
-	def_orc.id = &"orc"
-	def_orc.max_hp = 100
-	def_orc.attack = 20
-	def_orc.defense = 5
-	def_orc.attack_range = 1
-	def_orc.reaction_ids = ([&"howl"] as Array[StringName])
-	# Build a BattleSetup manually via BattleUnitSetup rows.
-	var player_row = BattleUnitSetupScript.new(
-		"p0", &"warrior", 0, Vector2i(0, 0), 100, 100, 50, 5, 1,
-		Array(def_warrior.reaction_ids))
-	var enemy_row = BattleUnitSetupScript.new(
-		"e0", &"orc", 1, Vector2i(0, 1), 100, 100, 20, 5, 1,
-		Array(def_orc.reaction_ids))
-	var setup = BattleSetupScript.new(42, [player_row], [enemy_row], 7, 4)
-	# Snapshot the row arrays BEFORE we mutate the defs.
-	var player_reactions_before: Array = Array(setup.player_units[0].reaction_ids)
-	var enemy_reactions_before: Array = Array(setup.enemy_units[0].reaction_ids)
-	_assert(_arr_eq(player_reactions_before, [&"counterattack", &"taunt"]),
-		"player row starts with [counterattack, taunt]")
-	_assert(_arr_eq(enemy_reactions_before, [&"howl"]),
-		"enemy row starts with [howl]")
-	# Mutate the UnitDefs.
-	def_warrior.reaction_ids = ([&"counterattack", &"taunt"]
-		as Array[StringName])
-	def_orc.reaction_ids = ([&"howl"] as Array[StringName])
+	# Construct minimal RunDomainState with one board warrior.
+	var state: RefCounted = RunDomainStateScript.new()
+	state.seed = 42
+	state.round_index = 1
+	state.meta_modifiers = {
+		"rest_attack_bonus": 0, "shrine_attack_bonus": 0,
+	}
+	var warrior_unit = state.create_unit(&"warrior", 100,
+		RunUnitScript.LOCATION_BOARD)
+	_assert(warrior_unit != null,
+		"created warrior RunUnit on the board")
+	if warrior_unit == null:
+		# Restore before return.
+		warrior_def.reaction_ids = original_player_ids
+		return
+	# Call the real BattleSetupBuilder.build().
+	var setup = BattleSetupBuilderScript.build(state, 42, 1, 7, 4)
+	_assert(setup != null,
+		"BattleSetupBuilder.build() returned a BattleSetup")
+	if setup == null:
+		warrior_def.reaction_ids = original_player_ids
+		return
+	_assert(setup.player_units.size() >= 1,
+		"setup has at least 1 player unit")
+	_assert(setup.enemy_units.size() >= 1,
+		"setup has at least 1 enemy unit")
+	if setup.player_units.is_empty() or setup.enemy_units.is_empty():
+		warrior_def.reaction_ids = original_player_ids
+		return
+	# Player snapshot: real builder path produced a row whose
+	# reaction_ids mirror the warrior def AT BUILD TIME.
+	var player_row = setup.player_units[0]
+	_assert(String(player_row.definition_id) == "warrior",
+		"player row built from warrior definition_id")
+	_assert(_arr_eq(Array(player_row.reaction_ids) as Array,
+			[&"reaction_a", &"reaction_b"]),
+		"player row reaction_ids mirror warrior def at build time")
+	_assert(player_row.source_run_unit_id == warrior_unit.instance_id,
+		"player row preserves stable source_run_unit_id from RunUnit")
+	# Enemy snapshot: inspect which enemy definition was
+	# picked and snapshot its original reaction_ids.
+	var enemy_row = setup.enemy_units[0]
+	var picked_id: StringName = StringName(enemy_row.definition_id)
+	picked_enemy_def = ContentDBScript.get_by_id_for_type(
+		"enemies", picked_id)
+	if picked_enemy_def != null:
+		original_enemy_ids = Array(picked_enemy_def.reaction_ids) \
+			as Array[StringName]
+		# Now set enemy def to a known reaction_ids and rebuild.
+		picked_enemy_def.reaction_ids = ([&"enemy_reaction_a"]
+			as Array[StringName])
+		setup = BattleSetupBuilderScript.build(state, 42, 1, 7, 4)
+		_assert(setup.enemy_units.size() >= 1,
+			"rebuild produced at least 1 enemy unit")
+		if not setup.enemy_units.is_empty():
+			var enemy_row2 = setup.enemy_units[0]
+			_assert(String(enemy_row2.definition_id) == String(picked_id),
+				"rebuild picks the same enemy definition_id "
+				+ "(deterministic seed)")
+			_assert(_arr_eq(Array(enemy_row2.reaction_ids) as Array,
+					[&"enemy_reaction_a"]),
+				"enemy row reaction_ids mirror picked enemy def "
+				+ "at build time")
+	# MUTATE warrior_def AFTER build. The already-built
 	# BattleSetup MUST NOT change.
-	var player_reactions_after: Array = Array(setup.player_units[0].reaction_ids)
-	var enemy_reactions_after: Array = Array(setup.enemy_units[0].reaction_ids)
-	_assert(_arr_eq(player_reactions_after, player_reactions_before),
-		"player row unaffected by UnitDef.reaction_ids mutation")
-	_assert(_arr_eq(enemy_reactions_after, enemy_reactions_before),
-		"enemy row unaffected by UnitDef.reaction_ids mutation")
+	var warrior_new_ids: Array[StringName] = (
+		[&"completely_different_after_build"] as Array[StringName])
+	warrior_def.reaction_ids = warrior_new_ids
+	# Re-read the player row from the EXISTING setup object.
+	var player_reactions_after_mutation: Array = \
+		Array(player_row.reaction_ids)
+	_assert(_arr_eq(player_reactions_after_mutation,
+			[&"reaction_a", &"reaction_b"]),
+		"player row unaffected by post-build warrior_def mutation "
+		+ "(got %s)" % str(player_reactions_after_mutation))
+	# Re-build to compare: the NEW setup's player row reflects
+	# the POST-mutation def. The OLD setup's player row does NOT.
+	var new_setup = BattleSetupBuilderScript.build(state, 42, 1, 7, 4)
+	if new_setup != null and not new_setup.player_units.is_empty():
+		_assert(_arr_eq(
+				Array(new_setup.player_units[0].reaction_ids) as Array,
+				[&"completely_different_after_build"]),
+			"new build reflects post-mutation warrior_def "
+			+ "(proves builder reads CURRENT def, not snapshot)")
+	# Also mutate picked enemy def AFTER build (if any).
+	if picked_enemy_def != null:
+		picked_enemy_def.reaction_ids = (
+			[&"enemy_changed"] as Array[StringName])
+		if not setup.enemy_units.is_empty():
+			var enemy_after: Array = \
+				Array(setup.enemy_units[0].reaction_ids)
+			_assert(_arr_eq(enemy_after, [&"enemy_reaction_a"]),
+				"old enemy row unaffected by post-build enemy_def mutation")
+	# RESTORE all mutated content (success path).
+	warrior_def.reaction_ids = original_player_ids
+	if picked_enemy_def != null:
+		picked_enemy_def.reaction_ids = original_enemy_ids
+	_assert(_arr_eq(Array(warrior_def.reaction_ids) as Array,
+			Array(original_player_ids) as Array),
+		"warrior_def.reaction_ids restored to original")
 
 
 # ============================================================
