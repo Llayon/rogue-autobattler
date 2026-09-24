@@ -29,17 +29,19 @@ func _initialize() -> void:
 	_assert_eq(z, int(BalanceScript.compute_damage(
 		0, 5, false, 0.0, 1.0)),
 		"AttackMathScript.compute(0, 5) still delegates to Balance")
-	print("\n=== B6.1 T1 RED: %d ===\n" % _fail_count)
+	print("\n=== B6.1 attack math: %d pass / %d fail ===\n" % [_pass_count, _fail_count])
 	if _fail_count > 0:
 		quit(1)
 	quit(0)
 
 
 var _fail_count: int = 0
+var _pass_count: int = 0
 
 
 func _assert_eq(got: int, want: int, label: String) -> void:
 	if got == want:
+		_pass_count += 1
 		print("  [OK]   %s" % label)
 	else:
 		_fail_count += 1

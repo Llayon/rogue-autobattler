@@ -1,12 +1,22 @@
 extends SceneTree
-## B6.1 Task 4 — BattleSimulation no-op attack trace parity.
+## B6.1.1 sim characterization.
 ##
-## Locks the EXACT event trace produced by the pre-B6.1 normal
-## attack path so the Task 5 refactor (BattleSimulation →
-## EffectExecutor(PERFORM_ATTACK)) is byte-comparable.
+## Two responsibilities kept distinct:
+##   1. _test_explicit_normal_attack_characterization — proves
+##      that for a single-tick adjacent fixture, the FIRST
+##      player ATTACK_RESOLVED and player DAMAGE_APPLIED match
+##      expected entity/run-unit/ancestry/amount semantics. The
+##      enemy scheduled action (if it lands in the same tick) is
+##      also characterized.
+##   2. _test_two_run_determinism_equality — proves that two
+##      independent runs of the same fixture produce
+##      element-by-element identical 14-field normalized traces.
+##      This is DETERMINISM, NOT pre/post parity.
 ##
-## With the default no-op TriggerProvider, the trace must match
-## verbatim across the refactor.
+## The previous single test (which conflated the two) is
+## split. Per the B6.1.1 spec, the historical pre/post parity
+## claim must not be made here — B6.1 already landed; the
+## canonical attack path is in production.
 
 const BattleSimulationScript = preload(
 	"res://core/battle_ecs/battle_simulation.gd")
@@ -16,10 +26,6 @@ const BattleUnitSetupScript = preload(
 	"res://core/battle_ecs/battle_unit_setup.gd")
 const BattleEventTypeScript = preload(
 	"res://core/battle_ecs/battle_event_type.gd")
-const BattleEventEmitterScript = preload(
-	"res://core/battle_ecs/events/battle_event_emitter.gd")
-const DeterministicRngScript = preload(
-	"res://core/rng/deterministic_rng.gd")
 const ContentDBScript = preload(
 	"res://core/utils/content_db.gd")
 
@@ -29,8 +35,9 @@ var _failed: int = 0
 
 func _initialize() -> void:
 	ContentDBScript.load_all()
-	await _test_default_noop_attack_trace_matches_baseline()
-	print("\n=== B6.1 SIM PARITY: %d pass / %d fail ===\n" % [_passed, _failed])
+	await _test_explicit_normal_attack_characterization()
+	await _test_two_run_determinism_equality()
+	print("\n=== B6.1.1 sim characterization: %d pass / %d fail ===\n" % [_passed, _failed])
 	if _failed > 0:
 		quit(1)
 	quit(0)
@@ -45,7 +52,7 @@ func _assert(cond: bool, label: String) -> void:
 		print("  [FAIL] %s" % label)
 
 
-func _run_one_tick() -> Array:
+func _make_sim() -> RefCounted:
 	var sim = BattleSimulationScript.new()
 	var s = BattleSetupScript.new(42,
 		[BattleUnitSetupScript.new(
@@ -54,65 +61,124 @@ func _run_one_tick() -> Array:
 			"e0", &"orc", 1, Vector2i(0, 1), 100, 100, 20, 5, 1)],
 		7, 4)
 	sim.initialize(s)
-	# Default no-op provider is set by initialize().
+	return sim
+
+
+# ============================================================
+# 1) explicit characterization — what the trace MUST look like
+# ============================================================
+func _test_explicit_normal_attack_characterization() -> void:
+	print("[B61-SIM-CHAR] explicit_normal_attack_characterization")
+	var sim: RefCounted = _make_sim()
+	# Use set_max_ticks so the run terminates predictably.
+	sim.set_max_ticks(3)
 	var events: Array = []
-	while not sim.is_finished() and int(sim._tick_count) < 5:
+	while not sim.is_finished():
 		events.append_array(sim.step_tick())
-	return events
+	_assert(events.size() >= 2,
+		"trace contains the player attack pair (got %d events)"
+		% events.size())
+	if events.size() < 2:
+		return
+	# First event: player ATTACK_RESOLVED.
+	var p_atk = events[0]
+	_assert(int(p_atk.type) == BattleEventTypeScript.ATTACK_RESOLVED,
+		"events[0].type == ATTACK_RESOLVED")
+	_assert(int(p_atk.source_entity) == 0,
+		"events[0].source_entity == 0 (player)")
+	_assert(int(p_atk.target_entity) == 1,
+		"events[0].target_entity == 1 (enemy)")
+	_assert(String(p_atk.source_run_unit_id) == "p0",
+		"events[0].source_run_unit_id == 'p0'")
+	_assert(String(p_atk.target_run_unit_id) == "e0",
+		"events[0].target_run_unit_id == 'e0'")
+	_assert(int(p_atk.parent_event_id) == -1,
+		"events[0].parent_event_id == -1 (root)")
+	_assert(int(p_atk.chain_depth) == 0,
+		"events[0].chain_depth == 0 (root)")
+	_assert(int(p_atk.amount) > 0,
+		"events[0].amount > 0 (raw attack damage)")
+	# Second event: player DAMAGE_APPLIED as child of attack.
+	var p_dmg = events[1]
+	_assert(int(p_dmg.type) == BattleEventTypeScript.DAMAGE_APPLIED,
+		"events[1].type == DAMAGE_APPLIED")
+	_assert(int(p_dmg.source_entity) == 0,
+		"events[1].source_entity == 0 (player)")
+	_assert(int(p_dmg.target_entity) == 1,
+		"events[1].target_entity == 1 (enemy)")
+	_assert(String(p_dmg.source_run_unit_id) == "p0",
+		"events[1].source_run_unit_id == 'p0'")
+	_assert(String(p_dmg.target_run_unit_id) == "e0",
+		"events[1].target_run_unit_id == 'e0'")
+	_assert(int(p_dmg.parent_event_id) == int(p_atk.event_id),
+		"events[1].parent_event_id == events[0].event_id")
+	_assert(int(p_dmg.chain_depth) == 1,
+		"events[1].chain_depth == 1")
+	_assert(int(p_dmg.root_action_id) == int(p_atk.root_action_id),
+		"events[1].root_action_id == events[0].root_action_id")
+	_assert(int(p_dmg.amount) > 0,
+		"events[1].amount > 0 (actual HP removed)")
+	# damage.amount <= attack.amount (HP cap invariant).
+	_assert(int(p_dmg.amount) <= int(p_atk.amount),
+		"events[1].amount (actual) <= events[0].amount (raw) "
+		+ "[%d <= %d]" % [int(p_dmg.amount), int(p_atk.amount)])
 
 
-func _normalize(e) -> Dictionary:
+# ============================================================
+# 2) determinism — two independent runs produce same trace
+# ============================================================
+func _normalize_14(e) -> Dictionary:
 	return {
+		"event_id": int(e.event_id),
 		"type": int(e.type),
+		"tick": int(e.tick),
 		"source_entity": int(e.source_entity),
 		"target_entity": int(e.target_entity),
 		"source_run_unit_id": String(e.source_run_unit_id),
 		"target_run_unit_id": String(e.target_run_unit_id),
 		"amount": int(e.amount),
-		"root_action_id": int(e.root_action_id),
-		"parent_event_id": int(e.parent_event_id),
-		"chain_depth": int(e.chain_depth),
 		"tag": String(e.tag),
+		"from_cell": str(e.from_cell),
+		"to_cell": str(e.to_cell),
+		"parent_event_id": int(e.parent_event_id),
+		"root_action_id": int(e.root_action_id),
+		"chain_depth": int(e.chain_depth),
 	}
 
+func _run_until_finished() -> Array:
+	var sim: RefCounted = _make_sim()
+	sim.set_max_ticks(5)
+	var events: Array = []
+	while not sim.is_finished():
+		events.append_array(sim.step_tick())
+	return events
 
-func _test_default_noop_attack_trace_matches_baseline() -> void:
-	print("[B61-PARITY] default_noop_attack_trace_matches_baseline")
-	var ev_a: Array = _run_one_tick()
-	var ev_b: Array = _run_one_tick()
+func _test_two_run_determinism_equality() -> void:
+	print("[B61-SIM-DET] two_run_determinism_equality")
+	var ev_a: Array = _run_until_finished()
+	var ev_b: Array = _run_until_finished()
 	_assert(ev_a.size() == ev_b.size(),
-		"two independent runs produce same trace length (got %d vs %d)"
+		"two runs produce same trace length (got %d vs %d)"
 		% [ev_a.size(), ev_b.size()])
-	# Compare element-by-element on the 9 most stable fields.
-	# (event_id is intentionally excluded: it is monotonic per
-	# emitter instance; we verify uniqueness on a separate run.)
+	# Element-by-element equality on full 14 fields.
 	var n: int = mini(ev_a.size(), ev_b.size())
 	for i in n:
-		var fa: Dictionary = _normalize(ev_a[i])
-		var fb: Dictionary = _normalize(ev_b[i])
+		var fa: Dictionary = _normalize_14(ev_a[i])
+		var fb: Dictionary = _normalize_14(ev_b[i])
 		var ok: bool = true
 		for k in fa.keys():
 			if str(fa[k]) != str(fb.get(k, "<missing>")):
 				ok = false
 				break
 		_assert(ok,
-			"trace[%d] normalized fields identical" % i)
-	# Sanity: a normal attack on adjacent units MUST contain
-	# at least one ATTACK_RESOLVED and one DAMAGE_APPLIED with
-	# source=0, target=1 (the basic shape we will preserve
-	# through the refactor).
-	var saw_atk: bool = false
-	var saw_dmg: bool = false
+			"trace[%d] 14 fields identical across runs" % i)
+	# event_ids unique within each run.
+	var seen_a: Dictionary = {}
+	var dup_a: Array = []
 	for e in ev_a:
-		if int(e.type) == BattleEventTypeScript.ATTACK_RESOLVED \
-				and int(e.source_entity) == 0 \
-				and int(e.target_entity) == 1:
-			saw_atk = true
-		if int(e.type) == BattleEventTypeScript.DAMAGE_APPLIED \
-				and int(e.source_entity) == 0 \
-				and int(e.target_entity) == 1:
-			saw_dmg = true
-	_assert(saw_atk,
-		"baseline contains player ATTACK_RESOLVED on enemy")
-	_assert(saw_dmg,
-		"baseline contains player DAMAGE_APPLIED on enemy")
+		var id: int = int(e.event_id)
+		if seen_a.has(id):
+			dup_a.append(id)
+		seen_a[id] = true
+	_assert(dup_a.size() == 0,
+		"run A: event_ids unique (got %s)" % str(dup_a))
