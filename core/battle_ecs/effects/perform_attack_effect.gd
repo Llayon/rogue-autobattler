@@ -45,15 +45,24 @@ const StatQueryScript = preload(
 
 
 static func execute(ctx, req) -> RefCounted:
-	var p_world = ctx.world()
-	var p_rng = ctx.rng()
-	var p_emitter = ctx.emitter()
-	var sink = ctx.event_sink()
-
-	# 0. Request null / bad ancestry shape.
+	# B6.1.1: PERFORM_ATTACK does NOT accept caller-defined raw
+	# damage. Caller must leave amount=0; canonical damage is
+	# derived inside this effect from live BattleWorld stats.
+	# Future content cannot accidentally bypass AttackMath.
 	if req == null:
 		return EffectResultScript.failed(
 			"perform_attack: null request", [], false)
+	if int(req.amount) != 0:
+		return EffectResultScript.failed(
+			"perform_attack: amount must be 0 (got %d)"
+			% int(req.amount), [], false)
+	var p_world = ctx.world()
+	var p_emitter = ctx.emitter()
+	# B6.1.1: we no longer touch ctx.event_sink() directly —
+	# sink publication goes through ctx.emit_through_sink so the
+	# executor is the only authority. removed local var.
+
+	# 0. Request null / bad ancestry shape.
 	var av = req.validate_ancestry_shape()
 	if not bool(av.get("ok", false)):
 		return EffectResultScript.failed(
@@ -159,8 +168,13 @@ static func execute(ctx, req) -> RefCounted:
 	# world.apply_damage also marks dead when HP reaches 0.
 	var dealt: int = int(p_world.apply_damage(tgt, raw_dmg))
 	dmg_event.amount = int(dealt)
-	sink.append(atk_event)
-	sink.append(dmg_event)
+	# B6.1.1: single canonical sink publication API. Direct
+	# sink.append is allowed but ctx.emit_through_sink is the
+	# documented path; both end up in the same sink with no
+	# semantic difference. We use ctx.emit_through_sink so the
+	# executor is the only authority for sink mutation.
+	ctx.emit_through_sink(atk_event)
+	ctx.emit_through_sink(dmg_event)
 	var result_events: Array = [atk_event, dmg_event]
 
 	var continues_chain: bool = true
@@ -172,7 +186,7 @@ static func execute(ctx, req) -> RefCounted:
 			src, tgt, src_run, tgt_run, int(dmg_event.amount), "",
 			Vector2i(-1, -1), Vector2i(-1, -1))
 		if died_event != null:
-			sink.append(died_event)
+			ctx.emit_through_sink(died_event)
 			result_events.append(died_event)
 		# Dead targets cannot continue a reaction chain.
 		continues_chain = false

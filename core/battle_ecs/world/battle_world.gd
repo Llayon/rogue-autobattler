@@ -45,8 +45,7 @@ var _attack: Dictionary = {}         # int -> int
 var _defense: Dictionary = {}        # int -> int
 var _attack_range: Dictionary = {}   # int -> int
 var _definition_ids: Dictionary = {} # int -> StringName
-var _source_run_unit_ids: Dictionary = {}  # int -> String (attacker's run unit)
-var _target_run_unit_ids: Dictionary = {}  # int -> String (defender's run unit on the SAME entity)
+var _source_run_unit_ids: Dictionary = {}  # int -> String (one identity per entity)
 
 # Phase 3: per-entity StatusContainer storage.
 # int -> StatusContainer (or null if no statuses yet).
@@ -102,11 +101,6 @@ func _spawn_one(u: BattleUnitSetup) -> int:
 	_attack_range[id] = maxi(1, int(u.attack_range))
 	_definition_ids[id] = u.definition_id
 	_source_run_unit_ids[id] = u.source_run_unit_id
-	# Each Phase-3 entity carries ONE run-unit-id. When it
-	# appears as `target_entity` on an attack or damage
-	# event, `target_run_unit_id` resolves to that same identity.
-	# Phase 1 + AGENTS.md forbid inventing per-side identity fields.
-	_target_run_unit_ids[id] = u.source_run_unit_id
 	# starting_hp <= 0 spawns as not-alive so it never attacks
 	# and never acquires a target.
 	_alive[id] = int(u.starting_hp) > 0
@@ -164,12 +158,14 @@ func source_run_unit_id_of(id: int) -> String:
 	return String(_source_run_unit_ids.get(id, ""))
 
 
-## The target_entity's run-unit id on a BattleEvent. Phase-3
-## entities carry ONE identity per entity (Phase 1 forbids
-## invent-and-side identity fields), so this returns the
-## same string as source_run_unit_id_of for the same id.
+## B6.1.1: one entity = one stable RunUnit identity (Phase 1 +
+## AGENTS.md forbid per-side identity fields). When an entity
+## appears as `target_entity` on an attack or damage event,
+## target_run_unit_id resolves to the SAME string as
+## source_run_unit_id. The single-identity invariant is the
+## only canonical answer; no parallel dict.
 func target_run_unit_id_of(id: int) -> String:
-	return String(_target_run_unit_ids.get(id, ""))
+	return source_run_unit_id_of(id)
 
 
 ## Applies damage to entity. Returns the actual amount applied
@@ -265,7 +261,6 @@ func remove_entity(id: int) -> void:
 	_attack_range.erase(id)
 	_definition_ids.erase(id)
 	_source_run_unit_ids.erase(id)
-	_target_run_unit_ids.erase(id)
 	# Phase 3: clear status container on entity removal.
 	_status_containers.erase(id)
 	var i: int = _player_ids_ordered.find(id)

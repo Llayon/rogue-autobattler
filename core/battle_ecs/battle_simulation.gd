@@ -495,15 +495,21 @@ func _has_progressed(events: Array) -> bool:
 
 # === Internal helpers ===
 
-## If attacker is in attack range of target, attack; otherwise
-## move one cell toward target and emit UNIT_MOVED. Returns all
-## events emitted.
+## B6.1.1 movement-only helper. The in-range branch moved
+## into _drive_team_action (which delegates to
+## PerformAttackEffect via EffectExecutor). This function is
+## now reached only with target_id outside attack range; it
+## emits UNIT_MOVED or returns []. PERFORM_ATTACK is not
+## involved (spec: "Movement is scheduler responsibility").
 func _resolve_or_move(attacker_id: int, target_id: int) -> Array:
 	if not _world.is_alive(attacker_id) or not _world.is_alive(target_id):
 		return []
+	# Caller (_drive_team_action) only invokes this when the
+	# target is OUT OF RANGE. Defensive in-range check returns []
+	# to keep this helper MOVEMENT-ONLY. PERFORM_ATTACK
+	# itself rejects out-of-range cleanly.
 	if _world.in_attack_range(attacker_id, target_id):
-		return _resolve_attack(attacker_id, target_id)
-	# Out of range — try to move one cell toward target.
+		return []
 	var src: Vector2i = _world.position_of(attacker_id)
 	var dst: Vector2i = _world.try_move_toward(attacker_id, target_id)
 	if dst == src:
@@ -527,23 +533,9 @@ func _resolve_or_move(attacker_id: int, target_id: int) -> Array:
 	return [moved_event]
 
 
-## B6.1: damage formula is computed inside PerformAttackEffect
-## (canonical path). This wrapper was the OLD second
-## production mutation path; retired as part of B6.1 to
-## guarantee ONE attack mutation path. Kept as a no-op
-## briefly to preserve function lookup stability during
-## the refactor window; will be removed in a follow-up.
-func _compute_damage(_attacker_id: int, _target_id: int) -> int:
-	return 0
-
-
-## B6.1 retired — _resolve_attack is no longer called by
-## _drive_team_action (which routes through PerformAttackEffect
-## via EffectExecutor). This stub remains to preserve
-## function lookup during the refactor window and will be
-## removed in a follow-up.
-func _resolve_attack(_attacker_id: int, _target_id: int) -> Array:
-	return []
+## B6.1.1: removed the retired _compute_damage and
+## _resolve_attack stubs. There is exactly ONE attack
+## mutation path: PerformAttackEffect via EffectExecutor.
 
 
 ## B2.0: BATTLE_ENDED is its own root event under the chosen

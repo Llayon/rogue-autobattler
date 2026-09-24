@@ -23,7 +23,17 @@ const EffectResultScript = preload("res://core/battle_ecs/effects/effect_result.
 ## Execute one EffectRequest in the given context.
 ## Returns EffectResult. Never raises exceptions for combat
 ## outcomes; failed targets produce failed results.
+##
+## B6.1.1: null requests are an explicit contract violation. We
+## refuse them with EffectResult.failed before any kind dispatch.
+## This keeps the executor's contract consistent: every successful
+## dispatch corresponds to a non-null EffectRequest. Individual
+## effects are free to fail with their own reasons (e.g. amount!=0,
+## malformed ancestry); null is reserved for the executor boundary.
 func execute(ctx, req) -> RefCounted:
+	if req == null:
+		return EffectResultScript.failed(
+			"effect_executor: null request", [], false)
 	var k: int = int(req.kind)
 	if k == EffectKindScript.DAMAGE:
 		return DamageEffectScript.execute(ctx, req)
