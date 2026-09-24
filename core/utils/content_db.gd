@@ -19,6 +19,7 @@ const CONTENT_DIRS: Dictionary = {
 	"abilities": "res://content/abilities/",
 	"effects": "res://content/effects/",
 	"items": "res://content/items/",
+	"reactions": "res://content/reactions/",
 }
 
 ## Legacy global id -> Resource index. For backward compatibility.

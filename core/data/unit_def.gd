@@ -66,5 +66,13 @@ class_name UnitDef extends Resource
 # === Способности ===
 @export var abilities: Array[Resource] = []  # AbilityDef[]
 
+# === Phase 3 / B6.2a / Static reactions owned by this unit ===
+## Ordered list of stable content IDs. Empty means no reactions.
+## These are StringNames, NOT Resource references. Battle
+## snapshots a copy into BattleUnitSetup.reaction_ids so that
+## later mutation of UnitDef.reaction_ids does not alter an
+## in-progress battle.
+@export var reaction_ids: Array[StringName] = []
+
 # Мета.
 @export_multiline var description: String = ""
