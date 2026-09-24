@@ -446,12 +446,26 @@ func _test_root_budget_bound_dispatcher() -> void:
 
 
 # ============================================================
-# 5) depth bound — DIRECT DISPATCHER with small max_chain_depth
-# PerformAttack is atomic: admitted reaction ATTACK_RESOLVED
-# may emit a deeper DAMAGE_APPLIED. The NEXT reaction request
-# derived from that DAMAGE_APPLIED (whose requested depth >
-# max_chain_depth) must be rejected.
-# Already-committed atomic attack child events remain; no rollback.
+# 5) depth bound — DIRECT DISPATCHER with atomic PerformAttack
+# admission. Prove the dispatcher admits ONE reaction at the
+# limit, that the atomic PerformAttackEffect may emit its own
+# DAMAGE_APPLIED deeper than the limit, and that the NEXT
+# reaction request whose requested depth exceeds the limit is
+# rejected with no rollback of the already-committed atomic
+# children.
+#
+# Fixture: max_chain_depth = 2.
+#   - Initial DAMAGE_APPLIED at depth 1.
+#   - Ping-pong provider proposes counter request at depth 2.
+#     Depth 2 is admitted (== max_chain_depth).
+#   - PerformAttackEffect atomically commits counter ATK (depth 2)
+#     and counter DMG (depth 3). Depth 3 > limit, but this is an
+#     INTERNAL atomic child of an already-admitted effect —
+#     it remains committed. No rollback.
+#   - Ping-pong provider sees counter DMG (depth 3) and proposes
+#     next attack request at depth 4. Depth 4 > max_chain_depth=2
+#     → REJECTED before execution. result.truncated == true,
+#     result.reason == REASON_MAX_DEPTH.
 # ============================================================
 func _test_depth_bound_dispatcher() -> void:
 	print("[B611-DEPTH] depth_bound_dispatcher")
@@ -475,40 +489,85 @@ func _test_depth_bound_dispatcher() -> void:
 		int(atk_root.root_action_id),
 		int(atk_root.chain_depth),
 		0, 1, "p0", "e0", 30)
+	var hp_before: int = int(w.current_hp_of(0))
 	var sink: Array = []
 	var provider = B611PingPongProvider.new()
 	var limits = TriggerLimitsScript.new()
-	# Small depth: limit the requested-chain-depth for reactions.
-	# The atomic child DAMAGE_APPLIED of an admitted reaction
-	# ATTACK_RESOLVED sits at depth+1, but those events are
-	# already-committed by PerformAttack's atomic emission —
-	# they bypass the depth gate. The NEXT reaction REQUEST
-	# whose requested depth > max_chain_depth is rejected.
-	limits.max_chain_depth = 1
+	limits.max_chain_depth = 2
 	limits.max_events_per_tick = 1000
 	limits.max_reactions_per_root = 256
 	var session = TriggerDispatchSessionScript.from_limits(limits)
 	var dispatcher = TriggerDispatcherScript.new()
 	var result = dispatcher.process(
 		[dmg_root], w, rng, em, sink, provider, limits, session)
-	# Initial event at depth 1. Provider reacts (requested depth 2)
-	# — exceeds max_chain_depth=1 → REJECTED. No reactions_executed.
-	_assert(result.reactions_executed == 0,
-		"depth-bound: zero reactions admitted (got %d)"
+	_assert(result != null, "dispatcher returned non-null")
+	# Exactly one reaction admitted (the depth-2 counter).
+	_assert(int(result.reactions_executed) == 1,
+		"depth-bound: exactly 1 reaction admitted (got %d)"
 		% int(result.reactions_executed))
-	_assert(int(result.reason) == int(DispatchResultScript.REASON_MAX_DEPTH),
-		"depth-bound: reason == MAX_DEPTH (got %d)" % int(result.reason))
+	# result.events contains exactly the committed atomic pair.
+	_assert(result.events.size() == 2,
+		"depth-bound: result.events.size == 2 (atomic pair, got %d)"
+		% result.events.size())
+	if result.events.size() != 2:
+		return
+	var counter_atk = result.events[0]
+	var counter_dmg = result.events[1]
+	_assert(int(counter_atk.type) == BattleEventTypeScript.ATTACK_RESOLVED,
+		"depth-bound: counter ATK type")
+	_assert(int(counter_dmg.type) == BattleEventTypeScript.DAMAGE_APPLIED,
+		"depth-bound: counter DMG type")
+	_assert(int(counter_atk.chain_depth) == 2,
+		"depth-bound: counter ATK chain_depth == 2 (admitted at limit)")
+	_assert(int(counter_dmg.chain_depth) == 3,
+		"depth-bound: counter DMG chain_depth == 3 "
+		+ "(atomic child, > limit, remains committed)")
+	# Both share the ORIGINAL root_action_id (no fresh root).
+	var original_root_id: int = int(atk_root.root_action_id)
+	_assert(int(counter_atk.root_action_id) == original_root_id,
+		"depth-bound: counter ATK shares original root_action_id")
+	_assert(int(counter_dmg.root_action_id) == original_root_id,
+		"depth-bound: counter DMG shares original root_action_id")
+	# Parent chain:
+	# counter ATK.parent_event_id == initial DMG.event_id (depth 2
+	# admitted from initial DMG depth 1).
+	_assert(int(counter_atk.parent_event_id) == int(dmg_root.event_id),
+		"depth-bound: counter ATK.parent_event_id == initial DMG.event_id")
+	_assert(int(counter_dmg.parent_event_id) == int(counter_atk.event_id),
+		"depth-bound: counter DMG.parent_event_id == counter ATK.event_id")
+	# World: player HP must reflect exactly ONE counter damage.
+	# 20-5 raw → 13 dmg applied (HP 200 → 187). If a SECOND counter
+	# were silently executed, HP would be lower (200 - 2*13 = 174).
+	# We assert HP decreased by EXACTLY one counter damage amount.
+	var hp_after: int = int(w.current_hp_of(0))
+	var expected_dmg: int = int(w.attack_of(1)) * 100 / (100 + int(w.defense_of(0)))
+	_assert(hp_after == hp_before - expected_dmg,
+		"depth-bound: player HP reflects exactly ONE counter "
+		+ "damage (before=%d after=%d expected_decr=%d)"
+		% [hp_before, hp_after, expected_dmg])
+	# No second reaction ATTACK_RESOLVED in result.events.
+	# (result.events.size == 2 already guarantees exactly one
+	# counter pair; if the depth-4 request had been admitted we
+	# would have a third event.)
+	# NEXT reaction was rejected: truncated + MAX_DEPTH.
 	_assert(result.truncated == true,
-		"depth-bound: result.truncated == true")
-	# Sink contains ONLY the pre-admitted initial event (no
-	# atomic children since the reaction was rejected before
-	# execute; the initial event itself is NOT in result.events).
-	# But perform_attack's atomic children are only emitted if
-	# a reaction was admitted. Here zero reactions admitted,
-	# so no atomic children. sink stays empty for new events.
-	# (The initial event lives outside result.events by contract.)
-	_assert(sink.size() == 0,
-		"depth-bound: sink empty (no admission, no execution)")
+		"depth-bound: result.truncated == true "
+		+ "(next depth-4 reaction request rejected)")
+	_assert(int(result.reason) == int(DispatchResultScript.REASON_MAX_DEPTH),
+		"depth-bound: reason == MAX_DEPTH (got %d)"
+		% int(result.reason))
+	# Session-level proof: keep the local session reference.
+	_assert(session.truncated == true,
+		"depth-bound: session.truncated == true")
+	_assert(int(session.first_reason) == int(DispatchResultScript.REASON_MAX_DEPTH),
+		"depth-bound: session.first_reason == MAX_DEPTH (got %d)"
+		% int(session.first_reason))
+	# Sink contains the admitted counter atomic pair (counter
+	# ATK + counter DMG). The initial event itself lives outside
+	# result.events by B5 contract.
+	_assert(sink.size() == 2,
+		"depth-bound: sink contains the counter atomic pair (got %d)"
+		% sink.size())
 
 
 # ============================================================
@@ -557,15 +616,18 @@ func _test_20_run_determinism_reaction_enabled() -> void:
 	for run in 20:
 		var sim = BattleSimulationScript.new()
 		var provider = B611OneShotCounterProvider.new()
-		sim.set_trigger_provider(provider)
 		var s = BattleSetupScript.new(42,
 			[BattleUnitSetupScript.new(
 				"p0", &"warrior", 0, Vector2i(0, 0), 200, 200, 50, 5, 3)],
 			[BattleUnitSetupScript.new(
 				"e0", &"orc", 1, Vector2i(0, 1), 200, 200, 20, 5, 3)],
 			7, 4)
+		# CANONICAL B6 LIFECYCLE: initialize FIRST, then apply
+		# provider (initialize() resets the trigger provider to
+		# the no-op default).
 		_assert(sim.initialize(s),
 			"run %d initialize ok" % run)
+		sim.set_trigger_provider(provider)
 		sim.set_max_ticks(8)
 		var events: Array = []
 		while not sim.is_finished():
@@ -580,22 +642,113 @@ func _test_20_run_determinism_reaction_enabled() -> void:
 			seen[id] = true
 		_assert(dup.size() == 0,
 			"run %d has duplicate event_ids: %s" % [run, str(dup)])
-		# Reaction actually fired at least once per run.
-		var counter_atk_count: int = 0
-		var counter_dmg_count: int = 0
+		# ============================================================
+		# Provider-actually-fired guard. The one-shot provider
+		# exposes `fired` (boolean) and `invocations` (count of
+		# semantic discovery calls that matched the candidate
+		# filter). Both must be in their post-fire state for the
+		# trace to contain a real counter reaction.
+		# ============================================================
+		_assert(provider.fired == true,
+			"run %d provider.fired == true (got %s)"
+			% [run, str(provider.fired)])
+		_assert(int(provider.invocations) == 1,
+			"run %d provider.invocations == 1 (got %d)"
+			% [run, int(provider.invocations)])
+		# ============================================================
+		# Causal counter identification. The player's scheduled
+		# normal attack and the enemy's later scheduled normal
+		# attack BOTH have source_entity in {0, 1}, so the
+		# "source_entity == 1" check is INSUFFICIENT. We must
+		# identify the reaction counter by following the
+		# parent_event_id / root_action_id chain from the FIRST
+		# player root.
+		#
+		# player_attack:    ATK src=0 tgt=1 parent=-1   depth=0
+		# player_damage:    DMG src=0 tgt=1 parent=atk  depth=1
+		# counter_attack:   ATK src=1 tgt=0 parent=dmg  depth=2
+		# counter_damage:   DMG src=1 tgt=0 parent=catk  depth=3
+		# All four share the SAME root_action_id (the player's).
+		# A later enemy scheduled attack would have parent=-1,
+		# depth=0, and a DIFFERENT root_action_id — distinguishing
+		# it from the reaction counter.
+		# ============================================================
+		var player_atk = null
+		var player_dmg = null
+		var counter_atk = null
+		var counter_dmg = null
+		var enemy_sched_atk = null
 		for e in events:
 			if int(e.type) == BattleEventTypeScript.ATTACK_RESOLVED \
-					and int(e.source_entity) == 1:
-				counter_atk_count += 1
-			if int(e.type) == BattleEventTypeScript.DAMAGE_APPLIED \
-					and int(e.source_entity) == 1:
-				counter_dmg_count += 1
-		_assert(counter_atk_count >= 1,
-			"run %d: at least 1 counter ATTACK_RESOLVED (got %d)"
-			% [run, counter_atk_count])
-		_assert(counter_dmg_count >= 1,
-			"run %d: at least 1 counter DAMAGE_APPLIED (got %d)"
-			% [run, counter_dmg_count])
+					and int(e.source_entity) == 0 \
+					and int(e.target_entity) == 1 \
+					and int(e.chain_depth) == 0 \
+					and int(e.parent_event_id) == -1:
+				if player_atk == null:
+					player_atk = e
+			if player_atk != null and player_dmg == null \
+					and int(e.type) == BattleEventTypeScript.DAMAGE_APPLIED \
+					and int(e.parent_event_id) == int(player_atk.event_id) \
+					and int(e.root_action_id) == int(player_atk.root_action_id):
+				player_dmg = e
+			if player_dmg != null and counter_atk == null \
+					and int(e.type) == BattleEventTypeScript.ATTACK_RESOLVED \
+					and int(e.source_entity) == 1 \
+					and int(e.target_entity) == 0 \
+					and int(e.parent_event_id) == int(player_dmg.event_id) \
+					and int(e.root_action_id) == int(player_atk.root_action_id) \
+					and int(e.chain_depth) == int(player_dmg.chain_depth) + 1:
+				counter_atk = e
+			if counter_atk != null and counter_dmg == null \
+					and int(e.type) == BattleEventTypeScript.DAMAGE_APPLIED \
+					and int(e.source_entity) == 1 \
+					and int(e.target_entity) == 0 \
+					and int(e.parent_event_id) == int(counter_atk.event_id) \
+					and int(e.root_action_id) == int(player_atk.root_action_id) \
+					and int(e.chain_depth) == int(counter_atk.chain_depth) + 1:
+				counter_dmg = e
+			if player_atk != null \
+					and int(e.type) == BattleEventTypeScript.ATTACK_RESOLVED \
+					and int(e.source_entity) == 1 \
+					and int(e.target_entity) == 0 \
+					and int(e.parent_event_id) == -1 \
+					and int(e.chain_depth) == 0 \
+					and int(e.event_id) != int(counter_atk.event_id if counter_atk != null else -1):
+				if enemy_sched_atk == null:
+					enemy_sched_atk = e
+		_assert(player_atk != null,
+			"run %d: player ATK root found" % run)
+		_assert(player_dmg != null,
+			"run %d: player DMG found under player ATK" % run)
+		_assert(counter_atk != null,
+			"run %d: counter ATK found under player DMG (causally identified via parent_event_id + root_action_id)"
+			% run)
+		_assert(counter_dmg != null,
+			"run %d: counter DMG found under counter ATK" % run)
+		_assert(counter_atk != null
+				and int(counter_atk.chain_depth) == 2,
+			"run %d: counter ATK chain_depth == 2" % run)
+		_assert(counter_dmg != null
+				and int(counter_dmg.chain_depth) == 3,
+			"run %d: counter DMG chain_depth == 3" % run)
+		# Reaction chain shares the ORIGINAL player root.
+		_assert(int(counter_atk.root_action_id) == int(player_atk.root_action_id),
+			"run %d: counter ATK root_action_id == player ATK root_action_id"
+			% run)
+		_assert(int(counter_dmg.root_action_id) == int(player_atk.root_action_id),
+			"run %d: counter DMG root_action_id == player ATK root_action_id"
+			% run)
+		# If a later enemy scheduled attack is present (e.g.
+		# enemy has range and fires next tick), it must be
+		# an INDEPENDENT root, distinct from the player root.
+		if enemy_sched_atk != null:
+			_assert(int(enemy_sched_atk.parent_event_id) == -1
+					and int(enemy_sched_atk.chain_depth) == 0,
+				"run %d: enemy scheduled ATTACK_RESOLVED is independent root"
+				% run)
+			_assert(int(enemy_sched_atk.root_action_id) != int(player_atk.root_action_id),
+				"run %d: enemy scheduled root != player root (reaction child vs independent scheduler root)"
+				% run)
 		# Capture baseline.
 		var norm: Array = []
 		for e in events:
