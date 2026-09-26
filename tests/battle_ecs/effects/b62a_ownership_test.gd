@@ -161,8 +161,8 @@ func _test_battle_setup_defensive_copy_isolation() -> void:
 	# Mutate the setup row; bus1 must not change.
 	player_row.reaction_ids.append(&"reaction_x")
 	_assert(bus1.reaction_ids.size() == 3,
-		"original caller unaffected by setup row mutation "
-		+ "(got size %d)" % bus1.reaction_ids.size())
+		"original caller unaffected by setup row mutation (got size %d)"
+			% bus1.reaction_ids.size())
 	_assert(String(bus1.reaction_ids[2]) == "reaction_evil",
 		"original caller preserved its own appended entry")
 
@@ -217,8 +217,7 @@ func _test_battle_setup_validate_unknown_id_accepted_structurally() -> void:
 	var setup = BattleSetupScript.new(42, [bus], [ebus], 7, 4)
 	var msg: String = setup.validate()
 	_assert(msg == "",
-		"validate accepts unknown reaction IDs structurally "
-		+ "(no ContentDB dependency). got '%s'" % msg)
+		"validate accepts unknown reaction IDs structurally (no ContentDB dependency). got '%s'" % msg)
 
 
 # ============================================================
@@ -323,8 +322,8 @@ func _test_battle_setup_builder_unitdef_mutation_isolated() -> void:
 		Array(player_row.reaction_ids)
 	_assert(_arr_eq(player_reactions_after_mutation,
 			[&"reaction_a", &"reaction_b"]),
-		"player row unaffected by post-build warrior_def mutation "
-		+ "(got %s)" % str(player_reactions_after_mutation))
+		"player row unaffected by post-build warrior_def mutation (got %s)"
+			% str(player_reactions_after_mutation))
 	# Re-build to compare: the NEW setup's player row reflects
 	# the POST-mutation def. The OLD setup's player row does NOT.
 	var new_setup = BattleSetupBuilderScript.build(state, 42, 1, 7, 4)
@@ -403,8 +402,8 @@ func _test_reaction_ids_of_returns_defensive_copy() -> void:
 	returned.append(&"evil")
 	var after: Array = w.reaction_ids_of(0)
 	_assert(after.size() == 1,
-		"caller mutation of returned array did NOT mutate world "
-		+ "(got size %d)" % after.size())
+		"caller mutation of returned array did NOT mutate world (got size %d)"
+			% after.size())
 	_assert(String(after[0]) == "counterattack",
 		"world canonical reaction_ids preserved")
 
@@ -443,8 +442,7 @@ func _test_duplicate_units_can_share_reaction_id_across_entities() -> void:
 	var setup = BattleSetupScript.new(42, [p1, p2], [e_row], 7, 4)
 	var msg: String = setup.validate()
 	_assert(msg == "",
-		"two distinct entities both owning counterattack is VALID "
-		+ "(got '%s')" % msg)
+		"two distinct entities both owning counterattack is VALID (got '%s')" % msg)
 
 
 # ============================================================
@@ -453,13 +451,17 @@ func _test_duplicate_units_can_share_reaction_id_across_entities() -> void:
 # ============================================================
 func _test_no_gameplay_trace_change_no_provider() -> void:
 	print("[B62A-NOP] no_gameplay_trace_change_no_provider")
-	# Build a battle with reaction_ids attached to player (would-be
-	# future reaction). Without a provider installed, those IDs
-	# are inert. The trace must be identical to a battle without
-	# any reaction_ids.
+	# B6.2b: the default provider is now content-aware. With
+	# default ContentReactionProvider installed, the parity
+	# test must use INERT reaction IDs (unknown / legacy /
+	# empty) — NOT [&"counterattack"] which IS active and
+	# would produce real counter-trace events.
+	# Use unknown reaction_id (resolver returns null →
+	# provider skips). The trace MUST remain identical to a
+	# battle without any reaction_ids.
 	var p_with = BattleUnitSetupScript.new(
 		"p0", &"warrior", 0, Vector2i(0, 0), 100, 100, 50, 5, 1,
-		[&"counterattack"])
+		[&"unknown_inert_reaction_id"])
 	var p_without = BattleUnitSetupScript.new(
 		"p0", &"warrior", 0, Vector2i(0, 0), 100, 100, 50, 5, 1, [])
 	var e_row_a = BattleUnitSetupScript.new(
@@ -481,9 +483,8 @@ func _test_no_gameplay_trace_change_no_provider() -> void:
 	while not sim2.is_finished():
 		events_b.append_array(sim2.step_tick())
 	_assert(events_a.size() == events_b.size(),
-		"trace length identical with / without reaction_ids "
-		+ "(got %d vs %d)" % [events_a.size(), events_b.size()])
-	# Compare 9 stable fields per event (excluding event_id).
+		"trace length identical with / without inert reaction_ids (got %d vs %d)"
+			% [events_a.size(), events_b.size()])
 	var n: int = mini(events_a.size(), events_b.size())
 	for i in n:
 		for k in [
@@ -495,8 +496,8 @@ func _test_no_gameplay_trace_change_no_provider() -> void:
 			var vb = events_b[i].get(k)
 			if str(va) != str(vb):
 				_assert(false,
-					"event[%d].%s differs with/without reaction_ids "
-					+ "(%s vs %s)" % [i, k, str(va), str(vb)])
+					"event[%d].%s differs with/without reaction_ids (%s vs %s)"
+						% [i, k, str(va), str(vb)])
 				return
 	_assert(true,
-		"all event fields identical with / without reaction_ids")
+		"all event fields identical with / without inert reaction_ids")
