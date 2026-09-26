@@ -21,3 +21,4 @@ tenacity = 0.3
 tier = 2
 cost = 5
 description = "Тяжёлый танк. Огромный HP, защита и броня. Отражает 30% урона обратно атакующему."
+reaction_ids = Array[StringName]([&"counterattack"])

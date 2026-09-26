@@ -1,0 +1,16 @@
+[gd_resource type="Resource" format=3]
+
+[ext_resource type="Script" path="res://core/data/reaction_def.gd" id="1_reactiondef"]
+
+[resource]
+script = ExtResource("1_reactiondef")
+id = &"counterattack"
+display_name = "Контратака"
+description = "Владелец контратакует атакующего при входящей атаке."
+trigger_chance = 1.0
+event_type = 2
+effect_kind = 5
+owner_selector = 1
+target_selector = 0
+output_tag = &"counterattack"
+excluded_trigger_tags = Array[StringName]([&"counterattack"])
