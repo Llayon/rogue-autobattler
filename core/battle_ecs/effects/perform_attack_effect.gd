@@ -117,6 +117,15 @@ static func execute(ctx, req) -> RefCounted:
 	var raw_dmg: int = int(AttackMathScript.compute(
 		int(p_world.attack_of(src)),
 		int(p_world.defense_of(tgt))))
+	# B6.2b: read semantic event_tag from request payload.
+	# Default &"" = normal scheduled attack (no semantic tag).
+	# ContentReactionProvider sets this from ReactionDef.output_tag.
+	var sem_tag: StringName = StringName("")
+	if req != null and req.payload != null:
+		var t: Variant = req.payload.get(
+			EffectRequestScript.PAYLOAD_EVENT_TAG, null)
+		if t != null:
+			sem_tag = StringName(String(t))
 
 	# ROOT requests get a fresh root_action_id via
 	# BattleEventEmitter.emit(); CHILD requests inherit.
@@ -135,12 +144,12 @@ static func execute(ctx, req) -> RefCounted:
 			BattleEventTypeScript.ATTACK_RESOLVED,
 			atk_parent_eid, atk_root_id,
 			atk_depth - 1,
-			src, tgt, src_run, tgt_run, raw_dmg, "",
+			src, tgt, src_run, tgt_run, raw_dmg, sem_tag,
 			Vector2i(-1, -1), Vector2i(-1, -1))
 	else:
 		atk_event = p_emitter.emit(
 			BattleEventTypeScript.ATTACK_RESOLVED,
-			src, tgt, src_run, tgt_run, raw_dmg, "",
+			src, tgt, src_run, tgt_run, raw_dmg, sem_tag,
 			Vector2i(-1, -1), Vector2i(-1, -1))
 
 	if atk_event == null:
@@ -157,7 +166,7 @@ static func execute(ctx, req) -> RefCounted:
 		BattleEventTypeScript.DAMAGE_APPLIED,
 		int(atk_event.event_id), dmg_root_id,
 		int(atk_event.chain_depth),
-		src, tgt, src_run, tgt_run, 0, "",
+		src, tgt, src_run, tgt_run, 0, sem_tag,
 		Vector2i(-1, -1), Vector2i(-1, -1))
 	if dmg_event == null:
 		return EffectResultScript.failed(
@@ -183,7 +192,7 @@ static func execute(ctx, req) -> RefCounted:
 			BattleEventTypeScript.UNIT_DIED,
 			int(dmg_event.event_id), dmg_root_id,
 			int(dmg_event.chain_depth),
-			src, tgt, src_run, tgt_run, int(dmg_event.amount), "",
+			src, tgt, src_run, tgt_run, int(dmg_event.amount), sem_tag,
 			Vector2i(-1, -1), Vector2i(-1, -1))
 		if died_event != null:
 			ctx.emit_through_sink(died_event)

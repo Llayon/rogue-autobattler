@@ -43,6 +43,14 @@ const ANCESTRY_ROOT: StringName = &"root"
 const ANCESTRY_CHILD: StringName = &"child"
 const ANCESTRY_INVALID: StringName = &"invalid"
 
+## B6.2b / Canonical semantic payload key. The provider
+## sets ReactionDef.output_tag here so PerformAttackEffect can
+## propagate the same semantic tag to its atomic
+## ATTACK_RESOLVED / DAMAGE_APPLIED / UNIT_DIED children.
+## Empty / missing means "no semantic tag" (normal scheduled
+## attacks use the empty default).
+const PAYLOAD_EVENT_TAG: StringName = &"event_tag"
+
 var kind: int = 0
 var source_entity: int = 0
 var target_entity: int = 0
