@@ -64,6 +64,8 @@ const TriggerLimitsScript = preload(
 	"res://core/battle_ecs/triggers/trigger_limits.gd")
 const TriggerProviderScript = preload(
 	"res://core/battle_ecs/triggers/trigger_provider.gd")
+const ContentReactionProviderScript = preload(
+	"res://core/battle_ecs/triggers/content_reaction_provider.gd")
 const TriggerDispatchSessionScript = preload(
 	"res://core/battle_ecs/triggers/trigger_dispatch_session.gd")
 
@@ -140,7 +142,13 @@ func initialize(setup: BattleSetup) -> bool:
 	_max_ticks = 0  # reset caller-overridden tick budget
 	# B6: reset trigger spine to safe defaults per battle.
 	_trigger_dispatcher = TriggerDispatcherScript.new()
-	_trigger_provider = TriggerProviderScript.new()    # no-op
+	# B6.2b: install a fresh ContentReactionProvider on every
+	# initialize(). This is the production default. Custom
+	# providers may still override via set_trigger_provider()
+	# AFTER initialize(); a subsequent initialize() must
+	# discard the custom provider and reinstall the default.
+	_trigger_provider = ContentReactionProviderScript.new(
+		_event_emitter)
 	_trigger_limits = TriggerLimitsScript.new()        # 32/10000/256
 	_trigger_session = null
 	_last_trigger_dispatch_result = null
