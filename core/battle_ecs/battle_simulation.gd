@@ -91,11 +91,11 @@ var _valid: bool = false
 var _termination_reason: int = BattleResultScript.TERMINATION_NATURAL
 # B6: trigger spine. BattleSimulation owns exactly ONE
 # TriggerDispatcher + ONE TriggerProvider reference + ONE
-# TriggerLimits configuration. Defaults to a no-op
-# provider so B1-B5 traces are preserved when no real
-# trigger content is configured. set_trigger_provider()
-# and set_trigger_limits() configure content; initialize()
-# resets defaults so prior battles do not leak.
+# TriggerLimits configuration. Default provider is a fresh
+# ContentReactionProvider installed on every initialize()
+# (B6.2b). set_trigger_provider() and set_trigger_limits()
+# configure content; initialize() resets defaults so prior
+# battles do not leak.
 var _trigger_dispatcher: RefCounted = null
 var _trigger_provider: RefCounted = null
 var _trigger_limits: Resource = null
@@ -142,13 +142,13 @@ func initialize(setup: BattleSetup) -> bool:
 	_max_ticks = 0  # reset caller-overridden tick budget
 	# B6: reset trigger spine to safe defaults per battle.
 	_trigger_dispatcher = TriggerDispatcherScript.new()
-	# B6.2b: install a fresh ContentReactionProvider on every
-	# initialize(). This is the production default. Custom
-	# providers may still override via set_trigger_provider()
-	# AFTER initialize(); a subsequent initialize() must
-	# discard the custom provider and reinstall the default.
-	_trigger_provider = ContentReactionProviderScript.new(
-		_event_emitter)
+	# B6.2b: reset _trigger_provider to a fresh
+	# ContentReactionProvider and trigger limits to defaults
+	# (32 / 10000 / 256). Custom providers may still override
+	# via set_trigger_provider() AFTER initialize(); a
+	# subsequent initialize() must discard the custom provider
+	# and reinstall the default.
+	_trigger_provider = ContentReactionProviderScript.new()
 	_trigger_limits = TriggerLimitsScript.new()        # 32/10000/256
 	_trigger_session = null
 	_last_trigger_dispatch_result = null
@@ -207,9 +207,10 @@ func set_max_ticks(p_max_ticks: int) -> void:
 ##   sim.set_trigger_provider(provider)
 ##   sim.set_trigger_limits(limits)
 ##   sim.step_tick()
-## initialize() resets _trigger_provider to no-op and
-## _trigger_limits to 32/10000/256 defaults. Configuration
-## applied BEFORE initialize() is discarded. Apply AFTER.
+## initialize() resets _trigger_provider to a fresh
+## ContentReactionProvider and _trigger_limits to
+## 32/10000/256 defaults. Configuration applied BEFORE
+## initialize() is discarded. Apply AFTER.
 func set_trigger_provider(p_provider) -> void:
 	_trigger_provider = p_provider
 

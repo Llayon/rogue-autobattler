@@ -11,6 +11,11 @@ extends "res://core/battle_ecs/triggers/trigger_provider.gd"
 ## rejects anything else upstream. Therefore this provider does
 ## not consult RNG for chance. If validation rejects a def
 ## for any reason, this provider skips it deterministically.
+##
+## B6.2b: no _emitter dependency. A TriggerProvider is a pure
+## discovery layer; the emitter is owned by BattleSimulation
+## and accessible via the dispatcher's emitter argument, not
+## via this provider.
 
 const ReactionDefResolverScript = preload(
 	"res://core/battle_ecs/triggers/reaction_def_resolver.gd")
@@ -24,13 +29,6 @@ const EffectRequestScript = preload(
 	"res://core/battle_ecs/effects/effect_request.gd")
 const TriggerReactionScript = preload(
 	"res://core/battle_ecs/triggers/trigger_reaction.gd")
-
-var _emitter = null
-
-
-func _init(p_emitter = null) -> void:
-	_emitter = p_emitter
-
 
 ## Provider discovery: build an ORDERED list of TriggerReaction
 ## specs. Returns Array (possibly empty). Order = sorted candidate
