@@ -7,6 +7,7 @@ script = ExtResource("1_reactiondef")
 id = &"counterattack"
 display_name = "Контратака"
 description = "Владелец контратакует атакующего при входящей атаке."
+trigger = &""
 trigger_chance = 1.0
 event_type = 2
 effect_kind = 5
