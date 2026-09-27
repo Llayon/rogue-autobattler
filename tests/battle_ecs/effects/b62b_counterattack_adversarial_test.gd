@@ -531,32 +531,76 @@ func _test_lethal_base_attack_no_counter() -> void:
 	var events: Array = []
 	while not sim.is_finished():
 		events.append_array(sim.step_tick())
-	# 1) Base chain present: ATTACK_RESOLVED -> DAMAGE_APPLIED ->
-	# UNIT_DIED for the enemy.
-	var enemy_atk: int = 0
-	var enemy_dmg: int = 0
-	var enemy_died: int = 0
+	# 1) Identify EXACT player normal root attack (N):
+	# source=0, target=1, parent=-1, depth=0, tag="".
+	var n_idx: int = -1
+	for i in events.size():
+		var e = events[i]
+		if int(e.type) == BattleEventTypeScript.ATTACK_RESOLVED \
+				and int(e.source_entity) == 0 \
+				and int(e.target_entity) == 1 \
+				and int(e.parent_event_id) == -1 \
+				and int(e.chain_depth) == 0 \
+				and String(e.tag) == "":
+			n_idx = i
+			break
+	_assert(n_idx >= 0,
+		"lethal base: player normal root ATTACK_RESOLVED N not found")
+	if n_idx < 0:
+		return
+	var N = events[n_idx]
+	# 2) Find counter DMG D (parent=N.event_id, same root, depth+1).
+	var d_idx: int = -1
+	for i in events.size():
+		var e = events[i]
+		if int(e.type) == BattleEventTypeScript.DAMAGE_APPLIED \
+				and int(e.source_entity) == 0 \
+				and int(e.target_entity) == 1 \
+				and int(e.parent_event_id) == int(N.event_id) \
+				and int(e.root_action_id) == int(N.root_action_id) \
+				and int(e.chain_depth) == int(N.chain_depth) + 1:
+			d_idx = i
+			break
+	_assert(d_idx >= 0,
+		"lethal base: DAMAGE_APPLIED D (parent=N, depth+1) not found")
+	if d_idx < 0:
+		return
+	var D = events[d_idx]
+	# 3) Find lethal UNIT_DIED X (parent=D.event_id, same root, depth+1).
+	var x_idx: int = -1
+	for i in events.size():
+		var e = events[i]
+		if int(e.type) == BattleEventTypeScript.UNIT_DIED \
+				and int(e.target_entity) == 1 \
+				and int(e.parent_event_id) == int(D.event_id) \
+				and int(e.root_action_id) == int(D.root_action_id) \
+				and int(e.chain_depth) == int(D.chain_depth) + 1:
+			x_idx = i
+			break
+	_assert(x_idx >= 0,
+		"lethal base: UNIT_DIED X (parent=D, depth+1) not found")
+	if x_idx < 0:
+		return
+	# 4) Public trace order: index(N) < index(D) < index(X).
+	_assert(n_idx < d_idx,
+		"lethal base: index(N)=%d < index(D)=%d" % [n_idx, d_idx])
+	_assert(d_idx < x_idx,
+		"lethal base: index(D)=%d < index(X)=%d" % [d_idx, x_idx])
+	# 5) Enemy is actually dead.
+	_assert(sim.world().is_alive(1) == false,
+		"lethal base: enemy entity 1 is dead at battle end")
+	# 6) ZERO counter ATTACK_RESOLVED parented to N anywhere.
+	var counter_under_n: int = 0
 	for e in events:
 		if int(e.type) == BattleEventTypeScript.ATTACK_RESOLVED \
-				and int(e.target_entity) == 1:
-			enemy_atk += 1
-		if int(e.type) == BattleEventTypeScript.DAMAGE_APPLIED \
-				and int(e.target_entity) == 1:
-			enemy_dmg += 1
-		if int(e.type) == BattleEventTypeScript.UNIT_DIED \
-				and int(e.event_id) >= 0 \
-				and int(e.target_entity) == 1:
-			enemy_died += 1
-	_assert(enemy_atk >= 1,
-		"lethal base: at least one ATK_RESOLVED targeting enemy (got %d)"
-		% enemy_atk)
-	_assert(enemy_dmg >= 1,
-		"lethal base: at least one DAMAGE_APPLIED targeting enemy (got %d)"
-		% enemy_dmg)
-	_assert(enemy_died >= 1,
-		"lethal base: enemy UNIT_DIED observed (got %d)" % enemy_died)
-	# 2) NO counter events at all (defender dead before
-	# trigger discovery evaluates ownership).
+				and String(e.tag) == "counterattack" \
+				and int(e.parent_event_id) == int(N.event_id):
+			counter_under_n += 1
+	_assert(counter_under_n == 0,
+		"lethal base: ZERO counter ATTACK parented to N (got %d)"
+		% counter_under_n)
+	# 7) ZERO tagged Counterattack ATTACK_RESOLVED anywhere in
+	# the trace (defender dead before discovery).
 	var counter_atk: int = 0
 	var counter_dmg: int = 0
 	for e in events:
@@ -567,12 +611,20 @@ func _test_lethal_base_attack_no_counter() -> void:
 				and String(e.tag) == "counterattack":
 			counter_dmg += 1
 	_assert(counter_atk == 0,
-		"lethal base: ZERO counter ATTACK_RESOLVED (got %d)" % counter_atk)
+		"lethal base: ZERO counter ATTACK_RESOLVED anywhere (got %d)"
+		% counter_atk)
 	_assert(counter_dmg == 0,
-		"lethal base: ZERO counter DAMAGE_APPLIED (got %d)" % counter_dmg)
-	# 3) Enemy is actually dead.
-	_assert(sim.world().is_alive(1) == false,
-		"lethal base: enemy entity 1 is dead at battle end")
+		"lethal base: ZERO counter DAMAGE_APPLIED anywhere (got %d)"
+		% counter_dmg)
+	# 8) Sequential causal-trace auditor (parent-before-child).
+	# Reuse via instance call from rundomain_test (test-only
+	# helper).
+	var RundomainTest = preload(
+		"res://tests/battle_ecs/effects/b62b_counterattack_rundomain_test.gd")
+	var helper = RundomainTest.new()
+	var ok: bool = helper.audit_causal_trace(events)
+	_assert(ok,
+		"lethal base: sequential causal trace auditor passed")
 
 
 # ============================================================
@@ -600,66 +652,115 @@ func _test_lethal_counterattack_kills_attacker() -> void:
 	var events: Array = []
 	while not sim.is_finished():
 		events.append_array(sim.step_tick())
-	# 1) Player normal ATK + DMG present (tag=""), enemy
-	# counter ATK + DMG + UNIT_DIED present (tag="counterattack").
-	var normal_atk: int = 0
-	var normal_dmg: int = 0
-	var counter_atk: int = 0
-	var counter_dmg: int = 0
-	var counter_died: int = 0
-	for e in events:
-		if int(e.type) == BattleEventTypeScript.ATTACK_RESOLVED:
-			if String(e.tag) == "":
-				normal_atk += 1
-			elif String(e.tag) == "counterattack":
-				counter_atk += 1
-		if int(e.type) == BattleEventTypeScript.DAMAGE_APPLIED:
-			if String(e.tag) == "":
-				normal_dmg += 1
-			elif String(e.tag) == "counterattack":
-				counter_dmg += 1
+	# 1) Identify EXACT player normal root attack N:
+	# type=ATK, source=0, target=1, parent=-1, depth=0, tag="".
+	var n_idx: int = -1
+	for i in events.size():
+		var e = events[i]
+		if int(e.type) == BattleEventTypeScript.ATTACK_RESOLVED \
+				and int(e.source_entity) == 0 \
+				and int(e.target_entity) == 1 \
+				and int(e.parent_event_id) == -1 \
+				and int(e.chain_depth) == 0 \
+				and String(e.tag) == "":
+			n_idx = i
+			break
+	_assert(n_idx >= 0,
+		"lethal counter: player normal root ATTACK_RESOLVED N not found")
+	if n_idx < 0:
+		return
+	var N = events[n_idx]
+	# 2) Identify EXACT counter ATTACK_RESOLVED C:
+	# source=1, target=0, tag="counterattack", parent=N.event_id,
+	# root_action_id=N.root_action_id, depth=N.depth+1.
+	var c_idx: int = -1
+	for i in events.size():
+		var e = events[i]
+		if int(e.type) == BattleEventTypeScript.ATTACK_RESOLVED \
+				and int(e.source_entity) == 1 \
+				and int(e.target_entity) == 0 \
+				and String(e.tag) == "counterattack" \
+				and int(e.parent_event_id) == int(N.event_id) \
+				and int(e.root_action_id) == int(N.root_action_id) \
+				and int(e.chain_depth) == int(N.chain_depth) + 1:
+			c_idx = i
+			break
+	_assert(c_idx >= 0,
+		"lethal counter: counter ATTACK_RESOLVED C (parent=N) not found")
+	if c_idx < 0:
+		return
+	var C = events[c_idx]
+	# 3) Identify EXACT counter DAMAGE_APPLIED D:
+	# source=1, target=0, tag="counterattack", parent=C.event_id,
+	# root_action_id=C.root_action_id, depth=C.depth+1.
+	var d_idx: int = -1
+	for i in events.size():
+		var e = events[i]
+		if int(e.type) == BattleEventTypeScript.DAMAGE_APPLIED \
+				and int(e.source_entity) == 1 \
+				and int(e.target_entity) == 0 \
+				and String(e.tag) == "counterattack" \
+				and int(e.parent_event_id) == int(C.event_id) \
+				and int(e.root_action_id) == int(C.root_action_id) \
+				and int(e.chain_depth) == int(C.chain_depth) + 1:
+			d_idx = i
+			break
+	_assert(d_idx >= 0,
+		"lethal counter: counter DAMAGE_APPLIED D (parent=C) not found")
+	if d_idx < 0:
+		return
+	var D = events[d_idx]
+	# 4) Identify EXACT lethal counter UNIT_DIED X:
+	# target=0, tag="counterattack", parent=D.event_id,
+	# root_action_id=D.root_action_id, depth=D.depth+1.
+	var x_idx: int = -1
+	for i in events.size():
+		var e = events[i]
 		if int(e.type) == BattleEventTypeScript.UNIT_DIED \
-				and String(e.tag) == "counterattack":
-			counter_died += 1
-	_assert(normal_atk >= 1,
-		"lethal counter: normal ATK present (got %d)" % normal_atk)
-	_assert(normal_dmg >= 1,
-		"lethal counter: normal DMG present (got %d)" % normal_dmg)
-	_assert(counter_atk >= 1,
-		"lethal counter: counter ATK present (got %d)" % counter_atk)
-	_assert(counter_dmg >= 1,
-		"lethal counter: counter DMG present (got %d)" % counter_dmg)
-	_assert(counter_died >= 1,
-		"lethal counter: counter UNIT_DIED tagged counterattack (got %d)"
-		% counter_died)
-	# 2) Player (attacker) is dead at battle end.
+				and int(e.target_entity) == 0 \
+				and String(e.tag) == "counterattack" \
+				and int(e.parent_event_id) == int(D.event_id) \
+				and int(e.root_action_id) == int(D.root_action_id) \
+				and int(e.chain_depth) == int(D.chain_depth) + 1:
+			x_idx = i
+			break
+	_assert(x_idx >= 0,
+		"lethal counter: counter UNIT_DIED X (parent=D) not found")
+	if x_idx < 0:
+		return
+	# 5) Public trace order: index(N) < index(C) < index(D) < index(X).
+	_assert(n_idx < c_idx,
+		"lethal counter: index(N)=%d < index(C)=%d" % [n_idx, c_idx])
+	_assert(c_idx < d_idx,
+		"lethal counter: index(C)=%d < index(D)=%d" % [c_idx, d_idx])
+	_assert(d_idx < x_idx,
+		"lethal counter: index(D)=%d < index(X)=%d" % [d_idx, x_idx])
+	# 6) Player is dead.
 	_assert(sim.world().is_alive(0) == false,
 		"lethal counter: player entity 0 is dead")
-	# 3) No LATER root ATTACK_RESOLVED by the enemy AFTER the
-	# counterattack killed the player. natural_after_player
-	# becomes true once player is dead.
-	# Find the counter UNIT_DIED event's tick. Any enemy root
-	# ATK_RESOLVED with tick > that tick must NOT exist.
-	var counter_died_tick: int = -1
-	for e in events:
-		if int(e.type) == BattleEventTypeScript.UNIT_DIED \
-				and String(e.tag) == "counterattack":
-			counter_died_tick = int(e.tick)
-			break
-	_assert(counter_died_tick >= 0,
-		"lethal counter: counter UNIT_DIED tick recorded")
-	if counter_died_tick >= 0:
-		for e in events:
-			if int(e.type) == BattleEventTypeScript.ATTACK_RESOLVED \
-					and int(e.source_entity) == 1 \
-					and int(e.parent_event_id) == -1 \
-					and int(e.tick) > counter_died_tick:
-				_assert(false,
-					"lethal counter: enemy root ATK after counter UNIT_DIED "
-					+ "(tick=%d, eid=%d)" % [int(e.tick), int(e.event_id)])
-				return
-		_assert(true,
-			"lethal counter: enemy never scheduled another root ATK after counter UNIT_DIED")
+	# 7) Same-tick scheduler suppression: scan EVERY event
+	# AFTER death_index (x_idx). For every event with
+	# i > x_idx, require NOT a fresh enemy root ATK
+	# (source=1, parent=-1, depth=0, tag="").
+	var illegal_later_root: int = 0
+	for i in range(x_idx + 1, events.size()):
+		var e = events[i]
+		if int(e.type) == BattleEventTypeScript.ATTACK_RESOLVED \
+				and int(e.source_entity) == 1 \
+				and int(e.parent_event_id) == -1 \
+				and int(e.chain_depth) == 0 \
+				and String(e.tag) == "":
+			illegal_later_root += 1
+	_assert(illegal_later_root == 0,
+		"lethal counter: ZERO enemy root ATTACK_RESOLVED after death_index "
+		+ "%d (got %d)" % [x_idx, illegal_later_root])
+	# 8) Sequential causal-trace auditor (parent-before-child).
+	var RundomainTest = preload(
+		"res://tests/battle_ecs/effects/b62b_counterattack_rundomain_test.gd")
+	var helper = RundomainTest.new()
+	var ok: bool = helper.audit_causal_trace(events)
+	_assert(ok,
+		"lethal counter: sequential causal trace auditor passed")
 
 
 # ============================================================

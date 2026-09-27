@@ -52,6 +52,21 @@ func _assert(cond: bool, label: String) -> void:
 
 
 func _assert_causal_trace_integrity(events: Array) -> void:
+	if not audit_causal_trace(events):
+		return
+	# (audit_causal_trace already reports failures via local
+	# _assert; if it returns true, every assertion passed.)
+
+
+## Static / instance-callable version: returns true if the
+## trace passes the sequential causal audit. Used by other test
+## files (b62b_counterattack_adversarial_test.gd) to share this
+## auditor without duplicating logic. Failures are reported via
+## THIS file's _passed/_failed counters when called from the
+## rundomain test's own _initialize. When called from another
+## file, the caller must check the return value; failures
+## reported there are scoped to the local _assert.
+func audit_causal_trace(events: Array) -> bool:
 	# Sequential causal-trace auditor: parent MUST appear in
 	# the trace earlier than the child. Uses the same seen_by_id
 	# map iteratively as we walk the trace in order.
@@ -63,13 +78,15 @@ func _assert_causal_trace_integrity(events: Array) -> void:
 		if ids_so_far.has(id):
 			_assert(false,
 				"duplicate event_id %d in trace" % id)
-			return
+			return false
 		ids_so_far[id] = true
 		var pid: int = int(e.parent_event_id)
 		if pid == -1:
 			# Root: chain_depth must be 0.
-			_assert(int(e.chain_depth) == 0,
-				"root event id=%d chain_depth==0" % id)
+			if int(e.chain_depth) != 0:
+				_assert(false,
+					"root event id=%d chain_depth==0" % id)
+				return false
 		else:
 			# Parent MUST have been seen earlier in the trace.
 			if not seen_by_id.has(pid):
@@ -77,13 +94,18 @@ func _assert_causal_trace_integrity(events: Array) -> void:
 					"event id=%d parent_event_id=%d not seen earlier "
 					+ "(parent must come before child)"
 					% [id, pid])
-				return
+				return false
 			var p = seen_by_id[pid]
-			_assert(int(e.root_action_id) == int(p.root_action_id),
-				"event id=%d shares root with parent" % id)
-			_assert(int(e.chain_depth) == int(p.chain_depth) + 1,
-				"event id=%d chain_depth==parent+1" % id)
+			if int(e.root_action_id) != int(p.root_action_id):
+				_assert(false,
+					"event id=%d shares root with parent" % id)
+				return false
+			if int(e.chain_depth) != int(p.chain_depth) + 1:
+				_assert(false,
+					"event id=%d chain_depth==parent+1" % id)
+				return false
 		seen_by_id[id] = e
+	return true
 
 
 func _test_ownership_pipeline_proven_via_real_builder() -> void:
