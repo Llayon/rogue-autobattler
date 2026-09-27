@@ -15,6 +15,10 @@ const UnitDefScript = preload("res://core/data/unit_def.gd")
 const ReactionDefScript = preload("res://core/data/reaction_def.gd")
 const ReactionDefResolverScript = preload(
 	"res://core/battle_ecs/triggers/reaction_def_resolver.gd")
+const BattleEventTypeScript = preload(
+	"res://core/battle_ecs/battle_event_type.gd")
+const EffectKindScript = preload(
+	"res://core/battle_ecs/effects/effect_kind.gd")
 
 var _passed: int = 0
 var _failed: int = 0
@@ -28,6 +32,7 @@ func _initialize() -> void:
 	await _test_resolver_unknown_id()
 	await _test_resolver_wrong_script_is_rejected()
 	await _test_reactiondef_legacy_compatibility()
+	await _test_counterattack_phase3_only_trigger()
 	await _test_unitdef_has_reaction_ids_field()
 	print("\n=== B6.2a content + reaction def: %d pass / %d fail ===\n" % [_passed, _failed])
 	if _failed > 0:
@@ -174,7 +179,40 @@ func _test_reactiondef_legacy_compatibility() -> void:
 
 
 # ============================================================
-# 7) UnitDef has reaction_ids field.
+# 7) counterattack.tres is Phase-3-only: trigger=&""
+# ============================================================
+func _test_counterattack_phase3_only_trigger() -> void:
+	print("[B62A-CTR] counterattack_phase3_only_trigger")
+	var ctr = ReactionDefResolverScript.resolve(&"counterattack")
+	_assert(ctr != null,
+		"counterattack ReactionDef resolves")
+	if ctr == null:
+		return
+	_assert(String(ctr.id) == "counterattack",
+		"counterattack.id == counterattack (got '%s')" % String(ctr.id))
+	_assert(String(ctr.trigger) == "",
+		"counterattack.trigger == &\"\" (got '%s') — Phase-3-only"
+		% String(ctr.trigger))
+	_assert(int(ctr.event_type) == int(BattleEventTypeScript.ATTACK_RESOLVED),
+		"counterattack.event_type == ATTACK_RESOLVED (got %d)"
+		% int(ctr.event_type))
+	_assert(int(ctr.effect_kind) == int(EffectKindScript.PERFORM_ATTACK),
+		"counterattack.effect_kind == PERFORM_ATTACK (got %d)"
+		% int(ctr.effect_kind))
+	_assert(abs(float(ctr.trigger_chance) - 1.0) < 0.001,
+		"counterattack.trigger_chance ~= 1.0 (got %s)" % str(ctr.trigger_chance))
+	_assert(String(ctr.output_tag) == "counterattack",
+		"counterattack.output_tag == counterattack (got '%s')"
+		% String(ctr.output_tag))
+	var excluded = ctr.excluded_trigger_tags
+	_assert(excluded.size() == 1
+			and String(excluded[0]) == "counterattack",
+		"counterattack.excluded_trigger_tags contains exactly [&\"counterattack\"]"
+		+ " (got %s)" % str(excluded))
+
+
+# ============================================================
+# 8) UnitDef has reaction_ids field.
 # ============================================================
 func _test_unitdef_has_reaction_ids_field() -> void:
 	print("[B62A-UNIT] unitdef_has_reaction_ids_field")

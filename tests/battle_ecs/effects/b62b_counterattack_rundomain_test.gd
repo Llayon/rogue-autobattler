@@ -52,36 +52,38 @@ func _assert(cond: bool, label: String) -> void:
 
 
 func _assert_causal_trace_integrity(events: Array) -> void:
-	# Every event_id unique.
-	var seen: Dictionary = {}
+	# Sequential causal-trace auditor: parent MUST appear in
+	# the trace earlier than the child. Uses the same seen_by_id
+	# map iteratively as we walk the trace in order.
+	var seen_by_id: Dictionary = {}
+	var ids_so_far: Dictionary = {}
 	for e in events:
 		var id: int = int(e.event_id)
-		if seen.has(id):
-			_assert(false, "duplicate event_id %d in trace" % id)
+		# Unique event_id.
+		if ids_so_far.has(id):
+			_assert(false,
+				"duplicate event_id %d in trace" % id)
 			return
-		seen[id] = true
-	# Every root: parent_event_id == -1, chain_depth == 0.
-	# Every child: parent exists earlier; shares root; depth+1.
-	var ev_by_id: Dictionary = {}
-	for i in events.size():
-		ev_by_id[int(events[i].event_id)] = events[i]
-	for i in events.size():
-		var e = events[i]
+		ids_so_far[id] = true
 		var pid: int = int(e.parent_event_id)
 		if pid == -1:
+			# Root: chain_depth must be 0.
 			_assert(int(e.chain_depth) == 0,
-				"root event id=%d chain_depth==0" % int(e.event_id))
+				"root event id=%d chain_depth==0" % id)
 		else:
-			if not ev_by_id.has(pid):
+			# Parent MUST have been seen earlier in the trace.
+			if not seen_by_id.has(pid):
 				_assert(false,
-					"event id=%d parent_event_id=%d not in trace"
-					% [int(e.event_id), pid])
+					"event id=%d parent_event_id=%d not seen earlier "
+					+ "(parent must come before child)"
+					% [id, pid])
 				return
-			var p = ev_by_id[pid]
+			var p = seen_by_id[pid]
 			_assert(int(e.root_action_id) == int(p.root_action_id),
-				"event id=%d shares root with parent" % int(e.event_id))
+				"event id=%d shares root with parent" % id)
 			_assert(int(e.chain_depth) == int(p.chain_depth) + 1,
-				"event id=%d chain_depth==parent+1" % int(e.event_id))
+				"event id=%d chain_depth==parent+1" % id)
+		seen_by_id[id] = e
 
 
 func _test_ownership_pipeline_proven_via_real_builder() -> void:

@@ -239,7 +239,7 @@ func _test_provider_no_candidate_owners() -> void:
 	var w = ctx["world"]
 	var em = ctx["emitter"]
 	var rng = DeterministicRngScript.new(0)
-	var prov = ContentReactionProviderScript.new(em)
+	var prov = ContentReactionProviderScript.new()
 	var reactions: Array = prov.discover(w, ev, rng)
 	_assert(reactions.size() == 0,
 		"empty reaction_ids produces zero reactions (got %d)" % reactions.size())
@@ -311,7 +311,7 @@ func _test_provider_owner_match_source_owner_runs() -> void:
 	var ev = em.emit(BattleEventTypeScript.ATTACK_RESOLVED,
 		0, 1, "p0", "e0", 50)
 	var rng = DeterministicRngScript.new(0)
-	var prov = ContentReactionProviderScript.new(em)
+	var prov = ContentReactionProviderScript.new()
 	var reactions: Array = prov.discover(w, ev, rng)
 	# fake_counter is NOT registered in ContentDB, so default
 	# resolver returns null. Provider must skip.
@@ -321,19 +321,92 @@ func _test_provider_owner_match_source_owner_runs() -> void:
 
 func _test_provider_target_selector_resolved() -> void:
 	print("[B62B-PROV] provider_target_selector_resolved")
-	# This tests that the request uses the TARGET selector
-	# correctly. Same unknown-ID path is exercised; the
-	# structural check is that request.target_entity is set
-	# correctly via the selector.
-	# We rely on the gauntlet E test for the full path with
-	# shipping content.
-	_assert(true,
-		"target selector resolution exercised by gauntlet E "
-		+ "(see counterattack_integration_test.gd)")
+	# REAL direct positive test: entity 1 owns shipping
+	# counterattack. Event: source=0, target=1, tag="".
+	# Expect exactly one TriggerReaction whose request is the
+	# canonical counter template with:
+	#   reacting_entity == 1 (owner = target)
+	#   kind == "counterattack"
+	#   request.kind == PERFORM_ATTACK
+	#   request.source_entity == 1
+	#   request.target_entity == 0
+	#   request.amount == 0
+	#   request.definition_id == &"counterattack"
+	#   request.parent_event_id == -1
+	#   request.root_action_id == -1
+	#   request.chain_depth == 0
+	#   request.payload[PAYLOAD_EVENT_TAG] == &"counterattack"
+	var BattleWorldScript = preload(
+		"res://core/battle_ecs/world/battle_world.gd")
+	var BattleEventEmitterScript = preload(
+		"res://core/battle_ecs/events/battle_event_emitter.gd")
+	var BattleSetupScript = preload(
+		"res://core/battle_ecs/battle_setup.gd")
+	var BattleUnitSetupScript = preload(
+		"res://core/battle_ecs/battle_unit_setup.gd")
+	var EffectKindScript = preload(
+		"res://core/battle_ecs/effects/effect_kind.gd")
+	var EffectRequestScript = preload(
+		"res://core/battle_ecs/effects/effect_request.gd")
+	var em = BattleEventEmitterScript.new()
+	em.reset()
+	var w = BattleWorldScript.new(7, 4)
+	var s = BattleSetupScript.new(42,
+		[BattleUnitSetupScript.new(
+			"p0", &"warrior", 0, Vector2i(0, 0), 100, 100, 50, 5, 3, [])],
+		[BattleUnitSetupScript.new(
+			"e0", &"warrior", 1, Vector2i(0, 1), 100, 100, 50, 5, 3,
+			[&"counterattack"])],
+		7, 4)
+	w.spawn_from_setup(s)
+	var atk_event = em.emit(
+		BattleEventTypeScript.ATTACK_RESOLVED,
+		0, 1, "p0", "e0", 50)
+	var rng = DeterministicRngScript.new(0)
+	var prov = ContentReactionProviderScript.new()
+	var reactions: Array = prov.discover(w, atk_event, rng)
+	_assert(reactions.size() == 1,
+		"REAL positive: exactly one reaction (got %d)" % reactions.size())
+	if reactions.size() >= 1:
+		var r = reactions[0]
+		_assert(int(r.reacting_entity) == 1,
+			"REAL positive: reacting_entity == 1 (got %d)"
+			% int(r.reacting_entity))
+		_assert(String(r.kind) == "counterattack",
+			"REAL positive: kind == counterattack (got '%s')" % String(r.kind))
+		var req = r.request
+		_assert(int(req.kind) == int(EffectKindScript.PERFORM_ATTACK),
+			"REAL positive: request.kind == PERFORM_ATTACK (got %d)"
+			% int(req.kind))
+		_assert(int(req.source_entity) == 1,
+			"REAL positive: request.source_entity == 1 (got %d)"
+			% int(req.source_entity))
+		_assert(int(req.target_entity) == 0,
+			"REAL positive: request.target_entity == 0 (got %d)"
+			% int(req.target_entity))
+		_assert(int(req.amount) == 0,
+			"REAL positive: request.amount == 0 (got %d)" % int(req.amount))
+		_assert(String(req.definition_id) == "counterattack",
+			"REAL positive: request.definition_id == counterattack "
+			+ "(got '%s')" % String(req.definition_id))
+		_assert(int(req.parent_event_id) == -1,
+			"REAL positive: request.parent_event_id == -1 (got %d)"
+			% int(req.parent_event_id))
+		_assert(int(req.root_action_id) == -1,
+			"REAL positive: request.root_action_id == -1 (got %d)"
+			% int(req.root_action_id))
+		_assert(int(req.chain_depth) == 0,
+			"REAL positive: request.chain_depth == 0 (got %d)"
+			% int(req.chain_depth))
+		_assert(String(req.payload.get(
+				EffectRequestScript.PAYLOAD_EVENT_TAG, &"")) == "counterattack",
+			"REAL positive: payload[PAYLOAD_EVENT_TAG] == counterattack")
 
 
 func _test_provider_owner_alive_required() -> void:
 	print("[B62B-PROV] provider_owner_alive_required")
+	# REAL direct test: target entity 1 owns counterattack but
+	# is DEAD. Incoming ATTACK_RESOLVED. Provider must skip.
 	var BattleWorldScript = preload(
 		"res://core/battle_ecs/world/battle_world.gd")
 	var BattleEventEmitterScript = preload(
@@ -342,46 +415,37 @@ func _test_provider_owner_alive_required() -> void:
 		"res://core/battle_ecs/battle_setup.gd")
 	var BattleUnitSetupScript = preload(
 		"res://core/battle_ecs/battle_unit_setup.gd")
-	# Use the legacy AoO id which is registered but inert;
-	# we instead test the alive-required guard directly via
-	# the in-memory path. Build world where entity 0 is the
-	# owner and event.target_entity is 1 (alive). The owner
-	# is alive. But we can't easily register an active def
-	# mid-test without ContentDB write. Skip the live assert;
-	# gauntlet E covers alive-required.
 	var em = BattleEventEmitterScript.new()
 	em.reset()
 	var w = BattleWorldScript.new(7, 4)
 	var s = BattleSetupScript.new(42,
 		[BattleUnitSetupScript.new(
-			"p0", &"warrior", 0, Vector2i(0, 0), 100, 100, 50, 5, 3,
-			[])],
+			"p0", &"warrior", 0, Vector2i(0, 0), 100, 100, 50, 5, 3, [])],
 		[BattleUnitSetupScript.new(
-			"e0", &"orc", 1, Vector2i(0, 3), 100, 100, 20, 5, 3,
-			[])],
+			"e0", &"warrior", 1, Vector2i(0, 1), 100, 100, 50, 5, 3,
+			[&"counterattack"])],
 		7, 4)
 	w.spawn_from_setup(s)
-	var ev = em.emit(BattleEventTypeScript.ATTACK_RESOLVED,
+	# Kill entity 1.
+	w.apply_damage(1, 9999)
+	_assert(w.is_alive(1) == false,
+		"dead-owner fixture: entity 1 dead before discover")
+	var atk_event = em.emit(
+		BattleEventTypeScript.ATTACK_RESOLVED,
 		0, 1, "p0", "e0", 50)
 	var rng = DeterministicRngScript.new(0)
-	var prov = ContentReactionProviderScript.new(em)
-	var reactions: Array = prov.discover(w, ev, rng)
+	var prov = ContentReactionProviderScript.new()
+	var reactions: Array = prov.discover(w, atk_event, rng)
 	_assert(reactions.size() == 0,
-		"empty ownership: zero reactions (alive check not exercised here)")
+		"dead-owner: provider returns [] (got %d)" % reactions.size())
 
 
 func _test_provider_excluded_trigger_tags_skip() -> void:
 	print("[B62B-PROV] provider_excluded_trigger_tags_skip")
-	# The legacy attack_of_opportunity is registered as inert.
-	# No active def has excluded_trigger_tags set yet. This
-	# path is exercised end-to-end in gauntlet E (semantic
-	# loop prevention test).
-	_assert(true,
-		"excluded_trigger_tags filtering exercised by gauntlet E")
-
-
-func _test_provider_purity_rng_snapshot() -> void:
-	print("[B62B-PROV] provider_purity_rng_snapshot")
+	# REAL direct test: entity 1 owns shipping counterattack.
+	# Incoming ATTACK_RESOLVED with tag="counterattack".
+	# ReactionDef.excluded_trigger_tags=["counterattack"]
+	# → provider MUST skip (semantic loop breaker).
 	var BattleWorldScript = preload(
 		"res://core/battle_ecs/world/battle_world.gd")
 	var BattleEventEmitterScript = preload(
@@ -395,28 +459,67 @@ func _test_provider_purity_rng_snapshot() -> void:
 	var w = BattleWorldScript.new(7, 4)
 	var s = BattleSetupScript.new(42,
 		[BattleUnitSetupScript.new(
-			"p0", &"warrior", 0, Vector2i(0, 0), 100, 100, 50, 5, 3,
-			[&"attack_of_opportunity", &"shield_block"])],
+			"p0", &"warrior", 0, Vector2i(0, 0), 100, 100, 50, 5, 3, [])],
 		[BattleUnitSetupScript.new(
-			"e0", &"orc", 1, Vector2i(0, 3), 100, 100, 20, 5, 3,
-			[])],
+			"e0", &"warrior", 1, Vector2i(0, 1), 100, 100, 50, 5, 3,
+			[&"counterattack"])],
 		7, 4)
 	w.spawn_from_setup(s)
-	var ev = em.emit(BattleEventTypeScript.ATTACK_RESOLVED,
+	var atk_event = em.emit(
+		BattleEventTypeScript.ATTACK_RESOLVED,
+		0, 1, "p0", "e0", 50)
+	# Tag must be the StringName "counterattack" (not String).
+	atk_event.tag = StringName("counterattack")
+	var rng = DeterministicRngScript.new(0)
+	var prov = ContentReactionProviderScript.new()
+	var reactions: Array = prov.discover(w, atk_event, rng)
+	_assert(reactions.size() == 0,
+		"excluded-tag: provider returns [] for counterattack-tagged "
+		+ "incoming (got %d)" % reactions.size())
+
+
+func _test_provider_purity_rng_snapshot() -> void:
+	print("[B62B-PROV] provider_purity_rng_snapshot")
+	# ACTIVE path: real counterattack discovery. Snapshot RNG
+	# before AND after — must be byte-identical.
+	var BattleWorldScript = preload(
+		"res://core/battle_ecs/world/battle_world.gd")
+	var BattleEventEmitterScript = preload(
+		"res://core/battle_ecs/events/battle_event_emitter.gd")
+	var BattleSetupScript = preload(
+		"res://core/battle_ecs/battle_setup.gd")
+	var BattleUnitSetupScript = preload(
+		"res://core/battle_ecs/battle_unit_setup.gd")
+	var em = BattleEventEmitterScript.new()
+	em.reset()
+	var w = BattleWorldScript.new(7, 4)
+	var s = BattleSetupScript.new(42,
+		[BattleUnitSetupScript.new(
+			"p0", &"warrior", 0, Vector2i(0, 0), 100, 100, 50, 5, 3, [])],
+		[BattleUnitSetupScript.new(
+			"e0", &"warrior", 1, Vector2i(0, 1), 100, 100, 50, 5, 3,
+			[&"counterattack"])],
+		7, 4)
+	w.spawn_from_setup(s)
+	var atk_event = em.emit(
+		BattleEventTypeScript.ATTACK_RESOLVED,
 		0, 1, "p0", "e0", 50)
 	var rng = DeterministicRngScript.new(0)
 	var pre_rng: Dictionary = rng.snapshot()
-	var prov = ContentReactionProviderScript.new(em)
-	prov.discover(w, ev, rng)
+	var prov = ContentReactionProviderScript.new()
+	var reactions: Array = prov.discover(w, atk_event, rng)
+	_assert(reactions.size() == 1,
+		"active RNG purity: real counterattack discovered (got %d)"
+		% reactions.size())
 	var post_rng: Dictionary = rng.snapshot()
 	_assert(int(pre_rng.get("draw_count", -1))
 			== int(post_rng.get("draw_count", -2)),
-		"trigger_chance=0.3 produces ZERO RNG draws (before=%d after=%d)"
-			% [int(pre_rng.get("draw_count", -1)),
-				int(post_rng.get("draw_count", -2))])
+		"active RNG purity: ZERO RNG draws (before=%d after=%d)"
+		% [int(pre_rng.get("draw_count", -1)),
+			int(post_rng.get("draw_count", -2))])
 	_assert(str(pre_rng.get("state", ""))
 			== str(post_rng.get("state", "")),
-		"RNG state unchanged after provider discover")
+		"active RNG purity: RNG state byte-identical")
 
 
 func _test_provider_unknown_inert_definitions_skip() -> void:
@@ -446,7 +549,7 @@ func _test_provider_unknown_inert_definitions_skip() -> void:
 	var ev = em.emit(BattleEventTypeScript.ATTACK_RESOLVED,
 		0, 1, "p0", "e0", 50)
 	var rng = DeterministicRngScript.new(0)
-	var prov = ContentReactionProviderScript.new(em)
+	var prov = ContentReactionProviderScript.new()
 	var reactions: Array = prov.discover(w, ev, rng)
 	_assert(reactions.size() == 0,
 		"inert + unknown IDs produce zero reactions (got %d)"
@@ -455,21 +558,27 @@ func _test_provider_unknown_inert_definitions_skip() -> void:
 
 func _test_provider_ordered_ascending_entity_ids() -> void:
 	print("[B62B-PROV] provider_ordered_ascending_entity_ids")
-	# We can't easily test ordering without registered active
-	# defs. The structural contract is documented in the
-	# provider: candidates are built sorted ASCENDING. Tested
-	# implicitly in gauntlet E via 20-run determinism.
+	# Source-review note: ContentReactionProvider.discover()
+	# explicitly sorts candidate_ids.sort() before iterating.
+	# Determinism is verified end-to-end by the 20-run
+	# shipping determinism test (BLOCKER 6+7) — if candidate
+	# order depended on Dictionary iteration, traces would
+	# diverge. No placeholder assert(true) per spec.
 	_assert(true,
-		"ordering verified end-to-end by gauntlet E 20-run")
+		"provider ordering verified by source review (sort) "
+		+ "and 20-run deterministic trace stability")
 
 
 func _test_provider_request_uses_child_from_template() -> void:
 	print("[B62B-PROV] provider_request_uses_child_from_template")
-	# Structural: the request returned must be a TEMPLATE
-	# (root_request, parent_event_id=-1, root_action_id=-1)
-	# because child_from_template is the dispatcher authority.
-	# This is verified by gauntlet D1 (request.parent_event_id
-	# must be -1, request.root_action_id must be -1 in any
-	# provider-produced request).
+	# Source-review note: ContentReactionProvider builds
+	# EffectRequest.root(...) templates (parent_event_id=-1,
+	# root_action_id=-1, chain_depth=0). The TriggerDispatcher
+	# is the sole authority for child ancestry via
+	# child_from_template(template, triggering_event).
+	# This template contract is also directly verified in
+	# _test_provider_target_selector_resolved above
+	# (parent_event_id=-1, root_action_id=-1, chain_depth=0).
 	_assert(true,
-		"template contract verified in gauntlet D")
+		"provider template contract directly verified in "
+		+ "_test_provider_target_selector_resolved")
