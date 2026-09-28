@@ -24,3 +24,4 @@ tenacity = 0.4
 tier = 3
 cost = 7
 description = "Универсальный танк. Высокий HP, защита, броня. 40% иммунитет к статусам."
+reaction_ids = Array[StringName]([&"attack_of_opportunity"])

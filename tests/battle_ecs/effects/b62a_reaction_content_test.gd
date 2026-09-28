@@ -138,12 +138,14 @@ func _test_reactiondef_legacy_compatibility() -> void:
 	_assert(r1 != null, "attack_of_opportunity resource present")
 	_assert(r2 != null, "shield_block resource present")
 	if r1 != null:
-		# Phase-3 fields default to inert for legacy content
-		# that was authored before the Phase-3 schema was added.
-		_assert(int(r1.event_type) == -1,
-			"attack_of_opportunity event_type == -1 (Phase-3 inert)")
-		_assert(int(r1.effect_kind) == -1,
-			"attack_of_opportunity effect_kind == -1 (Phase-3 inert)")
+		# B6.3: attack_of_opportunity is now an ACTIVE Phase-3
+		# spatial reaction (owner_selector=OWNER_ENEMY_LEAVING_RANGE).
+		_assert(int(r1.event_type) == int(BattleEventTypeScript.UNIT_MOVE_STARTED),
+			"attack_of_opportunity event_type == UNIT_MOVE_STARTED (got %d)"
+			% int(r1.event_type))
+		_assert(int(r1.effect_kind) == int(EffectKindScript.PERFORM_ATTACK),
+			"attack_of_opportunity effect_kind == PERFORM_ATTACK (got %d)"
+			% int(r1.effect_kind))
 	if r2 != null:
 		_assert(int(r2.event_type) == -1,
 			"shield_block event_type == -1 (Phase-3 inert)")
@@ -151,16 +153,15 @@ func _test_reactiondef_legacy_compatibility() -> void:
 			"shield_block effect_kind == -1 (Phase-3 inert)")
 	# Legacy fields still present (no removal of legacy schema).
 	# Specific compatibility checks (not tautology):
-	# attack_of_opportunity.trigger is explicitly set to
-	# &"unit_move_start" in its .tres file (the legacy GameBus
-	# signal name for "this unit starts moving"); shield_block
-	# falls back to the default &"unit_attacked" because its
-	# .tres does not override trigger. shield_block.trigger_chance
-	# is authored as 0.3 (the canonical Shield Block chance).
+	# B6.3: shipping attack_of_opportunity.trigger is
+	# explicitly &"" (Phase-3-only) to prevent legacy GameBus
+	# path activation. shield_block retains its legacy default
+	# &"unit_attacked" because Shield Block is explicitly
+	# deferred and remains Phase-3 inert.
 	if r1 != null:
-		_assert(String(r1.trigger) == "unit_move_start",
-			"attack_of_opportunity.trigger == 'unit_move_start' "
-			+ "(got '%s')" % String(r1.trigger))
+		_assert(String(r1.trigger) == "",
+			"attack_of_opportunity.trigger == '' (Phase-3-only, "
+			+ "got '%s')" % String(r1.trigger))
 		_assert(int(r1.trigger_chance) >= 0.0,
 			"attack_of_opportunity.trigger_chance is non-negative")
 	if r2 != null:

@@ -6,6 +6,14 @@
 script = ExtResource("1_reactiondef")
 id = &"attack_of_opportunity"
 display_name = "Атака по возможности"
-description = "Когда враг выходит из соседней клетки, контратакует."
-trigger = &"unit_move_start"
+description = "Когда враг выходит из соседней клетки, атакует его на выходе."
+trigger = &""
+trigger_chance = 1.0
+event_type = 11
+effect_kind = 5
+owner_selector = 2
+target_selector = 0
+range_cells = 1
 melee_only = true
+output_tag = &"attack_of_opportunity"
+excluded_trigger_tags = Array[StringName]([&"attack_of_opportunity"])
