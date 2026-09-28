@@ -510,36 +510,114 @@ func _has_progressed(events: Array) -> bool:
 ## now reached only with target_id outside attack range; it
 ## emits UNIT_MOVED or returns []. PERFORM_ATTACK is not
 ## involved (spec: "Movement is scheduler responsibility").
+## B6.3: pre-move reaction window.
+##
+## Movement sequence:
+##   1. validate mover + target alive
+##   2. confirm target currently out of attack range
+##   3. src = current position
+##   4. dst = world.next_step_toward (PURE planner)
+##   5. if dst == src: return []
+##   6. emit ROOT UNIT_MOVE_STARTED
+##   7. dispatch reactions to UNIT_MOVE_STARTED using the SAME
+##      session / RNG / emitter / provider as the outer tick
+##   8. revalidate mover
+##   9. if mover dead or blocks_actions: CANCEL (no UNIT_MOVED)
+##  10. world.try_commit_move(...)
+##  11. if committed: emit UNIT_MOVED as CHILD of UNIT_MOVE_STARTED
+##  12. return [start, ...child_unity, ...committed_moved]
+##
+## The outer step_tick then sees the returned events and may
+## also dispatch reactions to them (e.g. children of
+## UNIT_MOVE_STARTED). The same tick session ensures
+## duplicate discovery is prevented by the seen-set.
 func _resolve_or_move(attacker_id: int, target_id: int) -> Array:
 	if not _world.is_alive(attacker_id) or not _world.is_alive(target_id):
 		return []
-	# Caller (_drive_team_action) only invokes this when the
-	# target is OUT OF RANGE. Defensive in-range check returns []
-	# to keep this helper MOVEMENT-ONLY. PERFORM_ATTACK
-	# itself rejects out-of-range cleanly.
 	if _world.in_attack_range(attacker_id, target_id):
 		return []
 	var src: Vector2i = _world.position_of(attacker_id)
-	var dst: Vector2i = _world.try_move_toward(attacker_id, target_id)
+	var dst: Vector2i = _world.next_step_toward(attacker_id, target_id)
 	if dst == src:
-		# No movement possible (target cell occupied or OOB).
-		# Emit no event — caller will detect no-progress and
-		# eventually force-finish.
 		return []
-	# B2.0: movement is its own root action. Use emitter.emit()
-	# (allocates a fresh root_action_id, parent=-1, depth=0,
-	# tick taken from the emitter).
-	var moved_event = _event_emitter.emit(
-		BattleEventTypeScript.UNIT_MOVED,
+	var src_run: String = String(
+		_world.source_run_unit_id_of(attacker_id))
+	var tgt_run: String = String(
+		_world.source_run_unit_id_of(target_id))
+	# 6. Emit ROOT UNIT_MOVE_STARTED (parent=-1, depth=0,
+	# fresh root_action_id from emitter).
+	var move_started = _event_emitter.emit(
+		BattleEventTypeScript.UNIT_MOVE_STARTED,
 		attacker_id,
 		target_id,
-		_world.source_run_unit_id_of(attacker_id),
-		_world.source_run_unit_id_of(target_id),
+		src_run,
+		tgt_run,
 		0,
 		"",
 		src,
 		dst)
-	return [moved_event]
+	if move_started == null:
+		return []
+	# Local sink for pre-move dispatch reactions. We keep
+	# this separate from the outer tick's `events` sink so
+	# outer redispatch sees the right parent events.
+	var pre_move_sink: Array = []
+	# 7. Dispatch reactions to UNIT_MOVE_STARTED using the SAME
+	# tick session. This may commit AoO events into
+	# pre_move_sink.
+	_trigger_dispatcher.process(
+		[move_started], _world, _rng, _event_emitter,
+		pre_move_sink, _trigger_provider, null,
+		_trigger_session)
+	# Public action trace: pre-move dispatch events are part
+	# of the public trace regardless of whether movement
+	# cancels. An AoO that killed the mover MUST still appear
+	# in the returned events.
+	var out: Array = [move_started]
+	for e in pre_move_sink:
+		out.append(e)
+	# 8-9. Revalidate mover after reaction dispatch.
+	var cancelled: bool = false
+	if not _world.is_alive(attacker_id):
+		cancelled = true
+	else:
+		var stat_query_script = load(
+			"res://core/battle_ecs/status/stat_query.gd")
+		if stat_query_script != null \
+				and bool(stat_query_script.blocks_actions(
+					_world, attacker_id)):
+			cancelled = true
+	if cancelled:
+		# Cancelled movement: UNIT_MOVE_STARTED + pre-move
+		# reaction events are still part of the public trace;
+		# only UNIT_MOVED is suppressed.
+		return out
+	# 10. Commit the planned move (validates expected_from).
+	if not _world.try_commit_move(attacker_id, src, dst):
+		# Destination became invalid between plan and commit
+		# (shouldn't normally happen since nothing else moves
+		# mid-tick, but be defensive).
+		return out
+	# 11. Emit UNIT_MOVED as CHILD of UNIT_MOVE_STARTED.
+	var moved_event = _event_emitter.emit_child(
+		BattleEventTypeScript.UNIT_MOVED,
+		int(move_started.event_id),
+		int(move_started.root_action_id),
+		int(move_started.chain_depth),
+		attacker_id,
+		target_id,
+		src_run,
+		tgt_run,
+		0,
+		"",
+		src,
+		dst)
+	if moved_event == null:
+		return out
+	# 12. Public events in emission order: start, pre-move
+	# reaction children, moved.
+	out.append(moved_event)
+	return out
 
 
 ## B6.1.1: removed the retired _compute_damage and

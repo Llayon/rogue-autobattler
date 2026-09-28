@@ -364,22 +364,67 @@ static func step_cell_toward(attacker_cell: Vector2i, target_cell: Vector2i) -> 
 ## traversable formations.
 ##
 ## Deterministic — same world state -> same result.
-func try_move_toward(entity_id: int, target_id: int) -> Vector2i:
+## PURE movement planner. Computes the next step cell toward
+## `target_id` for `entity_id` without mutating world position.
+## Same Y-then-X deterministic priority as legacy
+## try_move_toward. Returns current cell if no valid step
+## exists (boxed in or out of bounds).
+##
+## B6.3: split from try_move_toward so the pre-move reaction
+## window can plan first, dispatch reactions while the mover is
+## still at from_cell, then explicitly commit.
+func next_step_toward(entity_id: int, target_id: int) -> Vector2i:
 	if not is_alive(entity_id) or not is_alive(target_id):
 		return position_of(entity_id)
 	var src: Vector2i = position_of(entity_id)
 	var dst: Vector2i = position_of(target_id)
-	# Try primary candidate.
 	var primary: Vector2i = step_cell_toward(src, dst)
 	if _is_walkable(entity_id, primary):
-		_positions[entity_id] = primary
 		return primary
-	# HIGH 4: try secondary-axis candidate.
 	var secondary: Vector2i = _secondary_axis_step(src, dst, primary)
 	if _is_walkable(entity_id, secondary):
-		_positions[entity_id] = secondary
 		return secondary
 	return src
+
+
+## Explicit commit. Validates that the entity is alive, the
+## current canonical position matches expected_from, the
+## destination is in bounds, unoccupied, and distinct from the
+## current cell. On success: updates canonical position and
+## returns true. On any failure: no mutation, returns false.
+##
+## B6.3: lets the pre-move reaction window commit a planned move
+## only after AoO has resolved.
+func try_commit_move(entity_id: int,
+		expected_from: Vector2i,
+		destination: Vector2i) -> bool:
+	if not is_alive(entity_id):
+		return false
+	var current: Vector2i = position_of(entity_id)
+	if current != expected_from:
+		return false
+	if destination.x < 0 or destination.x >= grid_width \
+			or destination.y < 0 or destination.y >= grid_height:
+		return false
+	if destination == current:
+		return false
+	if not _is_walkable(entity_id, destination):
+		return false
+	_positions[entity_id] = destination
+	return true
+
+
+## Legacy mutating movement API. Implemented as
+## next_step_toward + try_commit_move so there is exactly ONE
+## movement geometry policy.
+func try_move_toward(entity_id: int, target_id: int) -> Vector2i:
+	var src: Vector2i = position_of(entity_id)
+	var dst: Vector2i = next_step_toward(entity_id, target_id)
+	if dst == src:
+		return src
+	if not try_commit_move(entity_id, src, dst):
+		return src
+	return dst
 
 
 ## True iff `cell` is in bounds AND unoccupied by any other

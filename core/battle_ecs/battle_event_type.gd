@@ -35,6 +35,17 @@ const STATUS_TICKED: int = 9
 # tag (status_id), amount = 0.
 const STATUS_EXPIRED: int = 10
 
+## Phase-3 B6.3 addition. Frozen at 11.
+## UNIT_MOVE_STARTED: logical movement INTENT event.
+## Emitted BEFORE BattleWorld mutates the mover's position so
+## spatial reactions (e.g. Attack of Opportunity) can fire while
+## the mover is still at from_cell. Carries from_cell/to_cell so
+## the spatial owner selector can compute "leaving range" vs
+## "entering range". If movement is cancelled (dead mover, blocks
+## actions, commit failure), no UNIT_MOVED is emitted and
+## UNIT_MOVE_STARTED stands alone as telemetry/intent.
+const UNIT_MOVE_STARTED: int = 11
+
 
 ## Returns a snapshot Array of all (name, value) pairs in
 ## declaration order. Used by tests to assert uniqueness and
@@ -52,4 +63,5 @@ static func all_entries() -> Array:
 		["STATUS_REMOVED", STATUS_REMOVED],
 		["STATUS_TICKED", STATUS_TICKED],
 		["STATUS_EXPIRED", STATUS_EXPIRED],
+		["UNIT_MOVE_STARTED", UNIT_MOVE_STARTED],
 	]
