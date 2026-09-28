@@ -17,8 +17,9 @@ class_name ReactionDef extends Resource
 # Шанс срабатывания (0.0-1.0).
 @export var trigger_chance: float = 1.0
 
-# Дополнительные фильтры (например, only melee).
-@export var melee_only: bool = false
+# Дополнительные фильтры (spatial owner selector — must be
+# explicitly enabled via ReactionDef.range_cells >= 1 for
+# OWNER_ENEMY_LEAVING_RANGE).
 @export var range_cells: int = 1
 
 # === Phase 3 / B6.2a / Reaction execution schema (additive).
@@ -44,6 +45,14 @@ class_name ReactionDef extends Resource
 ## whose perspective gates execution).
 const OWNER_EVENT_SOURCE: int = 0
 const OWNER_EVENT_TARGET: int = 1
+## B6.3: spatial owner selector. Valid only for movement-intent
+## events carrying from_cell and to_cell (e.g. UNIT_MOVE_STARTED).
+## Discovers candidates by enumerating alive entities whose
+## team differs from the mover and whose distance to the
+## mover's from_cell is within ReactionDef.range_cells while
+## distance to the planned to_cell is OUTSIDE that range (the
+## "leaving range" pattern).
+const OWNER_ENEMY_LEAVING_RANGE: int = 2
 
 ## Which entity becomes the EFFECT TARGET when the reaction
 ## fires.

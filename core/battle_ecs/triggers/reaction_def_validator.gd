@@ -51,15 +51,24 @@ static func validate_for_execution(p_def: Resource) -> Dictionary:
 		return {"ok": false,
 			"reason": "effect_kind=%d is not supported in B6.2b (only PERFORM_ATTACK)"
 				% int(p_def.effect_kind)}
-	# owner_selector must be OWNER_EVENT_SOURCE or OWNER_EVENT_TARGET.
+	# owner_selector must be OWNER_EVENT_SOURCE,
+	# OWNER_EVENT_TARGET, or OWNER_ENEMY_LEAVING_RANGE (B6.3).
 	var valid_owner: Array = [
 		int(ReactionDefScript.OWNER_EVENT_SOURCE),
 		int(ReactionDefScript.OWNER_EVENT_TARGET),
+		int(ReactionDefScript.OWNER_ENEMY_LEAVING_RANGE),
 	]
 	if not valid_owner.has(int(p_def.owner_selector)):
 		return {"ok": false,
-			"reason": "owner_selector=%d is invalid (must be OWNER_EVENT_SOURCE or OWNER_EVENT_TARGET)"
+			"reason": "owner_selector=%d is invalid (must be OWNER_EVENT_SOURCE, OWNER_EVENT_TARGET, or OWNER_ENEMY_LEAVING_RANGE)"
 				% int(p_def.owner_selector)}
+	# B6.3: spatial owner selector requires range_cells >= 1.
+	if int(p_def.owner_selector) == int(
+			ReactionDefScript.OWNER_ENEMY_LEAVING_RANGE):
+		if int(p_def.range_cells) < 1:
+			return {"ok": false,
+				"reason": "OWNER_ENEMY_LEAVING_RANGE requires range_cells >= 1 (got %d)"
+					% int(p_def.range_cells)}
 	# target_selector must be TARGET_EVENT_SOURCE,
 	# TARGET_EVENT_TARGET, or TARGET_OWNER.
 	var valid_target: Array = [
