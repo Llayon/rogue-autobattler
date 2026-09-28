@@ -72,6 +72,8 @@ func _test_event_type_registry_uniqueness_and_frozen_values() -> void:
 		"STATUS_REMOVED": 8,
 		"STATUS_TICKED": 9,
 		"STATUS_EXPIRED": 10,
+		# B6.3: pre-move window. Logical movement intent event.
+		"UNIT_MOVE_STARTED": 11,
 	}
 	for e in entries:
 		var name: String = String(e[0])
@@ -81,7 +83,7 @@ func _test_event_type_registry_uniqueness_and_frozen_values() -> void:
 			"frozen value %s == %d (got %d)" % [name, int(expected.get(name, -1)), v])
 		_assert(not values.has(v), "value %d unique (collision on %s)" % [v, name])
 		values[v] = true
-	_assert(values.size() == 11, "11 unique values total")
+	_assert(values.size() == 12, "12 unique values total")
 
 
 func _test_no_local_event_type_constants_in_phase3_effects() -> void:
@@ -135,12 +137,17 @@ func _test_emit_step_tick_carries_to_events() -> void:
 func _test_first_event_id_is_one() -> void:
 	print("[ID1] first_event_id_is_one")
 	# B2.1: first root event_id must be exactly 1 (not >= 1).
+	# B6.3: also include UNIT_MOVE_STARTED in the search since
+	# pre-move windows may emit a UNIT_MOVE_STARTED before any
+	# UNIT_MOVED or ATTACK_RESOLVED.
 	var sim = _make_sim()
 	sim.set_max_ticks(1)
 	var evs: Array = sim.run_until_done(1000)
 	var first: int = -1
 	for e in evs:
-		if int(e.type) == BattleEventTypeScript.UNIT_MOVED or int(e.type) == BattleEventTypeScript.ATTACK_RESOLVED:
+		if int(e.type) == BattleEventTypeScript.UNIT_MOVE_STARTED \
+				or int(e.type) == BattleEventTypeScript.UNIT_MOVED \
+				or int(e.type) == BattleEventTypeScript.ATTACK_RESOLVED:
 			first = int(e.event_id)
 			break
 	_assert(first == 1, "first root event_id == 1 (got %d)" % first)
@@ -213,16 +220,33 @@ func _test_movement_root_event() -> void:
 	sim.set_max_ticks(50)
 	var evs: Array = sim.run_until_done(1000)
 	var moves: Array = []
+	var starteds: Array = []
 	for e in evs:
 		if int(e.type) == BattleEventTypeScript.UNIT_MOVED:
 			moves.append(e)
+		if int(e.type) == BattleEventTypeScript.UNIT_MOVE_STARTED:
+			starteds.append(e)
 	if moves.is_empty():
 		_assert(false, "expected at least one UNIT_MOVED to verify ancestry")
 		return
 	var m = moves[0]
-	_assert(int(m.parent_event_id) == -1, "UNIT_MOVED parent_event_id == -1")
-	_assert(int(m.chain_depth) == 0, "UNIT_MOVED chain_depth == 0")
+	# B6.3: UNIT_MOVED is now a CHILD of UNIT_MOVE_STARTED,
+	# not the root movement event. The pre-move window
+	# introduced UNIT_MOVE_STARTED with parent_event_id == -1
+	# and UNIT_MOVED inherits from it.
+	_assert(int(m.parent_event_id) != -1,
+		"UNIT_MOVED parent_event_id != -1 (B6.3 child of UNIT_MOVE_STARTED, got %d)"
+		% int(m.parent_event_id))
+	_assert(int(m.chain_depth) == 1,
+		"UNIT_MOVED chain_depth == 1 (B6.3 child of root, got %d)"
+		% int(m.chain_depth))
 	_assert(int(m.root_action_id) > 0, "UNIT_MOVED root_action_id > 0")
+	if not starteds.is_empty():
+		var s = starteds[0]
+		_assert(int(s.parent_event_id) == -1, "UNIT_MOVE_STARTED parent=-1")
+		_assert(int(s.chain_depth) == 0, "UNIT_MOVE_STARTED chain_depth == 0")
+		_assert(int(m.parent_event_id) == int(s.event_id),
+			"UNIT_MOVED.parent == UNIT_MOVE_STARTED.event_id")
 
 
 func _test_unit_died_parent_is_damage_applied() -> void:
