@@ -212,6 +212,18 @@ func _react_spatial(p_world, p_event, ev_type: int, rid_str: StringName,
 			continue
 		if int(p_world.team_of(owner_id_int)) == mover_team:
 			continue
+		# B6.3 final closure: spatial reactions must only fire for
+		# entities that ACTUALLY OWN this reaction_id. The spatial
+		# scan enumerates all alive enemies by geometry; a candidate
+		# that does not own this reaction must be skipped even if it
+		# is otherwise spatially eligible.
+		var owner_owns: bool = false
+		for owned_id in p_world.reaction_ids_of(owner_id_int):
+			if StringName(String(owned_id)) == rid_str:
+				owner_owns = true
+				break
+		if not owner_owns:
+			continue
 		var owner_pos: Vector2i = p_world.position_of(owner_id_int)
 		var d_from: int = _manhattan(owner_pos, from_cell)
 		var d_to: int = _manhattan(owner_pos, to_cell)
