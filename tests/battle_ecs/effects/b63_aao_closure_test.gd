@@ -384,20 +384,23 @@ func _test_aoo_counter_coexistence_permanent() -> void:
 			"Counter coexistence: CD.root == C.root (== S.root)")
 		_assert(int(CD.chain_depth) == int(C.chain_depth) + 1,
 			"Counter coexistence: CD.depth = C.depth+1")
-	# Mover-survival check: M must be present, parent=S, root=S.root,
-	# depth=S.depth+1.
+	# Mover-survival is REQUIRED for this non-lethal fixture
+	# (mover HP 200, knight ATK 5, knight DEF 5; knight is the
+	# target of the Counterattack reaction). UNIT_MOVED MUST be
+	# present; missing it is a hard failure, not a soft skip.
 	var M = null
 	for e in events:
 		if int(e.type) == BattleEventTypeScript.UNIT_MOVED:
 			M = e
 			break
-	if M != null:
-		_assert(int(M.parent_event_id) == s_id,
-			"Counter coexistence: M.parent == S.event_id")
-		_assert(int(M.root_action_id) == s_root,
-			"Counter coexistence: M.root == S.root")
-		_assert(int(M.chain_depth) == int(S.chain_depth) + 1,
-			"Counter coexistence: M.depth = S.depth+1")
+	_assert(M != null,
+		"Counter coexistence: UNIT_MOVED required for non-lethal fixture")
+	_assert(int(M.parent_event_id) == s_id,
+		"Counter coexistence: M.parent == S.event_id")
+	_assert(int(M.root_action_id) == s_root,
+		"Counter coexistence: M.root == S.root")
+	_assert(int(M.chain_depth) == int(S.chain_depth) + 1,
+		"Counter coexistence: M.depth = S.depth+1")
 	var ids_seen: Dictionary = {}
 	var dup_found: bool = false
 	for e in events:
