@@ -6,11 +6,11 @@ extends "res://core/battle_ecs/triggers/trigger_provider.gd"
 ## MUST NOT mutate world, RNG, emitter, events, ReactionDef, or
 ## reaction ownership arrays.
 ##
-## B5 contract: discovery is RNG-PURE. In B6.2b an active
-## ReactionDef must declare trigger_chance=1.0; the validator
-## rejects anything else upstream. Therefore this provider does
-## not consult RNG for chance. If validation rejects a def
-## for any reason, this provider skips it deterministically.
+## B5 contract: discovery is RNG-PURE. B6.4a keeps the contract.
+## Provider copies ReactionDef.trigger_chance into
+## TriggerReaction.trigger_chance; admission itself happens
+## inside TriggerDispatcher. If validation rejects a def for
+## any reason, this provider skips it deterministically.
 ##
 ## B6.2b: no _emitter dependency. A TriggerProvider is a pure
 ## discovery layer; the emitter is owned by BattleSimulation
@@ -268,4 +268,8 @@ func _emit_reaction_template(p_world, rid_str: StringName, def: Resource,
 	tr.reacting_entity = int(owner_entity)
 	tr.kind = String(rid_str)
 	tr.request = template
+	# B6.4a: copy chance metadata from ReactionDef into the
+	# carrier. Provider stays RNG-pure: no randf(), no
+	# @GlobalScope.randf(), no RandomNumberGenerator.
+	tr.trigger_chance = float(def.trigger_chance)
 	reactions.append(tr)

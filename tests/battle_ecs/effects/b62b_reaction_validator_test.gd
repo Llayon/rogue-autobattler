@@ -41,8 +41,8 @@ func _initialize() -> void:
 	await _test_validator_rejects_non_perform_attack_kinds()
 	await _test_validator_rejects_invalid_owner_selector()
 	await _test_validator_rejects_invalid_target_selector()
-	await _test_validator_rejects_chance_below_one()
-	await _test_validator_rejects_chance_above_one()
+	await _test_validator_accepts_fractional_chance()
+	await _test_validator_rejects_chance_out_of_domain()
 	await _test_provider_no_candidate_owners()
 	await _test_provider_owner_match_source_owner_runs()
 	await _test_provider_target_selector_resolved()
@@ -178,24 +178,31 @@ func _test_validator_rejects_invalid_target_selector() -> void:
 			"target_selector=%d rejected" % int(s))
 
 
-func _test_validator_rejects_chance_below_one() -> void:
-	print("[B62B-VAL] validator_rejects_chance_below_one")
+# B6.4a: validator now accepts [0,1] inclusive; out-of-domain
+# is rejected. Existing B6.2b test rewritten to confirm the
+# inclusive acceptance of formerly-rejected fractional chances.
+func _test_validator_accepts_fractional_chance() -> void:
+	print("[B62B-VAL] validator_accepts_fractional_chance")
 	for c in [0.0, 0.3, 0.999]:
 		var d = _make_def()
 		d.trigger_chance = float(c)
 		var r: Dictionary = ReactionDefValidatorScript.validate_for_execution(d)
-		_assert(bool(r.get("ok", false)) == false,
-			"trigger_chance=%s rejected (must be 1.0 in B6.2b)" % str(c))
+		_assert(bool(r.get("ok", false)),
+			"trigger_chance=%s accepted in B6.4a (must be in [0,1])"
+			% str(c))
 
 
-func _test_validator_rejects_chance_above_one() -> void:
-	print("[B62B-VAL] validator_rejects_chance_above_one")
-	for c in [1.0001, 1.5, 2.0]:
+# B6.4a: chance domain is [0,1]. Anything below 0 or above 1
+# is rejected fail-closed. (B6.2b's "must be 1.0" restriction
+# is lifted; fractional chances now valid.)
+func _test_validator_rejects_chance_out_of_domain() -> void:
+	print("[B62B-VAL] validator_rejects_chance_out_of_domain")
+	for c in [-0.0001, -0.5, 1.0001, 1.5, 2.0]:
 		var d = _make_def()
 		d.trigger_chance = float(c)
 		var r: Dictionary = ReactionDefValidatorScript.validate_for_execution(d)
 		_assert(bool(r.get("ok", false)) == false,
-			"trigger_chance=%s rejected (>1.0 invalid)" % str(c))
+			"trigger_chance=%s rejected (out-of-domain)" % str(c))
 
 
 # ============================================================

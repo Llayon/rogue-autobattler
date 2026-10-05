@@ -234,6 +234,26 @@ func _enqueue(ev) -> void:
 # success or a REASON_* limit constant if the reaction was
 # rejected. AT COMMIT TIME: appends every emitted event to
 # BOTH result.events AND the queue.
+#
+# B6.4a chance admission. Gate order is normative:
+#   1. validate template presence (null check)
+#   2. build EffectRequest via child_from_template (may be null
+#      -> rejected with REASON_NONE, no budget change)
+#   3. check chain_depth limit (REASON_MAX_DEPTH)
+#   4. peek per-root budget (REASON_MAX_REACTIONS_PER_ROOT)
+#      SAFETY BOUNDS WIN BEFORE CHANCE: zero chance draws.
+#   5. validate trigger_chance metadata (fail-closed for
+#      NaN/+/-Inf or out-of-domain). REASON_NONE on invalid.
+#   6. chance gate:
+#        chance == 1.0 -> guaranteed admit, zero draws
+#        chance == 0.0 -> guaranteed miss, zero draws
+#        0 < chance < 1 -> exactly one randf() draw
+#                         hit iff roll < chance
+#   7. ONLY ON HIT:
+#        consume budget slot
+#        increment reactions_executed
+#        execute EffectExecutor
+#   8. publish committed events normally
 func _execute_reaction(
 		p_reaction,
 		p_triggering_event,
@@ -246,43 +266,60 @@ func _execute_reaction(
 		p_max_chain_depth: int,
 		p_max_reactions_per_root: int,
 		p_session = null) -> int:
-	# Per-root reaction budget (LOCAL to that root, but
-	# CUMULATIVE across this session if p_session is set).
+	# Per-root reaction budget PEEK (do not mutate until hit).
 	var root_id: int = int(p_triggering_event.root_action_id)
 	var used: int
 	if p_session != null:
 		used = int(p_session.used_budget_for(root_id))
 	else:
 		used = int(_reaction_budget.get(root_id, 0))
-	if used >= int(p_max_reactions_per_root):
-		return DispatchResultScript.REASON_MAX_REACTIONS_PER_ROOT
-	var new_used: int = used + 1
-	if p_session != null:
-		p_session._reaction_budget[root_id] = new_used
-	else:
-		_reaction_budget[root_id] = new_used
-
 	# Build EffectRequest from template.
 	var req = EffectRequestScript.child_from_template(
 		p_reaction.request,
 		p_triggering_event)
 	if req == null:
-		# Refund budget slot (no reaction executed).
-		if p_session != null:
-			p_session._reaction_budget[root_id] = used
-		else:
-			_reaction_budget[root_id] = used
+		# Malformed template. NO budget mutation. NO chance draw.
 		return DispatchResultScript.REASON_NONE
 
 	# Depth limit: REJECT BEFORE mutation.
 	if int(req.chain_depth) > int(p_max_chain_depth):
-		if p_session != null:
-			p_session._reaction_budget[root_id] = used
-		else:
-			_reaction_budget[root_id] = used
+		# NO budget mutation. NO chance draw.
 		return DispatchResultScript.REASON_MAX_DEPTH
 
-	# Mutations admissible; count the attempt.
+	# Per-root budget PEEK: reject BEFORE chance gate.
+	# Safety bounds win before chance.
+	if used >= int(p_max_reactions_per_root):
+		# NO budget mutation. NO chance draw.
+		return DispatchResultScript.REASON_MAX_REACTIONS_PER_ROOT
+
+	# B6.4a: validate trigger_chance metadata fail-closed.
+	# Reject NaN / +/-Inf / out-of-domain without RNG draw.
+	var chance: float = float(p_reaction.trigger_chance)
+	if is_nan(chance) or is_inf(chance) \
+			or chance < 0.0 or chance > 1.0:
+		# Invalid chance: skip silently. NO budget mutation.
+		# NO chance draw.
+		return DispatchResultScript.REASON_NONE
+
+	# B6.4a chance gate.
+	# chance == 1.0 -> guaranteed admit, ZERO draws.
+	# chance == 0.0 -> guaranteed miss, ZERO draws.
+	# 0 < chance < 1 -> exactly one randf() draw.
+	var hit: bool = false
+	if chance >= 1.0:
+		hit = true
+	elif chance <= 0.0:
+		hit = false
+	else:
+		var roll: float = float(p_rng.randf())
+		hit = roll < chance
+	if not hit:
+		# Chance miss. NO budget mutation. NO executor call.
+		# NO committed events. NOT truncation.
+		return DispatchResultScript.REASON_NONE
+
+	# ON HIT: consume budget slot, increment reactions_executed.
+	var new_used: int = used + 1
 	if p_session != null:
 		p_session._reaction_budget[root_id] = new_used
 	else:

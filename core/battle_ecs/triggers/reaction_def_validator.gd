@@ -10,10 +10,18 @@ extends RefCounted
 ## APPLY_STATUS, REMOVE_STATUS, MOVE) are explicitly rejected
 ## until those pipelines are designed.
 ##
-## B5 provider discovery remains RNG-pure. Therefore an active
-## ReactionDef must declare trigger_chance == 1.0. Anything else
-## is unsupported and rejected fail-closed (no RNG draws,
-## no reinterpretation).
+## Validates that the active Phase-3 ReactionDef satisfies the
+## domain for B6.4a chance admission. Other Phase-3 reaction
+## validation is unchanged. This validator does NOT consume RNG;
+## chance admission is performed later by TriggerDispatcher.
+##
+## B6.4a chance domain: 0 <= trigger_chance <= 1.
+## NaN and +/-INF are rejected fail-closed.
+##
+## B6.2b/B6.3 contract: provider is RNG-pure and remains so.
+## Chance admission is owned by the dispatcher, not the
+## provider. The provider copies ReactionDef.trigger_chance
+## into TriggerReaction.trigger_chance without consuming RNG.
 
 const BattleEventTypeScript = preload(
 	"res://core/battle_ecs/battle_event_type.gd")
@@ -80,11 +88,12 @@ static func validate_for_execution(p_def: Resource) -> Dictionary:
 		return {"ok": false,
 			"reason": "target_selector=%d is invalid (must be TARGET_EVENT_SOURCE, TARGET_EVENT_TARGET, or TARGET_OWNER)"
 				% int(p_def.target_selector)}
-	# trigger_chance must be exactly 1.0. RNG-based chance is
-	# intentionally not supported in B6.2b.
+	# B6.4a: trigger_chance must be in [0,1]. NaN and +/-INF
+	# rejected fail-closed.
 	var chance: float = float(p_def.trigger_chance)
-	if chance != 1.0:
+	if is_nan(chance) or is_inf(chance) \
+			or chance < 0.0 or chance > 1.0:
 		return {"ok": false,
-			"reason": "trigger_chance=%s is not supported in B6.2b (must be exactly 1.0)"
+			"reason": "trigger_chance=%s is not in [0,1] (B6.4a)"
 				% str(chance)}
 	return {"ok": true, "reason": ""}
