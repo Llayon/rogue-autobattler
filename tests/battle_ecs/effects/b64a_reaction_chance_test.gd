@@ -111,13 +111,24 @@ func _make_def() -> Resource:
 	return d
 
 
-# Synthetic provider that returns a fixed list of reactions.
-class _FixedListProvider extends RefCounted:
+# Synthetic provider that returns a fixed list of reactions
+# ONLY for a specific gating event (matched by event_id). All
+# other events (re-dispatched events emitted by the executor)
+# receive an empty reactions array. This guarantees natural
+# FIFO termination for normal success tests (chance=1, HIT,
+# multiple, 20-run) without relying on depth cap as a
+# termination mechanism. The depth cap is purely a safety
+# net; the test does NOT depend on it.
+class _GatedProvider extends RefCounted:
 	var reactions: Array
-	func _init(p_reactions: Array) -> void:
+	var gate_event_id: int
+	func _init(p_reactions: Array, p_gate_event_id: int) -> void:
 		reactions = p_reactions
-	func discover(_world, _event, _rng) -> Array:
-		return reactions
+		gate_event_id = int(p_gate_event_id)
+	func discover(_world, p_event, _rng) -> Array:
+		if int(p_event.event_id) == int(gate_event_id):
+			return reactions
+		return []
 
 
 # Synthetic TriggerReaction with the given def + chance.
@@ -296,7 +307,12 @@ func _test_chance_miss_is_zero_mutation_and_one_draw() -> void:
 	var d = _make_def()
 	d.trigger_chance = 0.0
 	d.output_tag = StringName("b64a_test")
-	var provider = _FixedListProvider.new([_build_synthetic_reaction(d)])
+	# chance=0.0 path: no executor call, no events emitted, no
+	# re-dispatch. Gate provider is unnecessary but applied for
+	# uniformity — no events are emitted, so the gate never
+	# matters.
+	var provider = _GatedProvider.new(
+		[_build_synthetic_reaction(d)], s_event.event_id)
 	var sink: Array = []
 	var limits = TriggerLimitsScript.new(1, 10000, 256)
 	var before = _rng_snapshot(sim)
@@ -346,7 +362,8 @@ func _test_chance_hit_executes_normally_and_one_draw() -> void:
 	var d = _make_def()
 	d.trigger_chance = 0.5
 	d.output_tag = StringName("b64a_test")
-	var provider = _FixedListProvider.new([_build_synthetic_reaction(d)])
+	var provider = _GatedProvider.new(
+		[_build_synthetic_reaction(d)], s_event.event_id)
 	var fresh_rng = DeterministicRngScript.new(int(seed_hit))
 	var sink: Array = []
 	var limits = TriggerLimitsScript.new(1, 10000, 256)
@@ -361,9 +378,10 @@ func _test_chance_hit_executes_normally_and_one_draw() -> void:
 	_assert(after_dc - before_dc == 1,
 		"chance=0.5 HIT: RNG draw_count increased by exactly 1")
 	_assert(after == after, "sanity: rng returns valid object")
-	# A HIT was admitted at depth=1; the re-dispatched event's
-	# child at depth=2 is rejected with REASON_MAX_DEPTH so the
-	# queue terminates after one HIT.
+	# A HIT was admitted at depth=1. The re-dispatched events
+	# from PerformAttackEffect get empty reactions from the
+	# gate provider (gated to s_event.event_id only), so the
+	# queue terminates naturally without re-dispatch.
 	_assert(int(dr.reactions_executed) == 1,
 		"chance=0.5 HIT: reactions_executed=1")
 	_assert(sink.size() >= 2,
@@ -375,10 +393,12 @@ func _test_chance_hit_executes_normally_and_one_draw() -> void:
 		"chance=0.5 HIT: first sink event ATTACK_RESOLVED")
 	_assert(String(first_sink.tag) == "b64a_test",
 		"chance=0.5 HIT: first sink event tag=b64a_test")
-	# trunchated is true because depth-limit REASON_MAX_DEPTH
-	# was recorded after the first HIT.
-	_assert(bool(dr.truncated),
-		"chance=0.5 HIT: truncated=true (depth cap)")
+	# Natural termination: gate provider returns empty for
+	# re-dispatched events. No depth-cap fallback.
+	_assert(not bool(dr.truncated),
+		"chance=0.5 HIT: truncated=false (natural termination)")
+	_assert(int(dr.reason) == 0,
+		"chance=0.5 HIT: reason=REASON_NONE")
 
 
 # ============================================================
@@ -387,9 +407,9 @@ func _test_chance_hit_executes_normally_and_one_draw() -> void:
 func _test_chance_one_is_zero_draws_and_guaranteed() -> void:
 	print("[B64A-T8] chance_one_zero_draws")
 	# Try multiple seeds; chance=1.0 must always admit zero draws.
-	# After chance gate admit (zero draws), re-dispatched events
-	# from PerformAttackEffect have depth=2 > max=1 so they are
-	# rejected with REASON_MAX_DEPTH, again WITHOUT a chance draw.
+	# Gate provider returns empty for re-dispatched events so
+	# natural termination is the design intent. The depth cap
+	# is purely a safety net.
 	for seed in [0, 1, 7, 42, 100, 999]:
 		var fixture = _make_sim_with_event(1.0)
 		var sim = fixture["sim"]
@@ -398,8 +418,8 @@ func _test_chance_one_is_zero_draws_and_guaranteed() -> void:
 		var d = _make_def()
 		d.trigger_chance = 1.0
 		d.output_tag = StringName("b64a_test")
-		var provider = _FixedListProvider.new(
-			[_build_synthetic_reaction(d)])
+		var provider = _GatedProvider.new(
+			[_build_synthetic_reaction(d)], s_event.event_id)
 		var fresh_rng = DeterministicRngScript.new(int(seed))
 		var sink: Array = []
 		var limits = TriggerLimitsScript.new(1, 10000, 256)
@@ -413,6 +433,14 @@ func _test_chance_one_is_zero_draws_and_guaranteed() -> void:
 			% int(seed))
 		_assert(int(dr.reactions_executed) == 1,
 			"chance=1.0: reactions_executed=1 (seed=%d)" % int(seed))
+		# Natural termination: gate provider returns empty for
+		# re-dispatched events, so the dispatcher's outer FIFO
+		# terminates with truncated=false.
+		_assert(not bool(dr.truncated),
+			"chance=1.0: truncated=false (natural termination, seed=%d)"
+			% int(seed))
+		_assert(int(dr.reason) == 0,
+			"chance=1.0: reason=REASON_NONE (seed=%d)" % int(seed))
 
 
 # ============================================================
@@ -428,8 +456,8 @@ func _test_chance_zero_is_zero_draws_and_guaranteed_miss() -> void:
 		var d = _make_def()
 		d.trigger_chance = 0.0
 		d.output_tag = StringName("b64a_test")
-		var provider = _FixedListProvider.new(
-			[_build_synthetic_reaction(d)])
+		var provider = _GatedProvider.new(
+			[_build_synthetic_reaction(d)], s_event.event_id)
 		var fresh_rng = DeterministicRngScript.new(int(seed))
 		var sink: Array = []
 		var limits = TriggerLimitsScript.new(1, 10000, 256)
@@ -458,7 +486,13 @@ func _test_depth_rejection_does_not_draw_chance_rng() -> void:
 	var d = _make_def()
 	d.trigger_chance = 0.5
 	d.output_tag = StringName("b64a_test")
-	var provider = _FixedListProvider.new([_build_synthetic_reaction(d)])
+	# Dedicated depth-rejection test: provider fires for the
+	# gating event so the child gets built and depth-checked.
+	# max_chain_depth=0 is the EXPECTED termination mechanism
+	# here (this is the only test where depth cap is the design
+	# intent per spec Step 3).
+	var provider = _GatedProvider.new(
+		[_build_synthetic_reaction(d)], s_event.event_id)
 	var sink: Array = []
 	# max_chain_depth=0 forces depth-reject before chance.
 	var limits = TriggerLimitsScript.new(0, 10000, 256)
@@ -485,6 +519,10 @@ func _test_root_budget_exhaustion_does_not_draw_chance_rng() -> void:
 	print("[B64A-T11] root_budget_before_chance")
 	# max_reactions_per_root=1 with chain_depth=1: first reaction
 	# admitted, second is rejected with REASON_MAX_REACTIONS_PER_ROOT.
+	var fixture = _make_sim_with_event(1.0)
+	var sim = fixture["sim"]
+	var em = fixture["em"]
+	var s_event = fixture["s_event"]
 	var d_good = _make_def()
 	d_good.trigger_chance = 1.0
 	d_good.output_tag = StringName("b64a_test_good")
@@ -492,13 +530,9 @@ func _test_root_budget_exhaustion_does_not_draw_chance_rng() -> void:
 	d_fractional.id = &"b64a_test_frac"
 	d_fractional.trigger_chance = 0.5
 	d_fractional.output_tag = StringName("b64a_test_frac")
-	var provider = _FixedListProvider.new([
+	var provider = _GatedProvider.new([
 		_build_synthetic_reaction(d_good),
-		_build_synthetic_reaction(d_fractional)])
-	var fixture = _make_sim_with_event(1.0)
-	var sim = fixture["sim"]
-	var em = fixture["em"]
-	var s_event = fixture["s_event"]
+		_build_synthetic_reaction(d_fractional)], s_event.event_id)
 	var sink: Array = []
 	var limits = TriggerLimitsScript.new(32, 10000, 1)
 	var rng = DeterministicRngScript.new(7)
@@ -521,16 +555,20 @@ func _test_root_budget_exhaustion_does_not_draw_chance_rng() -> void:
 # ============================================================
 func _test_malformed_template_does_not_draw_chance_rng() -> void:
 	print("[B64A-T12] malformed_template_before_chance")
+	var fixture = _make_sim_with_event(0.5)
+	var sim = fixture["sim"]
+	var em = fixture["em"]
+	var s_event = fixture["s_event"]
 	var tr = TriggerReactionScript.new()
 	tr.reacting_entity = 1
 	tr.kind = StringName("b64a_test")
 	tr.request = null
 	tr.trigger_chance = 0.5
-	var provider = _FixedListProvider.new([tr])
-	var fixture = _make_sim_with_event(0.5)
-	var sim = fixture["sim"]
-	var em = fixture["em"]
-	var s_event = fixture["s_event"]
+	# Dedicated malformed-template test: provider fires for the
+	# gating event so template=null is reached. No re-dispatch
+	# (template is null and the dispatcher skips it before any
+	# executor call).
+	var provider = _GatedProvider.new([tr], s_event.event_id)
 	var sink: Array = []
 	var limits = TriggerLimitsScript.new(1, 10000, 256)
 	var rng = DeterministicRngScript.new(7)
@@ -551,14 +589,17 @@ func _test_malformed_template_does_not_draw_chance_rng() -> void:
 func _test_invalid_chance_fail_closed_synthetic() -> void:
 	print("[B64A-T13] invalid_chance_fail_closed")
 	for bad_chance in [-0.0001, 1.0001, NAN, INF, -INF]:
-		var d = _make_def()
-		d.trigger_chance = float(bad_chance)
-		var tr = _build_synthetic_reaction(d)
-		var provider = _FixedListProvider.new([tr])
 		var fixture = _make_sim_with_event(0.5)
 		var sim = fixture["sim"]
 		var em = fixture["em"]
 		var s_event = fixture["s_event"]
+		var d = _make_def()
+		d.trigger_chance = float(bad_chance)
+		var tr = _build_synthetic_reaction(d)
+		# Dedicated invalid-chance test: provider fires for the
+		# gating event so chance metadata is validated. No events
+		# emitted (REASON_NONE skip before executor call).
+		var provider = _GatedProvider.new([tr], s_event.event_id)
 		var sink: Array = []
 		var limits = TriggerLimitsScript.new(1, 10000, 256)
 		var rng = DeterministicRngScript.new(7)
@@ -581,6 +622,10 @@ func _test_invalid_chance_fail_closed_synthetic() -> void:
 # ============================================================
 func _test_multiple_fractional_reactions_get_draws_in_order() -> void:
 	print("[B64A-T14] multiple_fractional_draws_in_order")
+	var fixture = _make_sim_with_event(0.5)
+	var sim = fixture["sim"]
+	var em = fixture["em"]
+	var s_event = fixture["s_event"]
 	# Three fractional chance=0.5 reactions.
 	var reactions: Array = []
 	for i in 3:
@@ -589,11 +634,7 @@ func _test_multiple_fractional_reactions_get_draws_in_order() -> void:
 		d.trigger_chance = 0.5
 		d.output_tag = StringName("b64a_test_r%d" % int(i))
 		reactions.append(_build_synthetic_reaction(d))
-	var provider = _FixedListProvider.new(reactions)
-	var fixture = _make_sim_with_event(0.5)
-	var sim = fixture["sim"]
-	var em = fixture["em"]
-	var s_event = fixture["s_event"]
+	var provider = _GatedProvider.new(reactions, s_event.event_id)
 	var sink: Array = []
 	var limits = TriggerLimitsScript.new(1, 10000, 256)
 	# Run A
@@ -617,6 +658,11 @@ func _test_multiple_fractional_reactions_get_draws_in_order() -> void:
 		"same seed: same reactions_executed vector")
 	_assert(sink_b.size() == sink.size(),
 		"same seed: same sink event count")
+	# Natural termination for multi-reaction test.
+	_assert(not bool(dr_a.truncated) and not bool(dr_b.truncated),
+		"multi: truncated=false (natural termination)")
+	_assert(int(dr_a.reason) == 0 and int(dr_b.reason) == 0,
+		"multi: reason=REASON_NONE")
 	var snap_a = _rng_snapshot(sim)
 	var snap_b = _rng_snapshot(sim)
 	_assert(snap_a == snap_b,
@@ -642,21 +688,26 @@ func _test_20_run_fractional_chance_determinism() -> void:
 			[mover], [knight], 7, 4)
 		var sim = BattleSimulationScript.new()
 		sim.initialize(setup)
-		var d = _make_def()
-		d.trigger_chance = 0.5
-		d.output_tag = StringName("b64a_test")
-		var provider = _FixedListProvider.new(
-			[_build_synthetic_reaction(d)])
 		var em = sim._event_emitter
 		var s_event = em.emit(
 			BattleEventTypeScript.ATTACK_RESOLVED,
 			0, 1, "p0", "e0", 0, "",
 			Vector2i(1, 1), Vector2i(1, 2))
+		var d = _make_def()
+		d.trigger_chance = 0.5
+		d.output_tag = StringName("b64a_test")
+		var provider = _GatedProvider.new(
+			[_build_synthetic_reaction(d)], s_event.event_id)
 		var sink: Array = []
 		var limits = TriggerLimitsScript.new(1, 10000, 256)
 		var dr = sim._trigger_dispatcher.process(
 			[s_event], sim.world(), sim._rng, em, sink,
 			provider, limits, sim._trigger_session)
+		# Natural termination per run.
+		_assert(not bool(dr.truncated),
+			"run %d: truncated=false (natural termination)" % i)
+		_assert(int(dr.reason) == 0,
+			"run %d: reason=REASON_NONE" % i)
 		var world_state: Dictionary = {
 			"0_alive": bool(sim.world().is_alive(0)),
 			"0_hp": int(sim.world().current_hp_of(0)),
