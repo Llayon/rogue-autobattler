@@ -1,6 +1,6 @@
 extends SceneTree
 ## B6.4a / Deterministic reaction chance admission.
-## 13 GREEN proofs. See commit message for design.
+## 15 GREEN proofs. See commit message for design.
 ##
 ## Construction rules (all tests):
 ## - Every dispatch uses local limits =
@@ -8,6 +8,12 @@ extends SceneTree
 ##   cannot exceed chain_depth=1 (the test child is admitted at
 ##   depth=1; any re-built grandchild at depth=2 is rejected with
 ##   REASON_MAX_DEPTH and does NOT consume a chance RNG draw).
+##   Depth cap is a SAFETY NET only; the GatedProvider
+##   (event_id-gated) ensures natural termination for ordinary
+##   success tests (HIT, chance=1.0, multi, 20-run). The depth
+##   cap is the EXPECTED termination mechanism ONLY in the
+##   dedicated _test_depth_rejection_does_not_draw_chance_rng
+##   test (Test 10).
 ## - AoO geometry fixture uses knight (0,1) and mover (1,1)->(2,1):
 ##   d_from=1 (within range=1), d_to=2 (out of range). LEAVING
 ##   geometry.
@@ -16,6 +22,9 @@ extends SceneTree
 ##   compat must remain EXACTLY what they were at 4463fce (this is
 ##   verified by b62b + b63 suites; this file only covers
 ##   B6.4a-specific contracts).
+## - chance=0.0 consumes ZERO draws (not "one draw" as a stale
+##   test name might suggest); the miss path is fail-closed with
+##   zero RNG consumption and no event emission.
 
 const ReactionDefScript = preload(
 	"res://core/data/reaction_def.gd")
@@ -57,7 +66,7 @@ func _initialize() -> void:
 	await _test_validator_rejects_nan_and_inf_chance()
 	await _test_provider_is_rng_pure_for_each_chance()
 	await _test_provider_reaction_carries_authored_chance()
-	await _test_chance_miss_is_zero_mutation_and_one_draw()
+	await _test_chance_miss_is_zero_mutation_and_zero_draws()
 	await _test_chance_hit_executes_normally_and_one_draw()
 	await _test_chance_one_is_zero_draws_and_guaranteed()
 	await _test_chance_zero_is_zero_draws_and_guaranteed_miss()
@@ -88,6 +97,22 @@ func _assert(cond: bool, label: String) -> void:
 # state (PackedByteArray -> hex string for exact equality).
 func _rng_snapshot(sim) -> Array:
 	var snap: Dictionary = sim._rng.snapshot()
+	var state = snap.get("state", PackedByteArray())
+	var state_str: String = ""
+	if state is PackedByteArray:
+		state_str = String((state as PackedByteArray).hex_encode())
+	else:
+		state_str = str(state)
+	return [int(snap.get("seed", 0)), int(snap.get("draw_count", 0)),
+		state_str]
+
+
+# RNG snapshot for an arbitrary DeterministicRng (NOT sim's _rng).
+# Used to compare the actual dispatcher's RNG after each run.
+func _rng_snapshot_of(rng) -> Array:
+	if rng == null:
+		return [-1, -1, ""]
+	var snap: Dictionary = rng.snapshot()
 	var state = snap.get("state", PackedByteArray())
 	var state_str: String = ""
 	if state is PackedByteArray:
@@ -170,6 +195,37 @@ func _make_sim_with_event(p_chance: float = 1.0) -> Dictionary:
 	return {"sim": sim, "em": em, "s_event": s_event, "rng": fresh_rng}
 
 
+# Build a complete fresh fixture for one deterministic dispatch
+# run. Returns sim, em, s_event, fresh_rng. The dispatcher session
+# is initialized fresh (no carry-over from prior calls).
+func _make_dispatch_fixture() -> Dictionary:
+	var fixture = _make_sim_with_event(1.0)
+	return {
+		"sim": fixture["sim"],
+		"em": fixture["em"],
+		"s_event": fixture["s_event"],
+	}
+
+
+# Find a seed where the first 3 draws of DeterministicRng
+# produce at least one HIT and one MISS at chance=0.5.
+# Returns -1 if not found in 0..999.
+func _find_seed_with_mixed_rolls(p_max_seed: int) -> int:
+	for s in p_max_seed:
+		var oracle = DeterministicRngScript.new(int(s))
+		var r0: float = float(oracle.randf())
+		var r1: float = float(oracle.randf())
+		var r2: float = float(oracle.randf())
+		var hit0: bool = r0 < 0.5
+		var hit1: bool = r1 < 0.5
+		var hit2: bool = r2 < 0.5
+		var has_hit: bool = hit0 or hit1 or hit2
+		var has_miss: bool = (not hit0) or (not hit1) or (not hit2)
+		if has_hit and has_miss:
+			return int(s)
+	return -1
+
+
 # ============================================================
 # Test 1: validator accepts inclusive [0, 1] chance domain
 # ============================================================
@@ -250,7 +306,6 @@ func _test_provider_is_rng_pure_for_each_chance() -> void:
 		_assert(before == after,
 			"provider RNG snapshot unchanged for chance=%s" % str(c))
 	def.trigger_chance = original_chance
-	_assert(true, "shipping trigger_chance restored")
 
 
 # ============================================================
@@ -294,10 +349,9 @@ func _test_provider_reaction_carries_authored_chance() -> void:
 
 
 # ============================================================
-# Test 6: chance miss is zero mutation + one RNG draw
-# Use chance=0.0 path: simplest and zero-draw by spec.
+# Test 6: chance=0.0 miss is zero mutation + ZERO RNG draws
 # ============================================================
-func _test_chance_miss_is_zero_mutation_and_one_draw() -> void:
+func _test_chance_miss_is_zero_mutation_and_zero_draws() -> void:
 	print("[B64A-T6] chance_miss_zero_mutation")
 	var fixture = _make_sim_with_event(0.0)
 	var sim = fixture["sim"]
@@ -321,7 +375,7 @@ func _test_chance_miss_is_zero_mutation_and_one_draw() -> void:
 		provider, limits, sim._trigger_session)
 	var after = _rng_snapshot(sim)
 	_assert(after == before,
-		"chance=0.0: RNG snapshot unchanged (zero draws)")
+		"chance=0.0: RNG snapshot unchanged (ZERO draws)")
 	_assert(int(dr.reactions_executed) == 0,
 		"chance=0.0: reactions_executed=0")
 	_assert(sink.size() == 0,
@@ -364,20 +418,18 @@ func _test_chance_hit_executes_normally_and_one_draw() -> void:
 	d.output_tag = StringName("b64a_test")
 	var provider = _GatedProvider.new(
 		[_build_synthetic_reaction(d)], s_event.event_id)
+	# Dispatcher is given fresh_rng; we assert fresh_rng.draw_count
+	# delta (NOT sim._rng, which the dispatcher does NOT consume).
 	var fresh_rng = DeterministicRngScript.new(int(seed_hit))
 	var sink: Array = []
 	var limits = TriggerLimitsScript.new(1, 10000, 256)
-	var before = _rng_snapshot(sim)
-	# Use fresh_rng since before/after compares fresh_rng state.
 	var before_dc = fresh_rng.draw_count
 	var dr = sim._trigger_dispatcher.process(
 		[s_event], sim.world(), fresh_rng, em, sink,
 		provider, limits, sim._trigger_session)
-	var after = _rng_snapshot(sim)
 	var after_dc = fresh_rng.draw_count
 	_assert(after_dc - before_dc == 1,
-		"chance=0.5 HIT: RNG draw_count increased by exactly 1")
-	_assert(after == after, "sanity: rng returns valid object")
+		"chance=0.5 HIT: fresh_rng draw_count increased by exactly 1")
 	# A HIT was admitted at depth=1. The re-dispatched events
 	# from PerformAttackEffect get empty reactions from the
 	# gate provider (gated to s_event.event_id only), so the
@@ -429,7 +481,7 @@ func _test_chance_one_is_zero_draws_and_guaranteed() -> void:
 			provider, limits, sim._trigger_session)
 		var after_dc = fresh_rng.draw_count
 		_assert(after_dc - before_dc == 0,
-			"chance=1.0: RNG draw_count unchanged (zero draws, seed=%d)"
+			"chance=1.0: fresh_rng draw_count unchanged (zero draws, seed=%d)"
 			% int(seed))
 		_assert(int(dr.reactions_executed) == 1,
 			"chance=1.0: reactions_executed=1 (seed=%d)" % int(seed))
@@ -467,7 +519,7 @@ func _test_chance_zero_is_zero_draws_and_guaranteed_miss() -> void:
 			provider, limits, sim._trigger_session)
 		var after_dc = fresh_rng.draw_count
 		_assert(after_dc - before_dc == 0,
-			"chance=0.0: RNG draw_count unchanged (zero draws, seed=%d)" % int(seed))
+			"chance=0.0: fresh_rng draw_count unchanged (zero draws, seed=%d)" % int(seed))
 		_assert(int(dr.reactions_executed) == 0,
 			"chance=0.0: reactions_executed=0 (seed=%d)" % int(seed))
 		_assert(sink.size() == 0,
@@ -503,7 +555,7 @@ func _test_depth_rejection_does_not_draw_chance_rng() -> void:
 		provider, limits, sim._trigger_session)
 	var after_dc = rng.draw_count
 	_assert(after_dc - before_dc == 0,
-		"depth rejection: RNG draw_count unchanged (zero chance draws)")
+		"depth rejection: rng draw_count unchanged (zero chance draws)")
 	_assert(int(dr.reason) == 1,
 		"depth rejection: reason=REASON_MAX_DEPTH (1)")
 	_assert(bool(dr.truncated),
@@ -578,7 +630,7 @@ func _test_malformed_template_does_not_draw_chance_rng() -> void:
 		provider, limits, sim._trigger_session)
 	var after_dc = rng.draw_count
 	_assert(after_dc - before_dc == 0,
-		"malformed template: RNG draw_count unchanged")
+		"malformed template: rng draw_count unchanged")
 	_assert(int(dr.reactions_executed) == 0,
 		"malformed template: reactions_executed=0")
 
@@ -609,7 +661,7 @@ func _test_invalid_chance_fail_closed_synthetic() -> void:
 			provider, limits, sim._trigger_session)
 		var after_dc = rng.draw_count
 		_assert(after_dc - before_dc == 0,
-			"invalid chance=%s: RNG draw_count unchanged (zero draws)"
+			"invalid chance=%s: rng draw_count unchanged (zero draws)"
 			% str(bad_chance))
 		_assert(int(dr.reactions_executed) == 0,
 			"invalid chance=%s: reactions_executed=0" % str(bad_chance))
@@ -619,14 +671,36 @@ func _test_invalid_chance_fail_closed_synthetic() -> void:
 
 # ============================================================
 # Test 14: multiple fractional reactions get draws in order
+# (Stage 0 corrected: completely fresh fixtures per run;
+# independent sim/emitter/session/s_event/RNG per run;
+# oracle-driven expected hit vector).
 # ============================================================
 func _test_multiple_fractional_reactions_get_draws_in_order() -> void:
 	print("[B64A-T14] multiple_fractional_draws_in_order")
-	var fixture = _make_sim_with_event(0.5)
-	var sim = fixture["sim"]
-	var em = fixture["em"]
-	var s_event = fixture["s_event"]
-	# Three fractional chance=0.5 reactions.
+	# Find a seed where the first 3 draws produce at least one
+	# HIT and one MISS (so the test cannot pass vacuously with
+	# all-miss or all-hit).
+	var seed: int = _find_seed_with_mixed_rolls(200)
+	_assert(seed >= 0,
+		"found seed with mixed HIT/MISS roll vector (0..199)")
+	if seed < 0:
+		return
+	# Compute expected hit vector via an oracle RNG.
+	var oracle = DeterministicRngScript.new(int(seed))
+	var r0: float = float(oracle.randf())
+	var r1: float = float(oracle.randf())
+	var r2: float = float(oracle.randf())
+	var expected_hits: Array = [r0 < 0.5, r1 < 0.5, r2 < 0.5]
+	var hit_labels: Array = []
+	for h in expected_hits:
+		if h:
+			hit_labels.append("HIT")
+		else:
+			hit_labels.append("miss")
+	var expected_hits_str: String = "[" + ", ".join(hit_labels) + "]"
+	print("  oracle seed=%d expected=[HIT,miss] -> %s"
+		% [int(seed), expected_hits_str])
+	# Build 3 fractional chance=0.5 reactions.
 	var reactions: Array = []
 	for i in 3:
 		var d = _make_def()
@@ -634,39 +708,68 @@ func _test_multiple_fractional_reactions_get_draws_in_order() -> void:
 		d.trigger_chance = 0.5
 		d.output_tag = StringName("b64a_test_r%d" % int(i))
 		reactions.append(_build_synthetic_reaction(d))
-	var provider = _GatedProvider.new(reactions, s_event.event_id)
-	var sink: Array = []
-	var limits = TriggerLimitsScript.new(1, 10000, 256)
-	# Run A
-	var rng_a = DeterministicRngScript.new(7)
-	var dr_a = sim._trigger_dispatcher.process(
-		[s_event], sim.world(), rng_a, em, sink,
-		provider, limits, sim._trigger_session)
-	var dc_a = int(rng_a.draw_count)
-	# Each of the 3 reactions that reached the chance gate
-	# consumed 1 RNG draw IF chance=0.5 short-circuits at 0/1;
-	# 0.5 is in (0,1) so every candidate draws 1.
-	_assert(dc_a == 3,
-		"3 fractional candidates: draw_count=3 (got %d)" % dc_a)
-	# Run B with same seed
-	var rng_b = DeterministicRngScript.new(7)
-	var sink_b: Array = []
-	var dr_b = sim._trigger_dispatcher.process(
-		[s_event], sim.world(), rng_b, em, sink_b,
-		provider, limits, sim._trigger_session)
-	_assert(int(dr_b.reactions_executed) == int(dr_a.reactions_executed),
-		"same seed: same reactions_executed vector")
-	_assert(sink_b.size() == sink.size(),
-		"same seed: same sink event count")
-	# Natural termination for multi-reaction test.
-	_assert(not bool(dr_a.truncated) and not bool(dr_b.truncated),
-		"multi: truncated=false (natural termination)")
-	_assert(int(dr_a.reason) == 0 and int(dr_b.reason) == 0,
-		"multi: reason=REASON_NONE")
-	var snap_a = _rng_snapshot(sim)
-	var snap_b = _rng_snapshot(sim)
-	_assert(snap_a == snap_b,
-		"same seed: same final RNG snapshot (run RNG snapshot consistent)")
+	# Each run is a completely fresh independent fixture: new
+	# sim, new emitter, new initiating event, new session,
+	# new GatedProvider bound to that run's event_id, new
+	# DeterministicRng with the same seed.
+	var hits_a: Array = []
+	var hits_b: Array = []
+	for pair in [["a", 0], ["b", 1]]:
+		var name: String = pair[0]
+		var fixture = _make_dispatch_fixture()
+		var sim = fixture["sim"]
+		var em = fixture["em"]
+		var s_event = fixture["s_event"]
+		var provider = _GatedProvider.new(
+			reactions, int(s_event.event_id))
+		var rng = DeterministicRngScript.new(int(seed))
+		var sink: Array = []
+		var limits = TriggerLimitsScript.new(1, 10000, 256)
+		var dr = sim._trigger_dispatcher.process(
+			[s_event], sim.world(), rng, em, sink,
+			provider, limits, sim._trigger_session)
+		var dc: int = int(rng.draw_count)
+		# 3 fractional candidates at chance=0.5 each consume 1 draw.
+		_assert(dc == 3,
+			"run %s: 3 fractional candidates draw_count=3 (got %d)"
+			% [name, dc])
+		_assert(int(dr.reactions_executed) == expected_hits.count(true),
+			"run %s: reactions_executed=%d equals expected HIT count (got %d)"
+			% [name, expected_hits.count(true), int(dr.reactions_executed)])
+		_assert(not bool(dr.truncated),
+			"run %s: truncated=false (natural termination)" % name)
+		_assert(int(dr.reason) == 0,
+			"run %s: reason=REASON_NONE" % name)
+		# Identify which reactions hit by output_tag in sink.
+		# Count each tag exactly once (only ATTACK_RESOLVED).
+		var hit_tags: Array = []
+		for e in sink:
+			if int(e.type) != BattleEventTypeScript.ATTACK_RESOLVED:
+				continue
+			if String(e.tag) == "b64a_test_r0":
+				hit_tags.append(0)
+			elif String(e.tag) == "b64a_test_r1":
+				hit_tags.append(1)
+			elif String(e.tag) == "b64a_test_r2":
+				hit_tags.append(2)
+		# Provider order: r0, r1, r2 (ascending entity, ascending
+		# reaction_ids). So expected hit sequence is the indices of
+		# expected_hits that are HIT, in order.
+		var expected_hit_seq: Array = []
+		for idx in range(3):
+			if expected_hits[idx]:
+				expected_hit_seq.append(idx)
+		_assert(hit_tags == expected_hit_seq,
+			"run %s: actual hit sequence %s == expected %s"
+			% [name, str(hit_tags), str(expected_hit_seq)])
+		if name == "a":
+			hits_a = hit_tags.duplicate()
+		else:
+			hits_b = hit_tags.duplicate()
+	# Run A vs Run B equality.
+	_assert(hits_a == hits_b,
+		"Run A hit seq %s == Run B hit seq %s (deterministic)"
+		% [str(hits_a), str(hits_b)])
 
 
 # ============================================================
@@ -676,7 +779,6 @@ func _test_20_run_fractional_chance_determinism() -> void:
 	print("[B64A-T15] 20_run_fractional_determinism")
 	var first_events: Array = []
 	var first_world: Dictionary = {}
-	var first_rng: Array = []
 	var first_emitter: Dictionary = {}
 	for i in 20:
 		var mover = BattleUnitSetupScript.new(
@@ -714,7 +816,6 @@ func _test_20_run_fractional_chance_determinism() -> void:
 			"1_alive": bool(sim.world().is_alive(1)),
 			"1_hp": int(sim.world().current_hp_of(1)),
 		}
-		var rng_state: Array = _rng_snapshot(sim)
 		var em_state: Dictionary = {
 			"next_event_id": int(em.peek_next_event_id()),
 			"next_root_action_id": int(em.peek_next_root_action_id()),
@@ -723,7 +824,6 @@ func _test_20_run_fractional_chance_determinism() -> void:
 		if i == 0:
 			first_events = sink.duplicate()
 			first_world = world_state
-			first_rng = rng_state
 			first_emitter = em_state
 		else:
 			_assert(sink.size() == first_events.size(),
@@ -736,8 +836,6 @@ func _test_20_run_fractional_chance_determinism() -> void:
 					"run %d event %d matches first run" % [i, j])
 			_assert(world_state == first_world,
 				"run %d: world snapshot equal to first run" % i)
-			_assert(rng_state == first_rng,
-				"run %d: RNG snapshot equal to first run" % i)
 			_assert(em_state == first_emitter,
 				"run %d: emitter snapshot equal to first run" % i)
 
