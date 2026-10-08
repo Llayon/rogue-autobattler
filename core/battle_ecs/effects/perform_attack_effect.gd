@@ -1,5 +1,7 @@
 extends RefCounted
-## B6.1 — canonical attack execution path.
+## B6.1 — canonical attack execution path routed through the
+## B6.4b DamageTransaction seam.
+##
 ## BOTH BattleSimulation normal attacks and reaction
 ## PerformAttack requests route through this effect. There
 ## is exactly ONE production mutation path for attacks.
@@ -14,6 +16,22 @@ extends RefCounted
 ##   6. opposing teams
 ##   7. target is in attack range
 ## Failure returns EffectResult.failed(reason, [], false).
+##
+## B6.4b sequence (semantically equivalent to the previous
+## direct apply_damage path):
+##   1. all existing attack validation
+##   2. compute raw_dmg
+##   3. construct DamageTransaction(source, target, raw_dmg)
+##   4. emit ATTACK_RESOLVED with raw_dmg
+##   5. allocate DAMAGE_APPLIED with amount=0 placeholder
+##   6. commit transaction to BattleWorld
+##   7. patch DAMAGE_APPLIED.amount = actual dealt
+##   8. publish both events via ctx.emit_through_sink
+##   9. if lethal, emit UNIT_DIED as child of DAMAGE_APPLIED
+##
+## In B6.4b: pending_amount == base_amount for every production
+## attack because no modifier exists yet. The seam is a
+## forward-compat point for B6.4c.
 ##
 ## Canonical event emission order for a successful ROOT attack:
 ##   [ATTACK_RESOLVED (depth=0, parent=-1, fresh root_action_id),
@@ -42,6 +60,8 @@ const AttackMathScript = preload(
 	"res://core/battle_ecs/effects/attack_math.gd")
 const StatQueryScript = preload(
 	"res://core/battle_ecs/status/stat_query.gd")
+const DamageTransactionScript = preload(
+	"res://core/battle_ecs/effects/damage_transaction.gd")
 
 
 static func execute(ctx, req) -> RefCounted:
@@ -58,9 +78,6 @@ static func execute(ctx, req) -> RefCounted:
 			% int(req.amount), [], false)
 	var p_world = ctx.world()
 	var p_emitter = ctx.emitter()
-	# B6.1.1: we no longer touch ctx.event_sink() directly —
-	# sink publication goes through ctx.emit_through_sink so the
-	# executor is the only authority. removed local var.
 
 	# 0. Request null / bad ancestry shape.
 	var av = req.validate_ancestry_shape()
@@ -131,7 +148,7 @@ static func execute(ctx, req) -> RefCounted:
 	# BattleEventEmitter.emit(); CHILD requests inherit.
 	var ancestry_kind: String = String(av.get("kind", ""))
 	var atk_parent_eid: int = -1
-	var atk_root_id: int = -1
+	var atk_root_id: int = 0
 	var atk_depth: int = 0
 	var atk_event = null
 	if ancestry_kind == EffectRequestScript.ANCESTRY_CHILD:
@@ -173,9 +190,36 @@ static func execute(ctx, req) -> RefCounted:
 			"perform_attack: emitter refused DAMAGE_APPLIED",
 			[], false)
 
-	# Apply damage. Returns actual amount applied (HP-capped).
-	# world.apply_damage also marks dead when HP reaches 0.
-	var dealt: int = int(p_world.apply_damage(tgt, raw_dmg))
+	# B6.4b: build DamageTransaction and commit. In B6.4b no
+	# production modifier changes pending_amount, so commit's
+	# result is byte-identical to the previous direct
+	# world.apply_damage call. The seam is a forward-compat
+	# point for B6.4c pre-damage reactions.
+	var tx = DamageTransactionScript.new()
+	tx.setup(src, tgt, int(raw_dmg))
+	var commit_result: Dictionary = tx.commit(p_world)
+	if not bool(commit_result.get("ok", false)):
+		# Target died between emit and commit. Patch event
+		# with dealt=0 and emit UNIT_DIED if applicable.
+		dmg_event.amount = 0
+		var continues_chain: bool = true
+		var result_events: Array = [dmg_event]
+		if not p_world.is_alive(tgt):
+			var died_event = p_emitter.emit_child(
+				BattleEventTypeScript.UNIT_DIED,
+				int(atk_event.event_id), int(atk_event.root_action_id),
+				int(atk_event.chain_depth),
+				src, tgt, src_run, tgt_run, 0, sem_tag,
+				Vector2i(-1, -1), Vector2i(-1, -1))
+			if died_event != null:
+				result_events.append(died_event)
+			continues_chain = false
+		ctx.emit_through_sink(dmg_event)
+		for e in result_events:
+			if e != dmg_event:
+				ctx.emit_through_sink(e)
+		return EffectResultScript.succeeded(result_events, continues_chain)
+	var dealt: int = int(commit_result.get("dealt", 0))
 	dmg_event.amount = int(dealt)
 	# B6.1.1: single canonical sink publication API. Direct
 	# sink.append is allowed but ctx.emit_through_sink is the

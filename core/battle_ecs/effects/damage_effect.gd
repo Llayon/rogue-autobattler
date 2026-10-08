@@ -1,14 +1,27 @@
 extends RefCounted
 ## Phase 3 / B2.2 / DamageEffect — generic deterministic
-## physical damage.
+## physical damage routed through the B6.4b DamageTransaction seam.
 ##
-## Semantics (Phase 2 parity):
-##   - Uses Balance.compute_damage (pure defense scaling)
-##   - NO crit / dodge / variance (NORMATIVE FEATURE DEFER)
-##   - Damage amount = actual HP removed (not requested)
-##   - Dead target -> EffectResult.failed (no mutation, no event)
-##   - Invalid target -> EffectResult.failed
-##   - Self-target -> EffectResult.failed
+## B2.2 semantics (Phase 2 parity):
+##   - Uses Balance.compute_damage (pure defense scaling) when
+##     req.amount is 0.
+##   - NO crit / dodge / variance (NORMATIVE FEATURE DEFER).
+##   - Damage amount = actual HP removed (not requested).
+##   - Dead target -> EffectResult.failed (no mutation, no event).
+##   - Invalid target -> EffectResult.failed.
+##   - Self-target -> EffectResult.failed.
+##
+## B6.4b integration:
+##   - Effect builds a DamageTransaction with base_amount =
+##     (req.amount > 0 ? req.amount : Balance.compute_damage).
+##   - Effect allocates the DAMAGE_APPLIED event placeholder
+##     with amount=0 (semantically "pending") BEFORE commit.
+##   - Effect commits the transaction against the world; the
+##     returned `dealt` value is patched into DAMAGE_APPLIED.amount.
+##   - In B6.4b no production modifier exists; pending_amount
+##     remains equal to base_amount, so the commit semantics
+##     are byte-identical to the previous direct apply_damage
+##     path.
 ##
 ## Event semantics:
 ##   - Emits DAMAGE_APPLIED (NOT ATTACK_RESOLVED).
@@ -28,6 +41,8 @@ const EffectResultScript = preload("res://core/battle_ecs/effects/effect_result.
 const EffectRequestScript = preload("res://core/battle_ecs/effects/effect_request.gd")
 const EffectKindScript = preload("res://core/battle_ecs/effects/effect_kind.gd")
 const BalanceScript = preload("res://core/balance.gd")
+const DamageTransactionScript = preload(
+	"res://core/battle_ecs/effects/damage_transaction.gd")
 
 
 ## Execute damage effect against the world's target_entity.
@@ -92,8 +107,24 @@ static func execute(ctx, req) -> RefCounted:
 	if dmg_event == null:
 		return EffectResultScript.failed(
 			"damage emit failed (request was valid but emitter refused)", [], false)
-	# Apply damage (returns actual amount removed, capped at HP).
-	var dealt: int = int(world.apply_damage(tgt, dmg))
+	# B6.4b: route through DamageTransaction. The transaction
+	# encapsulates the canonical apply_damage call and gives us
+	# a stable seam for future pre-damage reactions. In B6.4b
+	# pending == base, so commit returns the same dealt value
+	# the direct apply_damage call would have produced.
+	var tx = DamageTransactionScript.new()
+	tx.setup(src, tgt, int(dmg))
+	var commit_result: Dictionary = tx.commit(world)
+	if not bool(commit_result.get("ok", false)):
+		# Target died between emit and commit. Patch the event
+		# with dealt=0 (no HP was actually removed) and return
+		# failure. No UNIT_DIED emitted.
+		dmg_event.amount = 0
+		ctx.emit_through_sink(dmg_event)
+		return EffectResultScript.failed(
+			"damage commit failed: %s"
+			% String(commit_result.get("reason", "")), [dmg_event], false)
+	var dealt: int = int(commit_result.get("dealt", 0))
 	# Patch the event with the actual dealt amount (post-apply).
 	dmg_event.amount = int(dealt)
 	ctx.emit_through_sink(dmg_event)
