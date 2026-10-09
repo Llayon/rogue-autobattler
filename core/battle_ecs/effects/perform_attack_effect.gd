@@ -196,29 +196,20 @@ static func execute(ctx, req) -> RefCounted:
 	# world.apply_damage call. The seam is a forward-compat
 	# point for B6.4c pre-damage reactions.
 	var tx = DamageTransactionScript.new()
-	tx.setup(src, tgt, int(raw_dmg))
+	if not bool(tx.setup(src, tgt, int(raw_dmg))):
+		return EffectResultScript.failed(
+			"perform_attack: damage transaction setup rejected "
+			+ "(base=%d)" % int(raw_dmg), [], false)
 	var commit_result: Dictionary = tx.commit(p_world)
 	if not bool(commit_result.get("ok", false)):
-		# Target died between emit and commit. Patch event
-		# with dealt=0 and emit UNIT_DIED if applicable.
-		dmg_event.amount = 0
-		var continues_chain: bool = true
-		var result_events: Array = [dmg_event]
-		if not p_world.is_alive(tgt):
-			var died_event = p_emitter.emit_child(
-				BattleEventTypeScript.UNIT_DIED,
-				int(atk_event.event_id), int(atk_event.root_action_id),
-				int(atk_event.chain_depth),
-				src, tgt, src_run, tgt_run, 0, sem_tag,
-				Vector2i(-1, -1), Vector2i(-1, -1))
-			if died_event != null:
-				result_events.append(died_event)
-			continues_chain = false
-		ctx.emit_through_sink(dmg_event)
-		for e in result_events:
-			if e != dmg_event:
-				ctx.emit_through_sink(e)
-		return EffectResultScript.succeeded(result_events, continues_chain)
+		# B6.4b.1: fail-closed. Do NOT publish ATTACK_RESOLVED,
+		# do NOT publish DAMAGE_APPLIED, do NOT fabricate
+		# UNIT_DIED, do NOT return success. The pre-allocated
+		# atk_event and dmg_event are discarded (not emitted
+		# to sink). result.events == [].
+		return EffectResultScript.failed(
+			"perform_attack: damage commit failed: %s"
+			% String(commit_result.get("reason", "")), [], false)
 	var dealt: int = int(commit_result.get("dealt", 0))
 	dmg_event.amount = int(dealt)
 	# B6.1.1: single canonical sink publication API. Direct

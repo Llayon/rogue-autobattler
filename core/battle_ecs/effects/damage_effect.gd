@@ -113,17 +113,18 @@ static func execute(ctx, req) -> RefCounted:
 	# pending == base, so commit returns the same dealt value
 	# the direct apply_damage call would have produced.
 	var tx = DamageTransactionScript.new()
-	tx.setup(src, tgt, int(dmg))
+	if not bool(tx.setup(src, tgt, int(dmg))):
+		return EffectResultScript.failed(
+			"damage transaction setup rejected (base=%d)"
+			% int(dmg), [], false)
 	var commit_result: Dictionary = tx.commit(world)
 	if not bool(commit_result.get("ok", false)):
-		# Target died between emit and commit. Patch the event
-		# with dealt=0 (no HP was actually removed) and return
-		# failure. No UNIT_DIED emitted.
-		dmg_event.amount = 0
-		ctx.emit_through_sink(dmg_event)
+		# B6.4b.1: fail-closed. Do NOT publish any event. Do NOT
+		# emit UNIT_DIED. Do NOT mutate HP. The pre-allocated
+		# dmg_event is discarded (not emitted to sink).
 		return EffectResultScript.failed(
 			"damage commit failed: %s"
-			% String(commit_result.get("reason", "")), [dmg_event], false)
+			% String(commit_result.get("reason", "")), [], false)
 	var dealt: int = int(commit_result.get("dealt", 0))
 	# Patch the event with the actual dealt amount (post-apply).
 	dmg_event.amount = int(dealt)
