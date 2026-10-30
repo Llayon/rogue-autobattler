@@ -313,35 +313,59 @@ func process_work(
 	# SILENTLY LOST, and the battle-level pending_count would not
 	# reflect it (it was reset at the top of this call).
 	#
-	# Every window that was opened MUST be closed. Here we drain
-	# the remaining windows: each is finalized with its CURRENT
+	# Every window that was opened MUST be closed. We drain the
+	# remaining windows: each is finalized with its CURRENT
 	# pending amount (no modifiers — discovery is already
 	# bounded) so the damage is applied exactly once and the
 	# window is closed.
 	#
+	# The drain LOOPS: finalizing a leftover window can itself
+	# enqueue another window (a reaction inside that window that
+	# opens a nested damage window). A single pass would leave
+	# that nested window queued and it would be discarded by the
+	# next process_work() call — its damage silently lost. The
+	# loop closes that hole.
+	#
 	# Post-commit DISCOVERY of those windows stays deferred: the
 	# pump has already reported truncation, and re-entering the
 	# discovery path would exceed the very cap that stopped us.
-	var leftover_windows: Array = []
-	for item in _queue:
-		if item == null or item.get_script() == null:
-			continue
-		if String(item.get_script().get_global_name()) \
-				== "DamageWindowWorkItem":
-			leftover_windows.append(item)
-	for w in leftover_windows:
-		_process_window_item(
-			w, p_world, p_rng, p_emitter, p_sink,
-			p_provider, result, executor,
-			eff_max_chain, eff_max_reactions_per_root, p_session)
-		_pending_count = maxi(0, int(_pending_count) - 1)
-	if leftover_windows.size() > 0:
+	var drained_windows: int = 0
+	while true:
+		var leftover_windows: Array = []
+		for item in _queue:
+			if item == null or item.get_script() == null:
+				continue
+			if String(item.get_script().get_global_name()) \
+					== "DamageWindowWorkItem":
+				leftover_windows.append(item)
+		if leftover_windows.is_empty():
+			break
+		for w in leftover_windows:
+			_process_window_item(
+				w, p_world, p_rng, p_emitter, p_sink,
+				p_provider, result, executor,
+				eff_max_chain, eff_max_reactions_per_root, p_session)
+			drained_windows += 1
+		# The drained windows are closed; remove them from the
+		# queue so they cannot be finalized a second time.
+		for w in leftover_windows:
+			_queue.erase(w)
+	if drained_windows > 0:
 		# The drain is a bounded-execution completion: the windows
 		# are closed, but their post-commit discovery is NOT run.
 		result.truncated = true
 		if int(result.reason) == 0:
 			result.reason = int(
 				DispatchResultScript.REASON_MAX_EVENTS)
+	# The counter must reflect what is STILL queued, not the
+	# arithmetic of this call: a window enqueued by a drained
+	# window's reaction must still be visible to the caller.
+	_pending_count = 0
+	for item in _queue:
+		if item != null and item.get_script() != null \
+				and String(item.get_script().get_global_name()) \
+				== "DamageWindowWorkItem":
+			_pending_count += 1
 	return result
 
 

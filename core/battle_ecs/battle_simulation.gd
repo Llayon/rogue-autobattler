@@ -335,12 +335,26 @@ func step_tick() -> Array:
 		if player_work.size() > 0:
 			_last_trigger_dispatch_result = \
 				_trigger_dispatcher.process_work(
-				player_work, _world, _rng, _event_emitter, events,
-				_trigger_provider, _trigger_limits, _trigger_session)
-		# Drain any post-action events that the dispatcher
-		# produced (e.g. reaction-emitted BattleEvents whose
-		# dispatch_work went into player_work). The
-		# process_work call above is the canonical drain.
+					player_work, _world, _rng, _event_emitter, events,
+					_trigger_provider, _trigger_limits, _trigger_session)
+		# B6.4c ACTION-PHASE DISCOVERY (regression fix).
+		#
+		# Legacy a5dd87d dispatched the action phase's PUBLIC
+		# events (UNIT_MOVED, UNIT_ATTACKED, ...), not just the
+		# work. The work-only drain dropped every public event
+		# that opens NO window — UNIT_MOVED (5) is the canonical
+		# example — so a reaction bound to it never fired in the
+		# production step_tick() path.
+		#
+		# The action's own events are dispatched AFTER its work,
+		# so a damage window's intent is still discovered after
+		# its commit. The session's seen-set makes a second
+		# delivery a no-op, so nothing is discovered twice.
+		if player_events != null and player_events.size() > 0:
+			_last_trigger_dispatch_result = \
+				_trigger_dispatcher.process_work(
+					player_events, _world, _rng, _event_emitter, events,
+					_trigger_provider, _trigger_limits, _trigger_session)
 	# === 4-5. enemy normal action (only if not yet natural) ===
 	if not _world.one_side_empty():
 		var enemy_work: Array = []
@@ -350,8 +364,14 @@ func step_tick() -> Array:
 		if enemy_work.size() > 0:
 			_last_trigger_dispatch_result = \
 				_trigger_dispatcher.process_work(
-				enemy_work, _world, _rng, _event_emitter, events,
-				_trigger_provider, _trigger_limits, _trigger_session)
+					enemy_work, _world, _rng, _event_emitter, events,
+					_trigger_provider, _trigger_limits, _trigger_session)
+		# B6.4c ACTION-PHASE DISCOVERY — see the player phase.
+		if enemy_events != null and enemy_events.size() > 0:
+			_last_trigger_dispatch_result = \
+				_trigger_dispatcher.process_work(
+					enemy_events, _world, _rng, _event_emitter, events,
+					_trigger_provider, _trigger_limits, _trigger_session)
 	# === termination / progress ===
 	var natural: bool = _world.one_side_empty()
 	var budget: bool = _max_ticks > 0 and _tick_count >= _max_ticks
