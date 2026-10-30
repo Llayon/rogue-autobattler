@@ -30,6 +30,17 @@ extends RefCounted
 ##   draw no randomness today, but the contract must hold for
 ##   chance-based triggers introduced later.
 ##
+## B6.4c: process_tick() (legacy synchronous path) is preserved
+## for backward compat. The new begin_tick() / has_next() /
+## next_step() API returns a lazy / resumable cursor. Each step
+## inspects LIVE world state. BattleSimulation's step_tick
+## drains each step's dispatch_work via the dispatcher BEFORE
+## asking for the next step. This preserves:
+##   - Burn kill -> later Regen on the same target does NOT
+##     execute (cursor resumes against updated world state).
+##   - STATUS_TICKED discovery remains post-Burn-commit
+##     (work_item.delayed_dispatch_seeds includes STATUS_TICKED).
+##
 ## NO Node. NO UI. NO global RNG. NO global event bus.
 
 const StatusContainerScript = preload("res://core/battle_ecs/status/status_container.gd")
@@ -42,17 +53,6 @@ const EffectContextScript = preload("res://core/battle_ecs/effects/effect_contex
 const EffectExecutorScript = preload("res://core/battle_ecs/effects/effect_executor.gd")
 
 ## B3.3 / Periodic payload classification.
-## DOT vs HOT is determined from dot_damage / dot_heal PAYLOAD
-## (the legacy source of truth in core/battle/status_list.gd),
-## NOT from StatusDef.is_harmful (which is a UI/classification
-## flag and is NOT the periodic effect kind).
-##
-## Cases:
-##   PERIODIC_NONE:        dot_damage == 0 AND dot_heal == 0
-##   PERIODIC_DAMAGE:      dot_damage >  0 AND dot_heal == 0
-##   PERIODIC_HEAL:        dot_damage == 0 AND dot_heal >  0
-##   PERIODIC_DUAL:        dot_damage >  0 AND dot_heal >  0
-##   PERIODIC_INVALID:     either value < 0 (malformed content)
 const PERIODIC_NONE: int = 0
 const PERIODIC_DAMAGE: int = 1
 const PERIODIC_HEAL: int = 2
@@ -60,10 +60,7 @@ const PERIODIC_DUAL: int = 3
 const PERIODIC_INVALID: int = 4
 
 
-## Classify the periodic payload of a StatusDef. Returns one of
-## the PERIODIC_* constants. Pure function — no allocation,
-## no side effects, no rng draws. Used for unit-level
-## classification tests and by PeriodicStatusProcessor.
+## Classify the periodic payload of a StatusDef. Pure function.
 static func classify_periodic_payload(
 		p_dot_damage,
 		p_dot_heal) -> int:
@@ -79,152 +76,12 @@ static func classify_periodic_payload(
 		return PERIODIC_HEAL
 	if dd > 0 and dh > 0:
 		return PERIODIC_DUAL
-	# Unreachable for non-negative integers.
 	return PERIODIC_INVALID
 
 
-## Process one status phase tick. Operates on the passed-in
-## dependencies (world, simulation-owned RNG, simulation-owned
-## emitter). NO RNG is constructed inside this function.
-##
-## RNG invariant:
-##   rng == null -> early-return empty result, no mutation.
-##   Same RNG object must reach every periodic EffectContext.
-##
-## Returns the array of BattleEvents emitted during this phase,
-## in emission order.
-static func process_tick(
-		p_world,
-		p_rng,
-		p_emitter: BattleEventEmitterScript) -> Array:
-	var events: Array = []
-	if p_world == null or p_rng == null or p_emitter == null:
-		return events
-	# Snapshot alive entities in deterministic allocation order.
-	var entities: Array = p_world.alive_ids_in_order()
-	for entity_id in entities:
-		var container = p_world.get_status_container(int(entity_id))
-		if container == null:
-			continue
-		# REVERSE INSERTION ORDER for the entity's status traversal
-		# (legacy parity).
-		var statuses: Array = container.all()
-		var indices: Array = []
-		for i in statuses.size():
-			indices.append(i)
-		indices.reverse()
-		for idx in indices:
-			# Re-check liveness: a previous status in this same
-			# phase may have killed this entity.
-			if not p_world.is_alive(int(entity_id)):
-				break
-			if idx >= statuses.size():
-				# Container mutated (status removed). Refresh.
-				statuses = container.all()
-				if idx >= statuses.size():
-					continue
-			var inst = statuses[int(idx)]
-			if inst == null:
-				continue
-			var status_id = inst.status_id
-			var stacks = int(inst.stacks)
-			# 1. DECREMENT first. StatusInstance.tick(1) preserves
-			# the indefinite contract (remaining < 0 -> no
-			# decrement, returns false). Timed statuses: 3->2,
-			# 2->1, 1->0 (expired).
-			var expired: bool = inst.tick(1)
-			if expired:
-				# 2a. EXPIRED — remove from container + emit
-				# STATUS_EXPIRED root event.
-				container.remove(status_id)
-				var expired_event = p_emitter.emit(
-					BattleEventTypeScript.STATUS_EXPIRED,
-					int(inst.source_entity),
-					int(entity_id),
-					"",
-					String(p_world.source_run_unit_id_of(int(entity_id))),
-					0,
-					String(status_id))
-				events.append(expired_event)
-				# Do NOT emit periodic effect on the expiry tick.
-				continue
-			# 2b. STILL ACTIVE — consider periodic effect.
-			var def: Resource = StatusDefResolverScript.resolve(status_id)
-			if def == null:
-				continue
-			var interval: float = float(def.tick_interval)
-			# B3 scope: interval == 1.0 -> every tick;
-			# interval == 0.0 -> no repeated periodic processing;
-			# other -> FEATURE DEFER (skip silently).
-			if interval < 0.0:
-				continue
-			if interval == 0.0:
-				continue
-			if interval != 1.0:
-				continue
-			var dot_damage: int = int(def.dot_damage)
-			var dot_heal: int = int(def.dot_heal)
-			var kind: int = classify_periodic_payload(
-				dot_damage, dot_heal)
-			if kind == PERIODIC_NONE:
-				# Duration still decrements (already done above);
-				# no periodic effect, no STATUS_TICKED.
-				continue
-			if kind == PERIODIC_DUAL:
-				# FEATURE DEFER: dual-payload periodic not
-				# supported in B3. Skip silently.
-				continue
-			if kind == PERIODIC_INVALID:
-				# Malformed content. Skip silently.
-				continue
-			# PERIODIC_DAMAGE or PERIODIC_HEAL.
-			var periodic_amount: int = 0
-			if kind == PERIODIC_DAMAGE:
-				periodic_amount = dot_damage * stacks
-			else:
-				periodic_amount = dot_heal * stacks
-			# Emit STATUS_TICKED root.
-			var status_tick_root = p_emitter.emit(
-				BattleEventTypeScript.STATUS_TICKED,
-				int(inst.source_entity),
-				int(entity_id),
-				"",
-				String(p_world.source_run_unit_id_of(int(entity_id))),
-				periodic_amount,
-				String(status_id))
-			events.append(status_tick_root)
-			# Route the periodic effect through EffectExecutor
-			# using the canonical child_from_parent factory.
-			var effect_kind: int = EffectKindScript.DAMAGE \
-				if kind == PERIODIC_DAMAGE \
-				else EffectKindScript.HEAL
-			var req = EffectRequestScript.child_from_parent(
-				effect_kind,
-				status_tick_root,
-				int(inst.source_entity),
-				int(entity_id),
-				periodic_amount)
-			if req == null:
-				continue
-			var per_events: Array = _execute_periodic_effect(
-				p_world, p_rng, p_emitter, effect_kind, req)
-			for ev in per_events:
-				events.append(ev)
-			# After a Burn tick, re-check liveness: a heal cannot
-			# resurrect per Phase-2 DamageEffect; a subsequent
-			# Regen MUST NOT run on a unit killed this phase.
-			if not p_world.is_alive(int(entity_id)):
-				break
-	return events
-
-
-## Run one periodic effect (Damage or Heal) through the existing
-## EffectExecutor path so we use the SAME semantics as the
-## action-phase Damage/Heal effects (capping, no resurrection,
-## UNIT_DIED on lethal).
-##
-## Uses the caller-provided RNG (simulation-owned) to construct
-## the EffectContext — no private RNG construction.
+## Run one periodic effect (Damage or Heal) through EffectExecutor.
+## Returns [events, dispatch_work]. Caller drains dispatch_work
+## via the dispatcher work-pump.
 static func _execute_periodic_effect(
 		p_world,
 		p_rng,
@@ -236,5 +93,341 @@ static func _execute_periodic_effect(
 	var exec = EffectExecutorScript.new()
 	var result = exec.execute(ctx, p_req)
 	if result == null:
-		return []
-	return result.events
+		return [[], []]
+	return [result.events, result.dispatch_work]
+
+
+# ============================================================
+# B6.4c: Lazy / resumable cursor API.
+# ============================================================
+
+class PeriodicStatusStep extends RefCounted:
+	var events: Array = []
+	var dispatch_work: Array = []
+
+
+class PeriodicStatusCursor extends RefCounted:
+	var _owner = null
+	# B6.4c: parent-script reference so this inner class can
+	# call the outer static helpers (classify_periodic_payload,
+	# _execute_periodic_effect). GDScript does not resolve
+	# outer-scope statics from inner-class instance methods.
+	var _world = null
+	var _rng = null
+	var _emitter = null
+	var _entity_ids: Array = []
+	var _entity_idx: int = 0
+	var _statuses: Array = []
+	var _indices: Array = []
+	var _idx_pos: int = 0
+
+	func has_next() -> bool:
+		while true:
+			# B6.4c REGRESSION FIX: the cursor must visit EVERY alive
+			# entity, INCLUDING the first one.
+			#
+			# The previous guard advanced _entity_idx whenever
+			# _idx_pos >= _indices.size(). On the very first call
+			# _idx_pos == 0 and _indices == [], so the guard fired
+			# immediately and skipped entity 0 entirely. Any status
+			# on the first alive entity never ticked in the
+			# production step_tick() path.
+			#
+			# The advance must only happen when the current
+			# entity's status list is actually EXHAUSTED — i.e.
+			# when _statuses is non-empty and _idx_pos has run
+			# past it. A fresh entity (_statuses empty) must be
+			# loaded first, not skipped.
+			if _statuses.size() > 0 and _idx_pos >= _indices.size():
+				_entity_idx += 1
+				_idx_pos = 0
+				_statuses = []
+				_indices = []
+			if _entity_idx >= _entity_ids.size():
+				return false
+			var entity_id: int = int(_entity_ids[_entity_idx])
+			if not bool(_world.is_alive(entity_id)):
+				_entity_idx += 1
+				_idx_pos = 0
+				_statuses = []
+				_indices = []
+				continue
+			if _statuses.size() == 0:
+				var container = _world.get_status_container(entity_id)
+				if container == null:
+					_entity_idx += 1
+					_idx_pos = 0
+					_statuses = []
+					_indices = []
+					continue
+				_statuses = container.all()
+				_indices = []
+				for i in _statuses.size():
+					_indices.append(i)
+				_indices.reverse()
+				_idx_pos = 0
+			if _indices.size() == 0:
+				_entity_idx += 1
+				_idx_pos = 0
+				_statuses = []
+				continue
+			return true
+		# Unreachable fallback.
+		return false
+
+	func next_step() -> RefCounted:
+		if _world == null:
+			return null
+		if not has_next():
+			return null
+		var step = PeriodicStatusStep.new()
+		step.events = []
+		step.dispatch_work = []
+		var entity_id: int = int(_entity_ids[_entity_idx])
+		if not bool(_world.is_alive(entity_id)):
+			return step
+		if _idx_pos >= _indices.size():
+			return step
+		if _idx_pos >= _statuses.size():
+			var container = _world.get_status_container(entity_id)
+			if container == null:
+				return step
+			_statuses = container.all()
+		var idx: int = int(_indices[_idx_pos])
+		_idx_pos += 1
+		if idx >= _statuses.size():
+			return step
+		var inst = _statuses[idx]
+		if inst == null:
+			return step
+		var status_id = inst.status_id
+		var expired: bool = inst.tick(1)
+		if expired:
+			var container = _world.get_status_container(entity_id)
+			if container != null:
+				container.remove(status_id)
+			var expired_event = _emitter.emit(
+				BattleEventTypeScript.STATUS_EXPIRED,
+				int(inst.source_entity),
+				int(entity_id),
+				"",
+				String(_world.source_run_unit_id_of(int(entity_id))),
+				0,
+				String(status_id))
+			step.events.append(expired_event)
+			return step
+		var def: Resource = StatusDefResolverScript.resolve(status_id)
+		if def == null:
+			return step
+		var interval: float = float(def.tick_interval)
+		if interval <= 0.0 or interval != 1.0:
+			return step
+		var dot_damage: int = int(def.dot_damage)
+		var dot_heal: int = int(def.dot_heal)
+		var kind: int = _owner.classify_periodic_payload(dot_damage, dot_heal)
+		if kind == _owner.PERIODIC_NONE or kind == _owner.PERIODIC_DUAL or kind == _owner.PERIODIC_INVALID:
+			return step
+		var stacks: int = int(inst.stacks)
+		var periodic_amount: int = 0
+		if kind == _owner.PERIODIC_DAMAGE:
+			periodic_amount = dot_damage * stacks
+		else:
+			periodic_amount = dot_heal * stacks
+		var status_tick_root = _emitter.emit(
+			BattleEventTypeScript.STATUS_TICKED,
+			int(inst.source_entity),
+			int(entity_id),
+			"",
+			String(_world.source_run_unit_id_of(int(entity_id))),
+			periodic_amount,
+			String(status_id))
+		step.events.append(status_tick_root)
+		var effect_kind: int = EffectKindScript.DAMAGE \
+				if kind == _owner.PERIODIC_DAMAGE \
+				else EffectKindScript.HEAL
+		var req = EffectRequestScript.child_from_parent(
+			effect_kind,
+			status_tick_root,
+			int(inst.source_entity),
+			int(entity_id),
+			periodic_amount)
+		if req == null:
+			return step
+		# B6.4c: attach the status_id as a semantic tag so the
+		# downstream DamageEffect can propagate it to
+		# DAMAGE_STARTED / DAMAGE_APPLIED for ancestry
+		# identity. This preserves the legacy B3 status-tick
+		# tag contract.
+		if req.payload == null:
+			req.payload = {}
+		req.payload[EffectRequestScript.PAYLOAD_EVENT_TAG] = status_id
+		var per_result: Array = _owner._execute_periodic_effect(
+			_world, _rng, _emitter, effect_kind, req)
+		var per_events: Array = per_result[0] if per_result.size() > 0 else []
+		var per_work: Array = per_result[1] if per_result.size() > 1 else []
+		for ev in per_events:
+			step.events.append(ev)
+		# B6.4c: for periodic Burn (DAMAGE), the DamageEffect
+		# opened a window. The DamageWindowWorkItem is in
+		# per_work. Attach STATUS_TICKED as a delayed seed so
+		# the dispatcher delays STATUS_TICKED's discovery
+		# until after the window commits.
+		for w in per_work:
+			if w != null and w.get_script() != null \
+					and w.get_script().get_global_name() == "DamageWindowWorkItem":
+				if w.delayed_dispatch_seeds == null:
+					w.delayed_dispatch_seeds = []
+				if not w.delayed_dispatch_seeds.has(status_tick_root):
+					w.delayed_dispatch_seeds.append(status_tick_root)
+			step.dispatch_work.append(w)
+		return step
+
+
+func begin_tick(p_world, p_rng,
+		p_emitter: BattleEventEmitterScript):
+	# B6.4c: pass `self` (the outer PeriodicStatusProcessor
+	# script) so the inner PeriodicStatusCursor class can call
+	# the outer's static helpers (classify_periodic_payload,
+	# _execute_periodic_effect) and access the constants
+	# PERIODIC_DAMAGE / PERIODIC_HEAL. GDScript inner classes
+	# do not resolve outer-scope statics directly.
+	var cursor = PeriodicStatusCursor.new()
+	cursor._owner = self
+	cursor._world = p_world
+	cursor._rng = p_rng
+	cursor._emitter = p_emitter
+	if p_world != null:
+		cursor._entity_ids = p_world.alive_ids_in_order()
+	cursor._entity_idx = 0
+	cursor._idx_pos = 0
+	return cursor
+
+
+## Legacy synchronous process_tick (preserved for backward
+## compat). BattleSimulation's step_tick uses the cursor API.
+static func process_tick(
+		p_world,
+		p_rng,
+		p_emitter: BattleEventEmitterScript) -> Array:
+	var events: Array = []
+	# B6.4c: the legacy synchronous path collects the window's
+	# committed events in its own sink, because the periodic
+	# effect's own context uses a private sink.
+	var sink: Array = []
+	if p_world == null or p_rng == null or p_emitter == null:
+		return events
+	var entities: Array = p_world.alive_ids_in_order()
+	for entity_id in entities:
+		var container = p_world.get_status_container(int(entity_id))
+		if container == null:
+			continue
+		var statuses: Array = container.all()
+		var indices: Array = []
+		for i in statuses.size():
+			indices.append(i)
+		indices.reverse()
+		for idx in indices:
+			if not p_world.is_alive(int(entity_id)):
+				break
+			if idx >= statuses.size():
+				statuses = container.all()
+				if idx >= statuses.size():
+					continue
+			var inst = statuses[int(idx)]
+			if inst == null:
+				continue
+			var status_id = inst.status_id
+			var stacks = int(inst.stacks)
+			var expired: bool = inst.tick(1)
+			if expired:
+				container.remove(status_id)
+				var expired_event = p_emitter.emit(
+					BattleEventTypeScript.STATUS_EXPIRED,
+					int(inst.source_entity),
+					int(entity_id),
+					"",
+					String(p_world.source_run_unit_id_of(int(entity_id))),
+					0,
+					String(status_id))
+				events.append(expired_event)
+				continue
+			var def: Resource = StatusDefResolverScript.resolve(status_id)
+			if def == null:
+				continue
+			var interval: float = float(def.tick_interval)
+			if interval < 0.0:
+				continue
+			if interval == 0.0:
+				continue
+			if interval != 1.0:
+				continue
+			var dot_damage: int = int(def.dot_damage)
+			var dot_heal: int = int(def.dot_heal)
+			var kind: int = classify_periodic_payload(
+				dot_damage, dot_heal)
+			if kind == PERIODIC_NONE:
+				continue
+			if kind == PERIODIC_DUAL:
+				continue
+			if kind == PERIODIC_INVALID:
+				continue
+			var periodic_amount: int = 0
+			if kind == PERIODIC_DAMAGE:
+				periodic_amount = dot_damage * stacks
+			else:
+				periodic_amount = dot_heal * stacks
+			var status_tick_root = p_emitter.emit(
+				BattleEventTypeScript.STATUS_TICKED,
+				int(inst.source_entity),
+				int(entity_id),
+				"",
+				String(p_world.source_run_unit_id_of(int(entity_id))),
+				periodic_amount,
+				String(status_id))
+			events.append(status_tick_root)
+			var effect_kind: int = EffectKindScript.DAMAGE \
+					if kind == PERIODIC_DAMAGE \
+					else EffectKindScript.HEAL
+			var req = EffectRequestScript.child_from_parent(
+				effect_kind,
+				status_tick_root,
+				int(inst.source_entity),
+				int(entity_id),
+				periodic_amount)
+			if req == null:
+				continue
+			var per_result: Array = _execute_periodic_effect(
+				p_world, p_rng, p_emitter, effect_kind, req)
+			var per_events: Array = per_result[0] if per_result.size() > 0 else []
+			var per_work: Array = per_result[1] if per_result.size() > 1 else []
+			for ev in per_events:
+				events.append(ev)
+			# B6.4c: the periodic DAMAGE effect opened a
+			# pre-damage window. The legacy process_tick() is a
+			# SYNCHRONOUS API: on a5dd87d the burn mutated HP
+			# inside this call, so the NEXT status in the same
+			# phase saw the post-damage world (a lethal burn
+			# suppressed the following regen).
+			#
+			# The window must therefore be COMPLETED here, before
+			# the loop advances to the next status. We finalize the
+			# window's continuation directly (the same commit path
+			# the canonical pump uses) and publish its events.
+			# Post-commit DISCOVERY stays out of this legacy
+			# synchronous API — it is the canonical pump's job.
+			for w in per_work:
+				if w == null or w.get_script() == null:
+					continue
+				if String(w.get_script().get_global_name()) \
+						!= "DamageWindowWorkItem":
+					continue
+				var cont = w.continuation
+				if cont == null:
+					continue
+				var fr = cont.finalize(p_world, sink, p_emitter)
+				if fr != null:
+					for ev2 in fr.emitted:
+						events.append(ev2)
+			if not p_world.is_alive(int(entity_id)):
+				break
+	return events

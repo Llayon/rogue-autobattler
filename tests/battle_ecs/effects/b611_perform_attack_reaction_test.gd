@@ -33,6 +33,8 @@ const TriggerReactionScript = preload(
 	"res://core/battle_ecs/triggers/trigger_reaction.gd")
 const TriggerLimitsScript = preload(
 	"res://core/battle_ecs/triggers/trigger_limits.gd")
+const DamageBridgeScript = preload(
+	"res://tests/battle_ecs/effects/b64c_damage_bridge.gd")
 const TriggerDispatcherScript = preload(
 	"res://core/battle_ecs/triggers/trigger_dispatcher.gd")
 const TriggerDispatchSessionScript = preload(
@@ -176,57 +178,88 @@ func _test_counter_like_exact_4_event_prefix() -> void:
 	var events: Array = []
 	while not sim.is_finished():
 		events.append_array(sim.step_tick())
-	_assert(events.size() >= 4,
-		"trace has at least 4 events (got %d)" % events.size())
-	if events.size() < 4:
+	_assert(events.size() >= 6,
+		"trace has at least 6 events (got %d)" % events.size())
+	if events.size() < 6:
 		return
-	# First 4 events must be canonical counter prefix:
+	# B6.4c: the pre-damage window inserts DAMAGE_STARTED between
+	# every damage intent and its commit, so the canonical counter
+	# prefix becomes SIX events:
 	#   0 player ATTACK_RESOLVED    depth 0
-	#   1 player DAMAGE_APPLIED      depth 1
-	#   2 counter ATTACK_RESOLVED    depth 2
-	#   3 counter DAMAGE_APPLIED      depth 3
-	# Then any later scheduler root (e.g. enemy normal action)
-	# appears strictly AFTER index 3.
+	#   1 player DAMAGE_STARTED     depth 1
+	#   2 player DAMAGE_APPLIED     depth 2
+	#   3 counter ATTACK_RESOLVED   depth 3
+	#   4 counter DAMAGE_STARTED    depth 4
+	#   5 counter DAMAGE_APPLIED    depth 5
+	#
+	# The counter's intent is published AFTER the player's damage
+	# COMMITTED (the reaction is discovered on the committed
+	# DAMAGE_APPLIED), and the counter's own window then opens and
+	# commits.
 	var types: Array = []
 	var depths: Array = []
-	for i in 4:
+	for i in 6:
 		types.append(int(events[i].type))
 		depths.append(int(events[i].chain_depth))
 	_assert(types == [
 			BattleEventTypeScript.ATTACK_RESOLVED,
+			BattleEventTypeScript.DAMAGE_STARTED,
 			BattleEventTypeScript.DAMAGE_APPLIED,
 			BattleEventTypeScript.ATTACK_RESOLVED,
+			BattleEventTypeScript.DAMAGE_STARTED,
 			BattleEventTypeScript.DAMAGE_APPLIED],
-		"events[0..3].type = [ATK, DMG, ATK, DMG] (got %s)" % str(types))
-	_assert(depths == [0, 1, 2, 3],
-		"events[0..3].chain_depth = [0, 1, 2, 3] (got %s)" % str(depths))
-	# All four share the SAME root_action_id.
+		"events[0..5].type = [ATK, STARTED, DMG, ATK, STARTED, DMG] (got %s)"
+			% str(types))
+	_assert(depths == [0, 1, 2, 3, 4, 5],
+		"events[0..5].chain_depth = [0, 1, 2, 3, 4, 5] (got %s)" % str(depths))
+	# All six share the SAME root_action_id.
 	var root_ids: Array = []
-	for i in 4:
+	for i in 6:
 		root_ids.append(int(events[i].root_action_id))
 	_assert(root_ids[0] == root_ids[1] \
 			and root_ids[1] == root_ids[2] \
-			and root_ids[2] == root_ids[3],
-		"events[0..3] share SAME root_action_id (got %s)" % str(root_ids))
-	# Parent chain on the first 4 events.
+			and root_ids[2] == root_ids[3] \
+			and root_ids[3] == root_ids[4] \
+			and root_ids[4] == root_ids[5],
+		"events[0..5] share SAME root_action_id (got %s)" % str(root_ids))
+	# Parent chain on the first six events.
 	_assert(int(events[0].parent_event_id) == -1,
 		"events[0] (player ATK) parent_event_id == -1 (root)")
 	_assert(int(events[1].parent_event_id) == int(events[0].event_id),
-		"events[1] (player DMG) parent == events[0].event_id")
+		"events[1] (player STARTED) parent == events[0].event_id")
 	_assert(int(events[2].parent_event_id) == int(events[1].event_id),
-		"events[2] (counter ATK) parent == events[1].event_id")
+		"events[2] (player DMG) parent == events[1].event_id")
 	_assert(int(events[3].parent_event_id) == int(events[2].event_id),
-		"events[3] (counter DMG) parent == events[2].event_id")
+		"events[3] (counter ATK) parent == events[2].event_id")
+	_assert(int(events[4].parent_event_id) == int(events[3].event_id),
+		"events[4] (counter STARTED) parent == events[3].event_id")
+	_assert(int(events[5].parent_event_id) == int(events[4].event_id),
+		"events[5] (counter DMG) parent == events[4].event_id")
+	# The two damage bridges are proven by the shared helper.
+	var player_bridge: Dictionary = \
+		DamageBridgeScript.assert_attack_damage_bridge(
+			events, events[0], "counter prefix player", _assert)
+	_assert(player_bridge.get("applied", null) != null,
+		"counter prefix: player DAMAGE_APPLIED committed")
+	var counter_bridge: Dictionary = \
+		DamageBridgeScript.assert_attack_damage_bridge(
+			events, events[3], "counter prefix counter", _assert)
+	_assert(counter_bridge.get("applied", null) != null,
+		"counter prefix: counter DAMAGE_APPLIED committed")
 	# Provider fires EXACTLY ONCE (only the player's DMG).
 	_assert(int(provider.invocations) == 1,
 		"one-shot provider invoked exactly 1 time (got %d)"
 		% int(provider.invocations))
 	# Counter source/target swap.
-	_assert(int(events[2].source_entity) == 1
-			and int(events[2].target_entity) == 0,
-		"counter ATK: source=1 target=0 (reverse)")
+	# B6.4c: the counter ATTACK_RESOLVED is events[3] (the
+	# player's DAMAGE_APPLIED at events[2] is the counter's
+	# discovery trigger).
 	_assert(int(events[3].source_entity) == 1
 			and int(events[3].target_entity) == 0,
+		"counter ATK: source=1 target=0 (reverse)")
+	# The counter's DAMAGE is the last of the six events.
+	_assert(int(events[5].source_entity) == 1
+			and int(events[5].target_entity) == 0,
 		"counter DMG: source=1 target=0 (reverse)")
 	# Unique event_ids across the entire trace.
 	var seen: Dictionary = {}
@@ -505,23 +538,33 @@ func _test_depth_bound_dispatcher() -> void:
 	_assert(int(result.reactions_executed) == 1,
 		"depth-bound: exactly 1 reaction admitted (got %d)"
 		% int(result.reactions_executed))
-	# result.events contains exactly the committed atomic pair.
-	_assert(result.events.size() == 2,
-		"depth-bound: result.events.size == 2 (atomic pair, got %d)"
-		% result.events.size())
-	if result.events.size() != 2:
+	# B6.4c: the committed events of the depth-2 counter are THREE
+	# (the intent layer + the window layer + the commit layer):
+	#   counter ATTACK_RESOLVED -> counter DAMAGE_STARTED
+	#                         -> counter DAMAGE_APPLIED
+	_assert(result.events.size() == 3,
+		"depth-bound: result.events.size == 3 (ATK, STARTED, DMG, got %d)"
+			% result.events.size())
+	if result.events.size() != 3:
 		return
 	var counter_atk = result.events[0]
-	var counter_dmg = result.events[1]
+	var counter_started = result.events[1]
+	var counter_dmg = result.events[2]
 	_assert(int(counter_atk.type) == BattleEventTypeScript.ATTACK_RESOLVED,
 		"depth-bound: counter ATK type")
+	_assert(int(counter_started.type) == BattleEventTypeScript.DAMAGE_STARTED,
+		"depth-bound: counter DAMAGE_STARTED type")
 	_assert(int(counter_dmg.type) == BattleEventTypeScript.DAMAGE_APPLIED,
 		"depth-bound: counter DMG type")
+	# The counter ATK is admitted AT the depth limit (2), so its
+	# own window layer sits at 3 and its commit at 4.
 	_assert(int(counter_atk.chain_depth) == 2,
 		"depth-bound: counter ATK chain_depth == 2 (admitted at limit)")
-	_assert(int(counter_dmg.chain_depth) == 3,
-		"depth-bound: counter DMG chain_depth == 3 "
-		+ "(atomic child, > limit, remains committed)")
+	_assert(int(counter_started.chain_depth) == 3,
+		"depth-bound: counter DAMAGE_STARTED chain_depth == 3")
+	_assert(int(counter_dmg.chain_depth) == 4,
+		"depth-bound: counter DMG chain_depth == 4 "
+		+ "(child of the window layer, > limit, remains committed)")
 	# Both share the ORIGINAL root_action_id (no fresh root).
 	var original_root_id: int = int(atk_root.root_action_id)
 	_assert(int(counter_atk.root_action_id) == original_root_id,
@@ -533,8 +576,10 @@ func _test_depth_bound_dispatcher() -> void:
 	# admitted from initial DMG depth 1).
 	_assert(int(counter_atk.parent_event_id) == int(dmg_root.event_id),
 		"depth-bound: counter ATK.parent_event_id == initial DMG.event_id")
-	_assert(int(counter_dmg.parent_event_id) == int(counter_atk.event_id),
-		"depth-bound: counter DMG.parent_event_id == counter ATK.event_id")
+	_assert(int(counter_started.parent_event_id) == int(counter_atk.event_id),
+		"depth-bound: counter DAMAGE_STARTED.parent == counter ATK.event_id")
+	_assert(int(counter_dmg.parent_event_id) == int(counter_started.event_id),
+		"depth-bound: counter DMG.parent == counter DAMAGE_STARTED.event_id")
 	# World: player HP must reflect exactly ONE counter damage.
 	# 20-5 raw → 13 dmg applied (HP 200 → 187). If a SECOND counter
 	# were silently executed, HP would be lower (200 - 2*13 = 174).
@@ -562,12 +607,15 @@ func _test_depth_bound_dispatcher() -> void:
 	_assert(int(session.first_reason) == int(DispatchResultScript.REASON_MAX_DEPTH),
 		"depth-bound: session.first_reason == MAX_DEPTH (got %d)"
 		% int(session.first_reason))
-	# Sink contains the admitted counter atomic pair (counter
-	# ATK + counter DMG). The initial event itself lives outside
-	# result.events by B5 contract.
-	_assert(sink.size() == 2,
-		"depth-bound: sink contains the counter atomic pair (got %d)"
-		% sink.size())
+	# Sink contains the admitted counter events (counter ATK +
+	# counter DAMAGE_STARTED + counter DAMAGE_APPLIED). The
+	# initial event itself lives outside result.events by B5
+	# contract.
+	# B6.4c: the window layer adds one event to the committed
+	# chain (3 instead of the legacy atomic pair of 2).
+	_assert(sink.size() == 3,
+		"depth-bound: sink contains the counter chain (got %d)"
+			% sink.size())
 
 
 # ============================================================
@@ -674,8 +722,10 @@ func _test_20_run_determinism_reaction_enabled() -> void:
 		# it from the reaction counter.
 		# ============================================================
 		var player_atk = null
+		var player_started = null
 		var player_dmg = null
 		var counter_atk = null
+		var counter_started = null
 		var counter_dmg = null
 		var enemy_sched_atk = null
 		for e in events:
@@ -686,9 +736,14 @@ func _test_20_run_determinism_reaction_enabled() -> void:
 					and int(e.parent_event_id) == -1:
 				if player_atk == null:
 					player_atk = e
-			if player_atk != null and player_dmg == null \
-					and int(e.type) == BattleEventTypeScript.DAMAGE_APPLIED \
+			if player_atk != null and player_started == null \
+					and int(e.type) == BattleEventTypeScript.DAMAGE_STARTED \
 					and int(e.parent_event_id) == int(player_atk.event_id) \
+					and int(e.root_action_id) == int(player_atk.root_action_id):
+				player_started = e
+			if player_started != null and player_dmg == null \
+					and int(e.type) == BattleEventTypeScript.DAMAGE_APPLIED \
+					and int(e.parent_event_id) == int(player_started.event_id) \
 					and int(e.root_action_id) == int(player_atk.root_action_id):
 				player_dmg = e
 			if player_dmg != null and counter_atk == null \
@@ -699,13 +754,19 @@ func _test_20_run_determinism_reaction_enabled() -> void:
 					and int(e.root_action_id) == int(player_atk.root_action_id) \
 					and int(e.chain_depth) == int(player_dmg.chain_depth) + 1:
 				counter_atk = e
-			if counter_atk != null and counter_dmg == null \
-					and int(e.type) == BattleEventTypeScript.DAMAGE_APPLIED \
-					and int(e.source_entity) == 1 \
-					and int(e.target_entity) == 0 \
+			if counter_atk != null and counter_started == null \
+					and int(e.type) == BattleEventTypeScript.DAMAGE_STARTED \
 					and int(e.parent_event_id) == int(counter_atk.event_id) \
 					and int(e.root_action_id) == int(player_atk.root_action_id) \
 					and int(e.chain_depth) == int(counter_atk.chain_depth) + 1:
+				counter_started = e
+			if counter_started != null and counter_dmg == null \
+					and int(e.type) == BattleEventTypeScript.DAMAGE_APPLIED \
+					and int(e.source_entity) == 1 \
+					and int(e.target_entity) == 0 \
+					and int(e.parent_event_id) == int(counter_started.event_id) \
+					and int(e.root_action_id) == int(player_atk.root_action_id) \
+					and int(e.chain_depth) == int(counter_started.chain_depth) + 1:
 				counter_dmg = e
 			if player_atk != null \
 					and int(e.type) == BattleEventTypeScript.ATTACK_RESOLVED \
@@ -718,26 +779,38 @@ func _test_20_run_determinism_reaction_enabled() -> void:
 					enemy_sched_atk = e
 		_assert(player_atk != null,
 			"run %d: player ATK root found" % run)
+		_assert(player_started != null,
+			"run %d: player DAMAGE_STARTED found under player ATK" % run)
 		_assert(player_dmg != null,
-			"run %d: player DMG found under player ATK" % run)
+			"run %d: player DMG found under player STARTED" % run)
 		_assert(counter_atk != null,
 			"run %d: counter ATK found under player DMG (causally identified via parent_event_id + root_action_id)"
-			% run)
+				% run)
+		_assert(counter_started != null,
+			"run %d: counter DAMAGE_STARTED found under counter ATK" % run)
 		_assert(counter_dmg != null,
-			"run %d: counter DMG found under counter ATK" % run)
-		_assert(counter_atk != null
-				and int(counter_atk.chain_depth) == 2,
-			"run %d: counter ATK chain_depth == 2" % run)
-		_assert(counter_dmg != null
-				and int(counter_dmg.chain_depth) == 3,
-			"run %d: counter DMG chain_depth == 3" % run)
+			"run %d: counter DMG found under counter STARTED" % run)
+		# B6.4c: the inserted DAMAGE_STARTED layer adds one depth
+		# level per damage:
+		#   player ATK(0) -> STARTED(1) -> DMG(2)
+		#   counter ATK(3) -> STARTED(4) -> DMG(5)
+		# The RELATIVE +1 per layer is what the contract requires
+		# (and is checked by the shared bridge helper).
+		if counter_atk != null:
+			_assert(int(counter_atk.chain_depth) == 3,
+				"run %d: counter ATK chain_depth == 3" % run)
+		if counter_dmg != null:
+			_assert(int(counter_dmg.chain_depth) == 5,
+				"run %d: counter DMG chain_depth == 5" % run)
 		# Reaction chain shares the ORIGINAL player root.
-		_assert(int(counter_atk.root_action_id) == int(player_atk.root_action_id),
-			"run %d: counter ATK root_action_id == player ATK root_action_id"
-			% run)
-		_assert(int(counter_dmg.root_action_id) == int(player_atk.root_action_id),
-			"run %d: counter DMG root_action_id == player ATK root_action_id"
-			% run)
+		if counter_atk != null:
+			_assert(int(counter_atk.root_action_id) == int(player_atk.root_action_id),
+				"run %d: counter ATK root_action_id == player ATK root_action_id"
+					% run)
+		if counter_dmg != null:
+			_assert(int(counter_dmg.root_action_id) == int(player_atk.root_action_id),
+				"run %d: counter DMG root_action_id == player ATK root_action_id"
+					% run)
 		# If a later enemy scheduled attack is present (e.g.
 		# enemy has range and fires next tick), it must be
 		# an INDEPENDENT root, distinct from the player root.

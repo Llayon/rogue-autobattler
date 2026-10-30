@@ -46,6 +46,19 @@ const STATUS_EXPIRED: int = 10
 ## UNIT_MOVE_STARTED stands alone as telemetry/intent.
 const UNIT_MOVE_STARTED: int = 11
 
+## Phase-3 B6.4c addition. Frozen at 12.
+## DAMAGE_STARTED: pre-damage-window intent event.
+## Emitted by a damage-origin effect (PerformAttackEffect,
+## DamageEffect) AFTER computing base damage and creating a
+## DamageTransaction, but BEFORE any HP mutation. The amount
+## carries the immutable BASE damage (= DamageTransaction.base_amount()).
+## Carries source/target/RunUnit IDs and semantic tag. Children of
+## this event are pre-damage reactions, the eventual DAMAGE_APPLIED,
+## and (if lethal) the eventual UNIT_DIED. Public emission must
+## happen before any pre-damage reaction is dispatched, so that
+## counterattack timing is preserved.
+const DAMAGE_STARTED: int = 12
+
 
 ## Returns a snapshot Array of all (name, value) pairs in
 ## declaration order. Used by tests to assert uniqueness and
@@ -64,4 +77,5 @@ static func all_entries() -> Array:
 		["STATUS_TICKED", STATUS_TICKED],
 		["STATUS_EXPIRED", STATUS_EXPIRED],
 		["UNIT_MOVE_STARTED", UNIT_MOVE_STARTED],
+		["DAMAGE_STARTED", DAMAGE_STARTED],
 	]

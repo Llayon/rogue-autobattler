@@ -1,5 +1,5 @@
 class_name TriggerDispatcher extends RefCounted
-## B5 / Phase-3 / TriggerDispatcher — bounded FIFO event
+## B6 / Phase-3 / TriggerDispatcher — bounded FIFO event
 ## dispatcher.
 ##
 ## Consumes committed BattleEvents. For each event:
@@ -27,6 +27,14 @@ class_name TriggerDispatcher extends RefCounted
 ##         both result.events AND the queue (no
 ##         post-pop re-record). Initial input events are
 ##         NEVER re-emitted by the dispatcher.
+##
+## B6.4c: process_work() accepts a heterogeneous work array
+## containing BattleEvent AND DamageWindowWorkItem. Window
+## items trigger the pre-damage reaction window, then
+## finalize, then re-enqueue delayed seeds + collected
+## dispatch work + finalize-emitted events. Legacy
+## process() is preserved for the standalone (non-window)
+## path used by tests that drive the dispatcher directly.
 ##
 ## Hard limits (see TriggerLimits):
 ##   - max_chain_depth: refuse EffectRequest whose
@@ -74,6 +82,19 @@ class_name TriggerDispatcher extends RefCounted
 ##   Once the session reaches MAX_EVENTS, every subsequent
 ##   process() call within that session returns an empty
 ##   result (preserves session.truncated/resetting nothing).
+##
+## B6.4c invariants:
+##   - No Effect/EffectExecutor/Continuation calls
+##     TriggerDispatcher.process*. Dispatcher entrypoints
+##     are invoked only by BattleSimulation-owned
+##     scheduler/phase code (including _resolve_or_move)
+##     or by explicit tests.
+##   - Each DamageWindowWorkItem is processed exactly
+##     once. finalize() is called inline within the work
+##     loop. The handle is closed by finalize itself.
+##   - pending_count tracks the number of work items
+##     currently queued or in-flight. BattleSimulation
+##     asserts pending_count == 0 at end of tick.
 
 const EffectContextScript = preload("res://core/battle_ecs/effects/effect_context.gd")
 const EffectExecutorScript = preload("res://core/battle_ecs/effects/effect_executor.gd")
@@ -83,9 +104,10 @@ const DispatchResultScript = preload("res://core/battle_ecs/triggers/dispatch_re
 const TriggerDispatchSessionScript = preload(
 	"res://core/battle_ecs/triggers/trigger_dispatch_session.gd")
 
-var _queue: Array = []                       # BattleEvent
+var _queue: Array = []                       # BattleEvent | DamageWindowWorkItem
 var _seen: Dictionary = {}                  # event_id -> true (per-call OR session-scoped)
 var _reaction_budget: Dictionary = {}        # root_action_id -> int (per-call OR session-scoped)
+var _pending_count: int = 0                 # B6.4c: window work items in flight + queued
 
 
 ## Begin a fresh tick-scoped trigger session. The session
@@ -127,9 +149,57 @@ func process(
 		p_provider,
 		p_limits: Resource,
 		p_session = null) -> RefCounted:
+	# B6.4c: process() is a BACKWARD-COMPATIBLE WRAPPER around
+	# process_work(). It must NOT contain its own copy of the
+	# work-pump state machine. Two divergent cycles were a
+	# refactor accident that we explicitly removed. All queue
+	# logic, seen-set, MAX_EVENTS, window handling, finalize,
+	# delayed seeds, collector mode, and post-commit FIFO live
+	# in EXACTLY ONE place: process_work(). This wrapper just
+	# routes the call there. The return value of process_work
+	# (DispatchResult) is compatible with the legacy return
+	# contract: legacy callers (b64a, b62b-counters, etc.) only
+	# read .events / .truncated / .reason / .reactions_executed.
+	return process_work(
+		p_initial_events,
+		p_world, p_rng, p_emitter, p_sink,
+		p_provider, p_limits, p_session)
+
+
+# Internal: enqueue an event.
+func _enqueue(ev) -> void:
+	_queue.append(ev)
+	# B6.4c: DamageWindowWorkItem counts toward pending_count
+	# while in the queue. BattleEvent and other items do not.
+	if ev != null and ev.get_script() != null \
+			and ev.get_script().get_global_name() == "DamageWindowWorkItem":
+		_pending_count += 1
+
+
+# B6.4c: number of DamageWindowWorkItem instances currently
+# in the queue. BattleSimulation asserts this is 0 at end of
+# step_tick to detect dangling windows.
+func pending_count() -> int:
+	return int(_pending_count)
+
+
+# B6.4c: process a heterogeneous work array. BattleEvent
+# items go through the existing FIFO reaction path. Window
+# items trigger their pre-damage window, finalize, and
+# re-enqueue post-commit work. This is the ONE work pump.
+#
+# Does NOT recursively call process/process_work.
+func process_work(
+		p_initial_items: Array,
+		p_world,
+		p_rng,
+		p_emitter,
+		p_sink: Array,
+		p_provider,
+		p_limits: Resource,
+		p_session = null) -> RefCounted:
 	var using_session: bool = p_session != null
 	if using_session:
-		# Dispatcher refs alias the session accumulators.
 		_seen = p_session._seen
 		_reaction_budget = p_session._reaction_budget
 		_queue = []
@@ -137,50 +207,63 @@ func process(
 		_reset()
 		if p_limits == null:
 			p_limits = TriggerLimitsScript.new()
-	# Effective numeric limits: from session if provided,
-	# else from the limits Resource.
+	_reset()
+	_pending_count = 0
+	# Re-attach session aliases AFTER _reset (which clears
+	# _seen / _reaction_budget / _queue for the standalone
+	# path; the session path re-aliases them).
+	if using_session:
+		_seen = p_session._seen
+		_reaction_budget = p_session._reaction_budget
+		_queue = []
 	var eff_max_events: int = int(
 		p_session.max_events_per_tick if using_session \
-			else p_limits.max_events_per_tick)
+				else p_limits.max_events_per_tick)
 	var eff_max_chain: int = int(
 		p_session.max_chain_depth if using_session \
-			else p_limits.max_chain_depth)
+				else p_limits.max_chain_depth)
 	var eff_max_reactions_per_root: int = int(
 		p_session.max_reactions_per_root if using_session \
-			else p_limits.max_reactions_per_root)
+				else p_limits.max_reactions_per_root)
 	var result := DispatchResultScript.new()
-	# Mirror session state (truncation that already fired
-	# in a prior call of this tick) into this call's result.
 	if using_session and bool(p_session.truncated):
 		result.truncated = true
 		result.reason = int(p_session.first_reason)
-	# Seed the queue with initial events (in order).
 	var executor = EffectExecutorScript.new()
-	for ev in p_initial_events:
-		_enqueue(ev)
-	# FIFO loop. MAX_EVENTS is the ONLY global stop. The
-	# canonical contract is: 4 unique events accepted with
-	# cap=4 -> NOT truncated. The 5th unique event in this
-	# same tick session -> truncated (try_mark returns
-	# false due to cap pre-check, then we record truncation
-	# and break). This means a call whose INITIAL events all
-	# equal cap (e.g. r3 here: pop e4 with cap=4 already hit)
-	# correctly records truncated=true and emits nothing.
+	for item in p_initial_items:
+		_enqueue(item)
 	while _queue.size() > 0:
-		var ev = _queue.pop_front()
+		var item = _queue.pop_front()
+		if item == null:
+			continue
+		# B6.4c window branch: handle DamageWindowWorkItem
+		# specially. finalize() emits DAMAGE_APPLIED / UNIT_DIED
+		# directly into p_sink. delayed_dispatch_seeds and the
+		# direct-reaction outputs go into _queue for the next
+		# iterations.
+		var item_name: String = ""
+		if item.get_script() != null:
+			item_name = String(item.get_script().get_global_name())
+		if item_name == "DamageWindowWorkItem":
+			# B6.4c: the ONE implementation of the pre-damage
+			# window state machine. See _process_window_item.
+			_process_window_item(
+				item, p_world, p_rng, p_emitter, p_sink,
+				p_provider, result, executor,
+				eff_max_chain, eff_max_reactions_per_root, p_session)
+			# Drain pending_count: this work item is done.
+			_pending_count = maxi(0, int(_pending_count) - 1)
+			continue
+		# BattleEvent legacy path
+		var ev: BattleEvent = item
 		var ev_id: int = int(ev.event_id)
-		# Canonical: re-dispatch protection.
 		if (using_session and p_session.has_seen(ev_id)) \
 				or (not using_session and _seen.has(ev_id)):
 			continue
-		# Canonical pre-check: try_mark is the ONE place
-		# that mutates events_processed. It returns false
-		# either if already seen OR cap reached.
 		var accepted: bool = true
 		if using_session:
 			accepted = p_session.try_mark(ev_id)
 		else:
-			# Standalone path: mirror the session contract.
 			if _seen.size() >= eff_max_events:
 				accepted = false
 			else:
@@ -190,8 +273,6 @@ func process(
 				else:
 					accepted = false
 		if not accepted:
-			# Cap reached. Record truncation for the first
-			# time, set reason, and break. No rollback.
 			result.truncated = true
 			if result.reason == 0:
 				result.reason = int(
@@ -200,34 +281,294 @@ func process(
 				p_session.record_truncation(int(
 					DispatchResultScript.REASON_MAX_EVENTS))
 			break
-		# Discovery (PURE per B5.1 contract).
-		var reactions: Array = p_provider.discover(p_world, ev, p_rng)
-		for reaction in reactions:
+		var reactions_b: Array = p_provider.discover(p_world, ev, p_rng)
+		for reaction in reactions_b:
 			if reaction == null or reaction.request == null:
 				continue
-			var outcome: int = _execute_reaction(
+			var outcome_b: int = _execute_reaction(
 				reaction, ev, p_world, p_rng, p_emitter, p_sink,
 				executor, result, eff_max_chain, eff_max_reactions_per_root,
-				p_session)
-			if outcome != DispatchResultScript.REASON_NONE:
+				p_session, p_provider)
+			# B6.4c: REASON_NONE means success / chance miss /
+			# invalid-chance fail-closed / malformed skip. It MUST
+			# NOT mark truncation. Truncation happens ONLY for
+			# bounded reasons (MAX_DEPTH, MAX_REACTIONS_PER_ROOT,
+			# MAX_EVENTS). There is deliberately NO sibling else:
+			# an `else: result.truncated = true` here made every
+			# ordinary chance miss look truncated.
+			if outcome_b != DispatchResultScript.REASON_NONE:
 				if using_session and not p_session.truncated:
-					p_session.record_truncation(int(outcome))
-					result.truncated = true
-					result.reason = int(outcome)
-				elif using_session and p_session.truncated:
-					result.truncated = true
-					result.reason = int(p_session.first_reason)
-				else:
-					# Standalone: first non-NONE wins.
-					result.truncated = true
-					if result.reason == 0:
-						result.reason = int(outcome)
+					p_session.record_truncation(int(outcome_b))
+				result.truncated = true
+				if result.reason == DispatchResultScript.REASON_NONE:
+					result.reason = int(outcome_b)
+			elif using_session and p_session.truncated:
+				result.truncated = true
+				result.reason = int(p_session.first_reason)
+	# B6.4c DRAINED-WINDOW INVARIANT (fail-safe).
+	#
+	# The loop above can break early (MAX_EVENTS cap) with
+	# DamageWindowWorkItem entries still queued. Such a window has
+	# been OPENED but never finalized: its HP mutation would be
+	# SILENTLY LOST, and the battle-level pending_count would not
+	# reflect it (it was reset at the top of this call).
+	#
+	# Every window that was opened MUST be closed. Here we drain
+	# the remaining windows: each is finalized with its CURRENT
+	# pending amount (no modifiers — discovery is already
+	# bounded) so the damage is applied exactly once and the
+	# window is closed.
+	#
+	# Post-commit DISCOVERY of those windows stays deferred: the
+	# pump has already reported truncation, and re-entering the
+	# discovery path would exceed the very cap that stopped us.
+	var leftover_windows: Array = []
+	for item in _queue:
+		if item == null or item.get_script() == null:
+			continue
+		if String(item.get_script().get_global_name()) \
+				== "DamageWindowWorkItem":
+			leftover_windows.append(item)
+	for w in leftover_windows:
+		_process_window_item(
+			w, p_world, p_rng, p_emitter, p_sink,
+			p_provider, result, executor,
+			eff_max_chain, eff_max_reactions_per_root, p_session)
+		_pending_count = maxi(0, int(_pending_count) - 1)
+	if leftover_windows.size() > 0:
+		# The drain is a bounded-execution completion: the windows
+		# are closed, but their post-commit discovery is NOT run.
+		result.truncated = true
+		if int(result.reason) == 0:
+			result.reason = int(
+				DispatchResultScript.REASON_MAX_EVENTS)
 	return result
 
 
-# Internal: enqueue an event.
-func _enqueue(ev) -> void:
-	_queue.append(ev)
+# ============================================================
+# B6.4c — the ONE pre-damage window state machine.
+#
+# Called from the single canonical work pump when a
+# DamageWindowWorkItem is popped. It:
+#   1. discovers direct reactions on DAMAGE_STARTED and runs
+#      them in COLLECTOR mode (their dispatch_work is collected,
+#      not enqueued yet);
+#   2. finalizes the window (HP mutation + DAMAGE_APPLIED /
+#      UNIT_DIED allocation);
+#   3. enqueues the post-commit FIFO: delayed seeds, collected
+#      work, finalize-emitted.
+#
+# IMPORTANT: the sibling-reaction ordering contract.
+#
+# Legacy a5dd87d executed a damage-producing reaction
+# SYNCHRONOUSLY: it mutated HP before the NEXT sibling
+# reaction on the same event was even admitted. A sibling
+# reaction therefore observed the POST-damage world state, and
+# a reaction whose target had just died was rejected by the
+# is_alive() pre-guard (no ATTACK_RESOLVED was published).
+#
+# B6.4c splits intent from commit (DAMAGE_STARTED /
+# DAMAGE_APPLIED). To preserve legacy world-state semantics,
+# the window that a reaction opened must be COMPLETE (its HP
+# mutation done) before the NEXT sibling reaction on the same
+# event is admitted.
+#
+# This is achieved WITHOUT a second pump and WITHOUT recursion:
+# the reaction execution path, when it opens a window, drives
+# the window to completion inline via _process_window_item and
+# then continues with the next sibling. Post-commit DISCOVERY
+# (the delayed seeds / finalize-emitted) stays in the canonical
+# FIFO and may be drained later.
+# ============================================================
+func _process_window_item(
+		p_item,
+		p_world, p_rng, p_emitter, p_sink: Array,
+		p_provider,
+		p_result: RefCounted,
+		p_executor,
+		p_max_chain_depth: int, p_max_reactions_per_root: int,
+		p_session) -> void:
+	var using_session: bool = p_session != null
+	# B6.4c MAX_EVENTS policy at work-item level: if the
+	# session is already truncated, finalize the window with
+	# the current pending amount and skip discovery.
+	if using_session and bool(p_session.cap_reached()):
+		# B6.4c: the bounded execution MUST be reported, not
+		# silent. The window is finalized with the current pending
+		# amount and discovery is skipped, but the caller has to
+		# learn that the MAX_EVENTS cap was hit.
+		#
+		# Before this fix the window path silently finalized
+		# without setting result.truncated / result.reason, so a
+		# capped run looked identical to an uncapped one.
+		p_result.truncated = true
+		if int(p_result.reason) == 0:
+			p_result.reason = int(
+				DispatchResultScript.REASON_MAX_EVENTS)
+		if using_session and not bool(p_session.truncated):
+			p_session.record_truncation(int(
+				DispatchResultScript.REASON_MAX_EVENTS))
+		var fr_pre = p_item.continuation.finalize(
+			p_world, p_sink, p_emitter)
+		if fr_pre != null:
+			for ev in fr_pre.emitted:
+				p_result.events.append(ev)
+		for ev in p_item.delayed_dispatch_seeds:
+			_enqueue(ev)
+		return
+	# Normal path: discover direct reactions on DAMAGE_STARTED,
+	# run them in collector mode.
+	var dmg_started: BattleEvent = p_item.event
+	var dmg_id: int = int(dmg_started.event_id)
+	if using_session:
+		p_session.try_mark(dmg_id)
+	else:
+		_seen[dmg_id] = true
+	var window_collected_work: Array = []
+	var reactions: Array = p_provider.discover(
+		p_world, dmg_started, p_rng)
+	for reaction in reactions:
+		if reaction == null or reaction.request == null:
+			continue
+		var outcome: int = _execute_reaction_window(
+			reaction, dmg_started, p_world, p_rng, p_emitter,
+			p_sink, p_executor, p_result, p_provider,
+			p_max_chain_depth,
+			p_max_reactions_per_root, p_session,
+			p_item.handle, window_collected_work)
+		if outcome != DispatchResultScript.REASON_NONE:
+			if using_session and not p_session.truncated:
+				p_session.record_truncation(int(outcome))
+			p_result.truncated = true
+			if p_result.reason == DispatchResultScript.REASON_NONE:
+				p_result.reason = int(outcome)
+			break
+	# Finalize the window. This is the HP mutation point.
+	var fr = p_item.continuation.finalize(
+		p_world, p_sink, p_emitter)
+	if fr != null:
+		for ev in fr.emitted:
+			p_result.events.append(ev)
+	# Post-commit FIFO order:
+	#   1. delayed_dispatch_seeds (already-public events whose
+	#      DISCOVERY is delayed until after commit)
+	#   2. window_collected_work (downstream work from direct
+	#      reactions that fired in the window)
+	#   3. finalize_result.emitted (DAMAGE_APPLIED / UNIT_DIED,
+	#      freshly allocated by finalize)
+	for ev in p_item.delayed_dispatch_seeds:
+		_enqueue(ev)
+	for ev in window_collected_work:
+		_enqueue(ev)
+	if fr != null:
+		for ev in fr.emitted:
+			_enqueue(ev)
+
+
+# B6.4c window-mode execution of a single direct reaction.
+# Collector mode: the result's dispatch_work is collected
+# into p_collected_work instead of being enqueued. Public
+# events are still appended to p_sink and result.events.
+# p_handle is the active window handle; wctx is built locally
+# with ctx.damage_window = p_handle so direct reactions can
+# read/modify the pending damage.
+func _execute_reaction_window(
+		p_reaction,
+		p_triggering_event,
+		p_world, p_rng, p_emitter, p_sink: Array,
+		p_executor, p_result: RefCounted,
+		p_provider,
+		p_max_chain_depth: int, p_max_reactions_per_root: int,
+		p_session,
+		p_handle,
+		p_collected_work: Array) -> int:
+	var root_id: int = int(p_triggering_event.root_action_id)
+	var used: int
+	if p_session != null:
+		used = int(p_session.used_budget_for(root_id))
+	else:
+		used = int(_reaction_budget.get(root_id, 0))
+	var req = EffectRequestScript.child_from_template(
+		p_reaction.request, p_triggering_event)
+	if req == null:
+		return DispatchResultScript.REASON_NONE
+	if int(req.chain_depth) > int(p_max_chain_depth):
+		return DispatchResultScript.REASON_MAX_DEPTH
+	if used >= int(p_max_reactions_per_root):
+		return DispatchResultScript.REASON_MAX_REACTIONS_PER_ROOT
+	var chance: float = float(p_reaction.trigger_chance)
+	if is_nan(chance) or is_inf(chance) \
+			or chance < 0.0 or chance > 1.0:
+		return DispatchResultScript.REASON_NONE
+	var hit: bool = false
+	if chance >= 1.0:
+		hit = true
+	elif chance <= 0.0:
+		hit = false
+	else:
+		var roll: float = float(p_rng.randf())
+		hit = roll < chance
+	if not hit:
+		return DispatchResultScript.REASON_NONE
+	var new_used: int = used + 1
+	if p_session != null:
+		p_session._reaction_budget[root_id] = new_used
+	else:
+		_reaction_budget[root_id] = new_used
+	p_result.reactions_executed += 1
+	# Build wctx locally with damage_window set. This is the
+	# ONLY mechanism by which direct window reactions access
+	# the live transaction.
+	var wctx = EffectContextScript.new(p_world, p_rng, p_emitter, p_sink)
+	wctx._set_damage_window_for_window_reaction(p_handle)
+	var exec_result = p_executor.execute(wctx, req)
+	if exec_result == null:
+		return DispatchResultScript.REASON_NONE
+	# Collector mode: append public events to result and sink
+	# normally, but COLLECT the downstream dispatch work
+	# instead of immediately enqueueing.
+	for emitted in exec_result.events:
+		p_result.events.append(emitted)
+	# p_sink appends happen inside execute() through
+	# ctx.emit_through_sink, but if the effect bypassed that
+	# helper, ensure public events are in p_sink too.
+	for emitted in exec_result.events:
+		if not p_sink.has(emitted):
+			p_sink.append(emitted)
+	# B6.4c WINDOW-PATH SIBLING ORDERING (regression fix).
+	#
+	# The sibling-ordering contract requires that a sibling
+	# observes all synchronous commits of the PREVIOUS siblings.
+	# The legacy path (_execute_reaction) honours it by driving a
+	# window-opening sibling's window INLINE.
+	#
+	# The window path used to COLLECT the sibling's dispatch_work
+	# and enqueue it only AFTER the outer window finalizes — so a
+	# sibling that opened a nested damage window had that nested
+	# window commit LATE, and the NEXT sibling observed the
+	# PRE-commit world (no room for a heal, an extra attack
+	# intent, ...).
+	#
+	# Here the nested window is driven INLINE, exactly like the
+	# legacy path: its HP mutation completes before the next
+	# sibling is admitted. The nested window's own POST-COMMIT
+	# discovery (delayed seeds, collected work, finalize-emitted)
+	# stays in the collector and is enqueued after the outer
+	# window finalizes, which is the canonical FIFO order.
+	for dw in exec_result.dispatch_work:
+		if dw == null or dw.get_script() == null:
+			p_collected_work.append(dw)
+			continue
+		if String(dw.get_script().get_global_name()) \
+				!= "DamageWindowWorkItem":
+			p_collected_work.append(dw)
+			continue
+		# Drive the nested window to completion inline.
+		_process_window_item(
+			dw, p_world, p_rng, p_emitter, p_sink,
+			p_provider, p_result, p_executor,
+			p_max_chain_depth, p_max_reactions_per_root, p_session)
+	return DispatchResultScript.REASON_NONE
 
 
 # Internal: execute one reaction; returns REASON_NONE on
@@ -265,7 +606,8 @@ func _execute_reaction(
 		p_result: RefCounted,
 		p_max_chain_depth: int,
 		p_max_reactions_per_root: int,
-		p_session = null) -> int:
+		p_session = null,
+		p_provider = null) -> int:
 	# Per-root reaction budget PEEK (do not mutate until hit).
 	var root_id: int = int(p_triggering_event.root_action_id)
 	var used: int
@@ -326,14 +668,76 @@ func _execute_reaction(
 		_reaction_budget[root_id] = new_used
 	p_result.reactions_executed += 1
 
-	# Execute via simulation-owned resources.
+	# B6.4c contract (FINAL): the work-pump channels are STRICTLY
+	# separated. Failure to keep them separated creates the
+	# recurrent-timing bug we built B6.4c to eliminate.
+	#
+	#   events          = public synchronous events, observable
+	#                    to callers. NOT enqueued for future
+	#                    trigger discovery. Going to result.events
+	#                    ONLY.
+	#   dispatch_work   = the SOLE channel that drives future
+	#                    trigger discovery. Going to queue ONLY.
+	#                    Window work items (e.g.
+	#                    DamageWindowWorkItem) live here, NOT in
+	#                    events. Pre-damage window for reaction-
+	#                    origin attacks depends on this contract:
+	#                    the work item gates discovery until
+	#                    finalize() commits.
+	#
+	# Legacy effects (HEAL, APPLY_STATUS, etc.) have
+	# dispatch_work == events.duplicate() (set by
+	# EffectResult.succeeded default). They are enqueued ONCE
+	# via the dispatch_work path. No double-dispatch.
+	#
+	# Window-opening effects (PerformAttack, DamageEffect) have
+	# events == [ATK, DMG_STARTED] and dispatch_work ==
+	# [WindowWorkItem]. Only the work item is enqueued. The
+	# public events stay out of the FIFO so reaction discovery
+	# for them is controlled by the window handler.
+	#
+	# Critically: NEVER _enqueue() from exec_result.events.
 	var ctx = EffectContextScript.new(p_world, p_rng, p_emitter, p_sink)
 	var exec_result = p_executor.execute(ctx, req)
 	if exec_result == null:
 		return DispatchResultScript.REASON_NONE
-	# AT COMMIT TIME: append every committed event to
-	# BOTH p_result.events and the queue.
 	for emitted in exec_result.events:
 		p_result.events.append(emitted)
-		_enqueue(emitted)
+	if exec_result.dispatch_work != null:
+		for w in exec_result.dispatch_work:
+			# B6.4c SIBLING-REACTION ORDERING.
+			#
+			# Legacy a5dd87d executed a damage-producing reaction
+			# SYNCHRONOUSLY: it mutated HP before the NEXT
+			# sibling reaction on the same event was admitted. A
+			# sibling therefore observed the POST-damage world
+			# state, and a reaction whose target had just died
+			# was rejected by the is_alive() pre-guard — its
+			# ATTACK_RESOLVED was NEVER published.
+			#
+			# B6.4c splits intent from commit, so the window
+			# this reaction opened is not yet finalized when the
+			# next sibling is admitted. To preserve legacy
+			# world-state semantics we complete the window
+			# INLINE here (same pump, no recursion, no second
+			# dispatcher): the HP mutation and the
+			# DAMAGE_APPLIED / UNIT_DIED allocation happen
+			# BEFORE the next sibling reaction is admitted.
+			#
+			# Post-commit DISCOVERY (delayed seeds, collected
+			# work, finalize-emitted) stays in the canonical
+			# FIFO and is drained by the pump's next
+			# iterations — it does NOT need to precede the
+			# sibling.
+			if w != null and w.get_script() != null \
+					and String(w.get_script().get_global_name()) \
+					== "DamageWindowWorkItem" \
+					and p_provider != null:
+				_process_window_item(
+					w, p_world, p_rng, p_emitter, p_sink,
+					p_provider, p_result, p_executor,
+					p_max_chain_depth, p_max_reactions_per_root,
+					p_session)
+				continue
+			_enqueue(w)
 	return DispatchResultScript.REASON_NONE

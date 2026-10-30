@@ -615,10 +615,35 @@ func _test_no_op_provider_full_event_ordering_invariant() -> void:
 			break
 	_assert(attack_idx >= 0,
 		"first tick contains ATTACK_RESOLVED")
+	# B6.4c: the pre-damage window splits the legacy ATOMIC pair
+	# (ATTACK_RESOLVED + DAMAGE_APPLIED) into an INTENT layer and
+	# a COMMIT layer:
+	#   ATTACK_RESOLVED -> DAMAGE_STARTED -> DAMAGE_APPLIED
+	# The intent layer is published synchronously; the commit
+	# happens when the window is drained. So the event that
+	# FOLLOWS the ATTACK_RESOLVED is now the DAMAGE_STARTED, and
+	# the DAMAGE_APPLIED is its child.
 	if attack_idx >= 0 and attack_idx + 1 < first_tick_events.size():
-		_assert(int(first_tick_events[attack_idx + 1].type) == \
-				BattleEventTypeScript.DAMAGE_APPLIED,
-			"DAMAGE_APPLIED immediately follows ATTACK_RESOLVED in first tick (atomic action)")
+		var next_ev = first_tick_events[attack_idx + 1]
+		_assert(int(next_ev.type) == \
+				BattleEventTypeScript.DAMAGE_STARTED,
+			"DAMAGE_STARTED immediately follows ATTACK_RESOLVED in first tick (intent layer)")
+		_assert(int(next_ev.parent_event_id) == \
+				int(first_tick_events[attack_idx].event_id),
+			"DAMAGE_STARTED is a CHILD of ATTACK_RESOLVED")
+		_assert(int(next_ev.chain_depth) == 1,
+			"DAMAGE_STARTED chain_depth == 1")
+		# The commit is the CHILD of that intent.
+		var commit_idx: int = -1
+		for j in range(attack_idx + 2, first_tick_events.size()):
+			if int(first_tick_events[j].type) == \
+					BattleEventTypeScript.DAMAGE_APPLIED \
+					and int(first_tick_events[j].parent_event_id) == \
+						int(next_ev.event_id):
+				commit_idx = j
+				break
+		_assert(commit_idx >= 0,
+			"DAMAGE_APPLIED (commit) follows the DAMAGE_STARTED")
 
 
 # === Determinism ===
@@ -827,9 +852,14 @@ func _test_lethal_exact_trace() -> void:
 		"causal order: atk(%d) < dmg_base(%d) < dmg_rx(%d) < died(%d) < ended(%d last=%d)" % [
 			idx_atk, idx_dmg_base, idx_dmg_rx, idx_died, idx_end,
 			events.size() - 1])
-	# Reaction ancestry derives from base DAMAGE_APPLIED
-	# (parent_event_id == base damage event id, root_action_id
-	# matches). Verify on the reaction DAMAGE_APPLIED.
+	# B6.4c: the reaction's damage is a DIRECT DamageEffect (not
+	# a PerformAttack), so it opens its own window rooted at the
+	# base DAMAGE_APPLIED:
+	#   player ATK(0) -> STARTED(1) -> DMG_base(2)
+	#                   -> STARTED(3) -> DMG_rx(4) -> DIED(5)
+	# The reaction's DAMAGE_STARTED is the CHILD of the base
+	# DAMAGE_APPLIED, and the reaction's DAMAGE_APPLIED is the
+	# child of that STARTED.
 	var base_dmg_ev = null
 	var reaction_dmg_ev = null
 	for e in events:
@@ -840,10 +870,32 @@ func _test_lethal_exact_trace() -> void:
 				reaction_dmg_ev = e
 	_assert(reaction_dmg_ev != null,
 		"reaction DAMAGE_APPLIED event captured")
-	if reaction_dmg_ev != null and base_dmg_ev != null:
-		_assert(int(reaction_dmg_ev.parent_event_id) == int(base_dmg_ev.event_id),
-			"reaction ancestry derives from base DAMAGE_APPLIED (parent_event_id=%d == %d)" % [
-				int(reaction_dmg_ev.parent_event_id), int(base_dmg_ev.event_id)])
+	var base_started = null
+	var rx_started = null
+	var atk_event = events[idx_atk] if idx_atk >= 0 else null
+	for e in events:
+		if int(e.type) == BattleEventTypeScript.DAMAGE_STARTED:
+			if base_started == null \
+					and atk_event != null \
+					and int(e.parent_event_id) == int(atk_event.event_id):
+				base_started = e
+			elif rx_started == null \
+					and base_dmg_ev != null \
+					and int(e.parent_event_id) == int(base_dmg_ev.event_id):
+				rx_started = e
+	_assert(base_started != null,
+		"base DAMAGE_STARTED is a CHILD of ATTACK_RESOLVED")
+	_assert(rx_started != null,
+		"reaction DAMAGE_STARTED is a CHILD of base DAMAGE_APPLIED")
+	if rx_started != null and reaction_dmg_ev != null \
+			and base_dmg_ev != null:
+		_assert(int(reaction_dmg_ev.parent_event_id) == int(rx_started.event_id),
+			"reaction ancestry derives from base DAMAGE_APPLIED (via its DAMAGE_STARTED, parent_event_id=%d == %d)" % [
+				int(reaction_dmg_ev.parent_event_id), int(rx_started.event_id)])
+		_assert(int(reaction_dmg_ev.chain_depth) == int(rx_started.chain_depth) + 1,
+			"reaction DAMAGE_APPLIED.depth == its DAMAGE_STARTED.depth + 1")
+		_assert(int(reaction_dmg_ev.root_action_id) == int(base_dmg_ev.root_action_id),
+			"reaction DAMAGE_APPLIED shares the base chain root_action_id")
 	# Unique event_ids.
 	_assert_unique_event_ids(events, "lethal reaction tick")
 	# BATTLE_ENDED is the final event.

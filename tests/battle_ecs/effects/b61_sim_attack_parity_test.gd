@@ -28,6 +28,8 @@ const BattleEventTypeScript = preload(
 	"res://core/battle_ecs/battle_event_type.gd")
 const ContentDBScript = preload(
 	"res://core/utils/content_db.gd")
+const DamageBridgeScript = preload(
+	"res://tests/battle_ecs/effects/b64c_damage_bridge.gd")
 
 var _passed: int = 0
 var _failed: int = 0
@@ -98,29 +100,29 @@ func _test_explicit_normal_attack_characterization() -> void:
 		"events[0].chain_depth == 0 (root)")
 	_assert(int(p_atk.amount) > 0,
 		"events[0].amount > 0 (raw attack damage)")
-	# Second event: player DAMAGE_APPLIED as child of attack.
-	var p_dmg = events[1]
-	_assert(int(p_dmg.type) == BattleEventTypeScript.DAMAGE_APPLIED,
-		"events[1].type == DAMAGE_APPLIED")
+	# B6.4c: the pre-damage window inserts DAMAGE_STARTED between
+	# the attack intent and the damage commit:
+	#   ATTACK_RESOLVED -> DAMAGE_STARTED -> DAMAGE_APPLIED
+	# The full bridge is proven by the shared helper.
+	var bridge: Dictionary = DamageBridgeScript.assert_attack_damage_bridge(
+		events, p_atk, "sim attack parity", _assert)
+	var p_dmg = bridge.get("applied", null)
+	_assert(p_dmg != null, "player DAMAGE_APPLIED committed")
+	if p_dmg == null:
+		return
 	_assert(int(p_dmg.source_entity) == 0,
-		"events[1].source_entity == 0 (player)")
+		"damage.source_entity == 0 (player)")
 	_assert(int(p_dmg.target_entity) == 1,
-		"events[1].target_entity == 1 (enemy)")
+		"damage.target_entity == 1 (enemy)")
 	_assert(String(p_dmg.source_run_unit_id) == "p0",
-		"events[1].source_run_unit_id == 'p0'")
+		"damage.source_run_unit_id == 'p0'")
 	_assert(String(p_dmg.target_run_unit_id) == "e0",
-		"events[1].target_run_unit_id == 'e0'")
-	_assert(int(p_dmg.parent_event_id) == int(p_atk.event_id),
-		"events[1].parent_event_id == events[0].event_id")
-	_assert(int(p_dmg.chain_depth) == 1,
-		"events[1].chain_depth == 1")
-	_assert(int(p_dmg.root_action_id) == int(p_atk.root_action_id),
-		"events[1].root_action_id == events[0].root_action_id")
+		"damage.target_run_unit_id == 'e0'")
 	_assert(int(p_dmg.amount) > 0,
-		"events[1].amount > 0 (actual HP removed)")
+		"damage.amount > 0 (actual HP removed)")
 	# damage.amount <= attack.amount (HP cap invariant).
 	_assert(int(p_dmg.amount) <= int(p_atk.amount),
-		"events[1].amount (actual) <= events[0].amount (raw) "
+		"damage.amount (actual) <= attack.amount (raw) "
 		+ "[%d <= %d]" % [int(p_dmg.amount), int(p_atk.amount)])
 
 

@@ -16,6 +16,16 @@ const EffectExecutorScript = preload("res://core/battle_ecs/effects/effect_execu
 const BattleEventEmitterScript = preload("res://core/battle_ecs/events/battle_event_emitter.gd")
 const BattleEventTypeScript = preload("res://core/battle_ecs/battle_event_type.gd")
 const BattleEventScript = preload("res://core/battle_ecs/battle_event.gd")
+const TriggerDispatcherScript = preload(
+	"res://core/battle_ecs/triggers/trigger_dispatcher.gd")
+const TriggerLimitsScript = preload(
+	"res://core/battle_ecs/triggers/trigger_limits.gd")
+const TriggerDispatchSessionScript = preload(
+	"res://core/battle_ecs/triggers/trigger_dispatch_session.gd")
+const TriggerProviderScript = preload(
+	"res://core/battle_ecs/triggers/trigger_provider.gd")
+const DamageBridgeScript = preload(
+	"res://tests/battle_ecs/effects/b64c_damage_bridge.gd")
 
 var _passed: int = 0
 var _failed: int = 0
@@ -75,6 +85,31 @@ func _make_ctx() -> Array:
 	var sink: Array = []
 	var ctx = EffectContextScript.new(world, rng, emitter, sink)
 	return [ctx, sink, rng, emitter]
+
+
+# B6.4c: the DAMAGE effect OPENS a pre-damage window. The HP
+# mutation happens when the window work item is drained by the
+# canonical work pump.
+#
+# This helper drains an EffectResult's dispatch_work and returns
+# the committed events. The pump is the ONLY thing that commits a
+# window — the executor never mutates HP by itself.
+func _drain(p_world, p_rng, p_emitter, p_result) -> Array:
+	var out: Array = []
+	if p_result == null:
+		return out
+	var work = p_result.dispatch_work
+	if work == null or work.size() == 0:
+		return out
+	var limits = TriggerLimitsScript.new()
+	var session = TriggerDispatchSessionScript.from_limits(limits)
+	var out_sink: Array = []
+	TriggerDispatcherScript.new().process_work(
+		work, p_world, p_rng, p_emitter, out_sink,
+		TriggerProviderScript.new(), limits, session)
+	for e in out_sink:
+		out.append(e)
+	return out
 
 
 # === Existing effect core tests (refactored for emitter) ===
@@ -151,13 +186,54 @@ func _test_executor_damage_against_live_target_deals_and_returns_events() -> voi
 	var ctx = pair[0]
 	var world: BattleWorldScript = ctx.world()
 	var sink: Array = pair[1]
+	var rng = pair[2]
+	var emitter = pair[3]
 	var req = EffectRequestScript.new(
 		EffectKindScript.DAMAGE, 0, 1, 200, -1, -1, 0)
 	var exec = EffectExecutorScript.new()
 	var result = exec.execute(ctx, req)
 	_assert(result.success, "executor returns success")
-	_assert(world.current_hp_of(1) < 80, "enemy HP reduced (got %d)" % world.current_hp_of(1))
+	# B6.4c OPEN PHASE: the executor only OPENS the window. The
+	# HP must NOT be mutated yet, and the transaction must be
+	# pending. This is the load-bearing boundary of the
+	# pre-damage window.
+	_assert(world.current_hp_of(1) == 80,
+		"HP NOT yet mutated after execute (got %d, expected 80)"
+			% world.current_hp_of(1))
+	_assert(result.dispatch_work != null
+			and result.dispatch_work.size() == 1,
+		"exactly one damage window work item pending")
 	_assert(sink.size() >= 1, "at least one event emitted")
+	# The emitted event is the INTENT layer.
+	_assert(int(sink[0].type) == BattleEventTypeScript.DAMAGE_STARTED,
+		"first emitted event is DAMAGE_STARTED (intent)")
+	# COMMIT PHASE: draining the window commits the HP exactly
+	# once.
+	var committed: Array = _drain(world, rng, emitter, result)
+	_assert(world.current_hp_of(1) < 80,
+		"enemy HP reduced after drain (got %d)" % world.current_hp_of(1))
+	_assert(committed.size() >= 1, "commit phase emitted events")
+	var applied = null
+	for e in committed:
+		if int(e.type) == BattleEventTypeScript.DAMAGE_APPLIED:
+			applied = e
+			break
+	_assert(applied != null, "DAMAGE_APPLIED emitted on commit")
+	# The direct-damage bridge: DAMAGE_STARTED (ROOT) ->
+	# DAMAGE_APPLIED. The intent event was published into the
+	# sink at open time; the commit event arrives on drain. The
+	# bridge needs BOTH, so we pass the combined trace.
+	var full_trace: Array = []
+	for e in sink:
+		full_trace.append(e)
+	for e2 in committed:
+		if not full_trace.has(e2):
+			full_trace.append(e2)
+	var bridge: Dictionary = \
+		DamageBridgeScript.assert_direct_damage_bridge(
+			full_trace, "direct damage commit", _assert)
+	_assert(bridge.get("applied", null) != null,
+		"direct damage bridge: DAMAGE_APPLIED committed")
 
 
 func _test_executor_damage_against_dead_target_returns_failure_no_mutation() -> void:
@@ -240,16 +316,24 @@ func _test_executor_damage_event_amount_matches_actual_hp_removed() -> void:
 	var ctx = pair[0]
 	var world: BattleWorldScript = ctx.world()
 	var sink: Array = pair[1]
+	var rng = pair[2]
+	var emitter = pair[3]
 	var req = EffectRequestScript.new(
 		EffectKindScript.DAMAGE, 0, 1, 1000, -1, -1, 0)
 	var exec = EffectExecutorScript.new()
-	exec.execute(ctx, req)
+	var result = exec.execute(ctx, req)
+	# B6.4c OPEN PHASE: no HP mutation yet.
+	_assert(world.current_hp_of(1) == 80,
+		"HP NOT yet mutated after execute (got %d, expected 80)"
+			% world.current_hp_of(1))
+	# COMMIT PHASE: the window commits exactly once.
+	var committed: Array = _drain(world, rng, emitter, result)
 	var hp_after: int = world.current_hp_of(1)
 	var actual_removed: int = 80 - hp_after
 	_assert(hp_after == 0, "overkill -> HP=0 (got %d)" % hp_after)
 	_assert(actual_removed == 80, "actual HP removed = 80 (got %d)" % actual_removed)
 	var saw_amount_match: bool = false
-	for e in sink:
+	for e in committed:
 		if int(e.type) == BattleEventTypeScript.DAMAGE_APPLIED:
 			_assert(int(e.amount) == 80,
 				"DAMAGE_APPLIED amount = actual HP removed (got %d expected 80)" % int(e.amount))
@@ -290,8 +374,11 @@ func _test_executor_damage_emits_battleevent_with_real_event_id() -> void:
 	var first = sink[0]
 	_assert(int(first.event_id) >= 1,
 		"event has real event_id (got %d)" % int(first.event_id))
-	_assert(int(first.type) == BattleEventTypeScript.DAMAGE_APPLIED,
-		"first event type = DAMAGE_APPLIED (got %d)" % int(first.type))
+	# B6.4c: the DamageEffect's own event is the INTENT layer
+	# (DAMAGE_STARTED). The DAMAGE_APPLIED (commit) is its child
+	# and is published when the window is drained.
+	_assert(int(first.type) == BattleEventTypeScript.DAMAGE_STARTED,
+		"first event type = DAMAGE_STARTED (intent, got %d)" % int(first.type))
 	_assert(int(first.source_entity) == 0, "source_entity matches")
 	_assert(int(first.target_entity) == 1, "target_entity matches")
 
@@ -322,27 +409,47 @@ func _test_executor_damage_lethal_emits_unit_died_as_child() -> void:
 	var pair: Array = _make_ctx()
 	var ctx = pair[0]
 	var sink: Array = pair[1]
+	var world: BattleWorldScript = ctx.world()
+	var rng = pair[2]
+	var emitter = pair[3]
 	# Lethal damage.
 	var req = EffectRequestScript.new(
 		EffectKindScript.DAMAGE, 0, 1, 999, -1, -1, 0)
 	var exec = EffectExecutorScript.new()
-	exec.execute(ctx, req)
-	# Find DAMAGE_APPLIED and UNIT_DIED.
+	var result = exec.execute(ctx, req)
+	# B6.4c OPEN PHASE: the window is pending, the target is
+	# still alive, and no UNIT_DIED exists yet.
+	_assert(world.current_hp_of(1) == 80,
+		"HP NOT yet mutated after execute (got %d, expected 80)"
+			% world.current_hp_of(1))
+	var saw_died_open: bool = false
+	for e in sink:
+		if int(e.type) == BattleEventTypeScript.UNIT_DIED:
+			saw_died_open = true
+			break
+	_assert(not saw_died_open,
+		"no UNIT_DIED while the window is still open")
+	# COMMIT PHASE: the lethal commit emits UNIT_DIED as the
+	# child of DAMAGE_APPLIED.
+	var committed: Array = _drain(world, rng, emitter, result)
 	var dmg_event = null
 	var died_event = null
-	for e in sink:
+	for e in committed:
 		if int(e.type) == BattleEventTypeScript.DAMAGE_APPLIED and dmg_event == null:
 			dmg_event = e
 		if int(e.type) == BattleEventTypeScript.UNIT_DIED and died_event == null:
 			died_event = e
 	_assert(dmg_event != null, "DAMAGE_APPLIED emitted")
 	_assert(died_event != null, "UNIT_DIED emitted on lethal damage")
-	_assert(int(died_event.parent_event_id) == int(dmg_event.event_id),
-		"UNIT_DIED.parent_event_id = DAMAGE_APPLIED.event_id")
-	_assert(int(died_event.root_action_id) == int(dmg_event.root_action_id),
-		"UNIT_DIED.root_action_id matches DAMAGE_APPLIED")
-	_assert(int(died_event.chain_depth) == int(dmg_event.chain_depth) + 1,
-		"UNIT_DIED.chain_depth = parent + 1")
+	if dmg_event != null and died_event != null:
+		_assert(int(died_event.parent_event_id) == int(dmg_event.event_id),
+			"UNIT_DIED.parent_event_id = DAMAGE_APPLIED.event_id")
+		_assert(int(died_event.root_action_id) == int(dmg_event.root_action_id),
+			"UNIT_DIED.root_action_id matches DAMAGE_APPLIED")
+		_assert(int(died_event.chain_depth) == int(dmg_event.chain_depth) + 1,
+			"UNIT_DIED.chain_depth = parent + 1")
+	_assert(world.current_hp_of(1) == 0,
+		"target dead after commit (HP=%d)" % world.current_hp_of(1))
 
 
 # === NEW — Emitter contract (A4, A17) ===

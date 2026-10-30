@@ -37,6 +37,16 @@ const StatQueryScript = preload(
 	"res://core/battle_ecs/status/stat_query.gd")
 const StatusInstanceScript = preload(
 	"res://core/battle_ecs/status/status_instance.gd")
+const TriggerDispatcherScript = preload(
+	"res://core/battle_ecs/triggers/trigger_dispatcher.gd")
+const TriggerLimitsScript = preload(
+	"res://core/battle_ecs/triggers/trigger_limits.gd")
+const TriggerDispatchSessionScript = preload(
+	"res://core/battle_ecs/triggers/trigger_dispatch_session.gd")
+const TriggerProviderScript = preload(
+	"res://core/battle_ecs/triggers/trigger_provider.gd")
+const DamageBridgeScript = preload(
+	"res://tests/battle_ecs/effects/b64c_damage_bridge.gd")
 const ContentDBScript = preload(
 	"res://core/utils/content_db.gd")
 
@@ -120,6 +130,38 @@ func _root_attack(fx: _Fixture) -> RefCounted:
 	return _run(fx, req)
 
 
+# B6.4c: the same attack, but the window is DRAINED, so the
+# returned trace contains the FULL causal chain:
+#   ATTACK_RESOLVED -> DAMAGE_STARTED -> DAMAGE_APPLIED -> UNIT_DIED?
+# The legacy tests asserted on the ATOMIC pair
+# (ATTACK_RESOLVED + DAMAGE_APPLIED); B6.4c splits intent from
+# commit, so the tests now assert on the full bridge.
+func _root_attack_drained(fx: _Fixture) -> Array:
+	var req = EffectRequestScript.root(
+		EffectKindScript.PERFORM_ATTACK, 0, 1, 0)
+	return _run_and_drain(fx, req)
+
+
+# B6.4c: drain ONLY the dispatch_work of an existing result and
+# return the committed events.
+func _drain_work(fx: _Fixture, p_result) -> Array:
+	var out: Array = []
+	if p_result == null:
+		return out
+	var work = p_result.dispatch_work
+	if work == null or work.size() == 0:
+		return out
+	var limits = TriggerLimitsScript.new()
+	var session = TriggerDispatchSessionScript.from_limits(limits)
+	var out_sink: Array = []
+	TriggerDispatcherScript.new().process_work(
+		work, fx.world, fx.rng, fx.emitter, out_sink,
+		TriggerProviderScript.new(), limits, session)
+	for e in out_sink:
+		out.append(e)
+	return out
+
+
 func _child_attack(fx: _Fixture, parent) -> RefCounted:
 	# Build a template by emitting/stealing the attacker +
 	# target swap, but for the simplest case just build a
@@ -138,6 +180,37 @@ func _run(fx: _Fixture, req) -> RefCounted:
 	return PerformAttackEffectScript.execute(ctx, req)
 
 
+# B6.4c: the PerformAttack effect OPENS a pre-damage window.
+# The commit (DAMAGE_APPLIED / UNIT_DIED) happens when the
+# window work item is driven by the canonical work pump.
+#
+# This helper drains the window and returns the FULL public
+# trace (intent events + committed events) in emission order,
+# so the tests can assert on the complete causal shape.
+func _run_and_drain(fx: _Fixture, req) -> Array:
+	var sink: Array = []
+	var ctx = EffectContextScript.new(
+		fx.world, fx.rng, fx.emitter, sink)
+	var result = PerformAttackEffectScript.execute(ctx, req)
+	if result == null:
+		return []
+	var trace: Array = []
+	for e in result.events:
+		trace.append(e)
+	var work = result.dispatch_work
+	if work != null and work.size() > 0:
+		var limits = TriggerLimitsScript.new()
+		var session = TriggerDispatchSessionScript.from_limits(limits)
+		var out_sink: Array = []
+		TriggerDispatcherScript.new().process_work(
+			work, fx.world, fx.rng, fx.emitter, out_sink,
+			TriggerProviderScript.new(), limits, session)
+		for e2 in out_sink:
+			if not trace.has(e2):
+				trace.append(e2)
+	return trace
+
+
 # ============================================================
 # ROOT NON-LETHAL
 # ============================================================
@@ -150,10 +223,17 @@ func _test_root_attack_exact_trace() -> void:
 	_assert(result != null, "result returned")
 	_assert(result.success == true,
 		"root attack succeeded")
+	# B6.4c: the effect's own events are the INTENT layer:
+	# ATTACK_RESOLVED + DAMAGE_STARTED. The commit arrives when
+	# the window is drained.
 	_assert(result.events.size() == 2,
-		"root non-lethal events.size()==2 (got %d)" % result.events.size())
+		"root non-lethal intent events.size()==2 (got %d)"
+			% result.events.size())
+	var trace: Array = _root_attack_drained(fx)
+	_assert(trace.size() == 3,
+		"root non-lethal full trace.size()==3 (got %d)" % trace.size())
 	# Event 0: ATTACK_RESOLVED with parent=-1, depth=0.
-	var atk = result.events[0]
+	var atk = trace[0]
 	_assert(int(atk.type) == BattleEventTypeScript.ATTACK_RESOLVED,
 		"events[0].type == ATTACK_RESOLVED")
 	_assert(int(atk.parent_event_id) == -1,
@@ -172,22 +252,23 @@ func _test_root_attack_exact_trace() -> void:
 		"events[0].amount (raw) > 0")
 	_assert(int(atk.root_action_id) > 0,
 		"events[0].root_action_id > 0")
-	# Event 1: DAMAGE_APPLIED, child of atk, depth=1.
-	var dmg = result.events[1]
-	_assert(int(dmg.type) == BattleEventTypeScript.DAMAGE_APPLIED,
-		"events[1].type == DAMAGE_APPLIED")
-	_assert(int(dmg.parent_event_id) == int(atk.event_id),
-		"events[1].parent_event_id == events[0].event_id")
-	_assert(int(dmg.chain_depth) == 1,
-		"events[1].chain_depth == 1")
-	_assert(int(dmg.root_action_id) == int(atk.root_action_id),
-		"events[1].root_action_id matches events[0]")
-	_assert(int(dmg.amount) <= int(atk.amount),
-		"DAMAGE_APPLIED.amount <= ATTACK_RESOLVED.amount (HP cap)")
-	# Target HP decreased by dmg.amount.
+	# Event 1: DAMAGE_STARTED, child of atk, depth=1.
+	# B6.4c: the pre-damage window inserts DAMAGE_STARTED between
+	# the attack intent and the damage commit:
+	#   ATTACK_RESOLVED -> DAMAGE_STARTED -> DAMAGE_APPLIED
+	# The full bridge is proven by the shared helper.
+	var bridge: Dictionary = DamageBridgeScript.assert_attack_damage_bridge(
+		trace, atk, "root nonlethal", _assert)
+	var dmg = bridge.get("applied", null)
+	_assert(dmg != null, "root nonlethal: DAMAGE_APPLIED committed")
+	if dmg != null:
+		_assert(int(dmg.amount) <= int(atk.amount),
+			"DAMAGE_APPLIED.amount <= ATTACK_RESOLVED.amount (HP cap)")
+	# Target HP decreased by dmg.amount (the commit happened).
 	var hp_after: int = int(fx.world.current_hp_of(1))
-	_assert(hp_after == hp_before - int(dmg.amount),
-		"target HP decreased by dmg.amount")
+	if dmg != null:
+		_assert(hp_after == hp_before - int(dmg.amount),
+			"target HP decreased by dmg.amount")
 	_assert(hp_after > 0, "target still alive (non-lethal)")
 	# Sink length equals events size (single insertion path).
 	# Event IDs unique.
@@ -212,17 +293,32 @@ func _test_lethal_root_exact_trace() -> void:
 	_assert(result != null, "result returned")
 	_assert(result.success == true,
 		"lethal root attack succeeded")
-	_assert(result.events.size() == 3,
-		"lethal events.size()==3 (got %d)" % result.events.size())
-	var atk = result.events[0]
-	var dmg = result.events[1]
-	var died = result.events[2]
-	_assert(int(died.type) == BattleEventTypeScript.UNIT_DIED,
-		"events[2].type == UNIT_DIED")
-	_assert(int(died.parent_event_id) == int(dmg.event_id),
-		"UNIT_DIED.parent_event_id == DAMAGE_APPLIED.event_id")
-	_assert(int(died.chain_depth) == 2,
-		"UNIT_DIED.chain_depth == 2")
+	# B6.4c: the intent layer is ATTACK_RESOLVED + DAMAGE_STARTED;
+	# the commit layer (DAMAGE_APPLIED + UNIT_DIED) arrives when
+	# the window is drained. The full trace is 4 events.
+	_assert(result.events.size() == 2,
+		"lethal intent events.size()==2 (got %d)" % result.events.size())
+	var trace: Array = _root_attack_drained(fx)
+	_assert(trace.size() == 4,
+		"lethal full trace.size()==4 (got %d)" % trace.size())
+	var atk = trace[0]
+	var bridge: Dictionary = DamageBridgeScript.assert_attack_damage_bridge(
+		trace, atk, "root lethal", _assert)
+	var dmg = bridge.get("applied", null)
+	var died = bridge.get("died", null)
+	_assert(dmg != null, "root lethal: DAMAGE_APPLIED committed")
+	_assert(died != null, "root lethal: UNIT_DIED committed")
+	if died != null:
+		_assert(int(died.type) == BattleEventTypeScript.UNIT_DIED,
+			"UNIT_DIED type")
+		_assert(int(died.parent_event_id) == int(dmg.event_id),
+			"UNIT_DIED.parent_event_id == DAMAGE_APPLIED.event_id")
+		# B6.4c: the inserted DAMAGE_STARTED layer adds one
+		# depth level: ATK(0) -> STARTED(1) -> APPLIED(2) ->
+		# DIED(3). The relative +1 per layer is what matters and
+		# is verified by the bridge helper.
+		_assert(int(died.chain_depth) == int(dmg.chain_depth) + 1,
+			"UNIT_DIED.chain_depth == DAMAGE_APPLIED.chain_depth + 1")
 	_assert(int(died.root_action_id) == int(atk.root_action_id),
 		"UNIT_DIED shares root_action_id")
 	_assert(int(fx.world.current_hp_of(1)) <= 0,
@@ -455,17 +551,38 @@ func _test_sink_result_parity_root_and_lethal() -> void:
 	var result2: RefCounted = R2["result"]
 	var sink2: Array = R2["sink"]
 	_assert(result2.success == true, "lethal root: success")
-	_assert(result2.events.size() == 3, "lethal: 3 events (got %d)" % result2.events.size())
-	_assert(_arrays_share_object_events(sink2, result2.events), "lethal sink[i]===result.events[i]")
+	# B6.4c: the effect's OWN events are the INTENT layer:
+	# ATTACK_RESOLVED + DAMAGE_STARTED. The commit layer
+	# (DAMAGE_APPLIED + UNIT_DIED) is produced by the window
+	# when it is drained, and lives in dispatch_work.
+	_assert(result2.events.size() == 2,
+		"lethal: 2 intent events (got %d)" % result2.events.size())
+	_assert(_arrays_share_object_events(sink2, result2.events),
+		"lethal sink[i]===result.events[i]")
+	# The commit layer, drained from the window.
+	var trace2: Array = []
+	for e in result2.events:
+		trace2.append(e)
+	for e2 in _drain_work(fx2, result2):
+		if not trace2.has(e2):
+			trace2.append(e2)
+	_assert(trace2.size() == 4,
+		"lethal: 4 events after drain (got %d)" % trace2.size())
 	var died_count: int = 0
 	var died_last: bool = true
-	for i in result2.events.size():
-		if int(result2.events[i].type) == BattleEventTypeScript.UNIT_DIED:
+	for i in trace2.size():
+		if int(trace2[i].type) == BattleEventTypeScript.UNIT_DIED:
 			died_count += 1
-			if i != result2.events.size() - 1:
+			if i != trace2.size() - 1:
 				died_last = false
 	_assert(died_count == 1, "lethal: UNIT_DIED == 1 (got %d)" % died_count)
 	_assert(died_last, "lethal: UNIT_DIED is final event")
+	# The commit layer's ancestry: ATTACK_RESOLVED ->
+	# DAMAGE_STARTED -> DAMAGE_APPLIED -> UNIT_DIED.
+	var bridge2: Dictionary = DamageBridgeScript.assert_attack_damage_bridge(
+		trace2, trace2[0], "lethal sink parity", _assert)
+	_assert(bridge2.get("died", null) != null,
+		"lethal sink parity: UNIT_DIED committed")
 
 func _test_child_attack_with_real_parent_event() -> void:
 	print("[B611-CHILD] child_attack_with_real_parent_event")

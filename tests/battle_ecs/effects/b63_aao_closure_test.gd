@@ -371,19 +371,40 @@ func _test_aoo_counter_coexistence_permanent() -> void:
 		"Counter coexistence: C.root == A.root (== S.root)")
 	_assert(int(C.chain_depth) == a_depth + 1,
 		"Counter coexistence: C.depth = A.depth+1")
+	# B6.4c: the counterattack's damage now hangs off the
+	# DAMAGE_STARTED layer. Walk the full bridge via parent
+	# linkage: C (counter ATK) -> CD_STARTED -> CD (damage).
 	var CD = null
+	var CD_started = null
 	for e in events:
-		if int(e.type) == BattleEventTypeScript.DAMAGE_APPLIED \
-				and String(e.tag) == "counterattack" \
+		if int(e.type) == BattleEventTypeScript.DAMAGE_STARTED \
 				and int(e.parent_event_id) == c_id:
-			CD = e
+			CD_started = e
 			break
-	_assert(CD != null, "Counterattack DAMAGE_APPLIED CD with parent=C")
+	_assert(CD_started != null,
+		"Counterattack DAMAGE_STARTED with parent=C")
+	if CD_started != null:
+		for e2 in events:
+			if int(e2.type) == BattleEventTypeScript.DAMAGE_APPLIED \
+					and String(e2.tag) == "counterattack" \
+					and int(e2.parent_event_id) == int(CD_started.event_id):
+				CD = e2
+				break
+	_assert(CD != null,
+			"Counterattack DAMAGE_APPLIED CD with parent=counter DAMAGE_STARTED")
 	if CD != null:
+		_assert(int(CD.parent_event_id) == int(CD_started.event_id),
+			"Counter coexistence: CD.parent == counter DAMAGE_STARTED.event_id")
+		_assert(int(CD_started.parent_event_id) == c_id,
+			"Counter coexistence: counter DAMAGE_STARTED.parent == C.event_id")
+		_assert(int(CD_started.root_action_id) == a_root,
+			"Counter coexistence: counter DAMAGE_STARTED.root == A.root")
+		_assert(int(CD_started.chain_depth) == int(C.chain_depth) + 1,
+			"Counter coexistence: counter DAMAGE_STARTED.depth = C.depth+1")
 		_assert(int(CD.root_action_id) == a_root,
 			"Counter coexistence: CD.root == C.root (== S.root)")
-		_assert(int(CD.chain_depth) == int(C.chain_depth) + 1,
-			"Counter coexistence: CD.depth = C.depth+1")
+		_assert(int(CD.chain_depth) == int(CD_started.chain_depth) + 1,
+			"Counter coexistence: CD.depth = counter DAMAGE_STARTED.depth+1")
 	# Mover-survival is REQUIRED for this non-lethal fixture
 	# (mover HP 200, knight ATK 5, knight DEF 5; knight is the
 	# target of the Counterattack reaction). UNIT_MOVED MUST be
@@ -532,36 +553,48 @@ func _test_20_run_aoo_determinism() -> void:
 			"run %d: event_ids strictly increase in emission order" % i)
 		# Causal quartet per run.
 		_assert(quartet.s >= 0 and quartet.a >= 0
-				and quartet.d >= 0 and quartet.m >= 0,
-			"run %d: quartet S/A/D/M all present" % i)
-		if quartet.s >= 0 and quartet.a >= 0 \
+				and quartet.b >= 0 and quartet.d >= 0 and quartet.m >= 0,
+			"run %d: quartet S/A/STARTED/D/M all present" % i)
+		if quartet.s >= 0 and quartet.a >= 0 and quartet.b >= 0 \
 				and quartet.d >= 0 and quartet.m >= 0:
 			_assert(quartet.s < quartet.a,
 				"run %d: S(%d) < A(%d)" % [i, quartet.s, quartet.a])
-			_assert(quartet.a < quartet.d,
-				"run %d: A(%d) < D(%d)" % [i, quartet.a, quartet.d])
+			_assert(quartet.a < quartet.b,
+				"run %d: A(%d) < STARTED(%d)" % [i, quartet.a, quartet.b])
+			_assert(quartet.b < quartet.d,
+				"run %d: STARTED(%d) < D(%d)" % [i, quartet.b, quartet.d])
 			_assert(quartet.d < quartet.m,
 				"run %d: D(%d) < M(%d)" % [i, quartet.d, quartet.m])
 			var S_e = quartet.S
 			var A_e = quartet.A
+			var B_e = quartet.B
 			var D_e = quartet.D
 			var M_e = quartet.M
 			_assert(int(A_e.parent_event_id) == int(S_e.event_id),
 				"run %d: A.parent == S.event_id" % i)
-			_assert(int(D_e.parent_event_id) == int(A_e.event_id),
-				"run %d: D.parent == A.event_id" % i)
+			# B6.4c: the pre-damage window inserts the
+			# DAMAGE_STARTED layer between the AoO intent (A) and
+			# the commit (D).
+			_assert(int(B_e.parent_event_id) == int(A_e.event_id),
+				"run %d: STARTED.parent == A.event_id" % i)
+			_assert(int(D_e.parent_event_id) == int(B_e.event_id),
+				"run %d: D.parent == STARTED.event_id" % i)
 			_assert(int(M_e.parent_event_id) == int(S_e.event_id),
 				"run %d: M.parent == S.event_id" % i)
 			_assert(int(A_e.root_action_id) == int(S_e.root_action_id),
 				"run %d: A.root == S.root" % i)
+			_assert(int(B_e.root_action_id) == int(S_e.root_action_id),
+				"run %d: STARTED.root == S.root" % i)
 			_assert(int(D_e.root_action_id) == int(S_e.root_action_id),
 				"run %d: D.root == S.root" % i)
 			_assert(int(M_e.root_action_id) == int(S_e.root_action_id),
 				"run %d: M.root == S.root" % i)
 			_assert(int(A_e.chain_depth) == int(S_e.chain_depth) + 1,
 				"run %d: A.depth = S.depth+1" % i)
-			_assert(int(D_e.chain_depth) == int(A_e.chain_depth) + 1,
-				"run %d: D.depth = A.depth+1" % i)
+			_assert(int(B_e.chain_depth) == int(A_e.chain_depth) + 1,
+				"run %d: STARTED.depth = A.depth+1" % i)
+			_assert(int(D_e.chain_depth) == int(B_e.chain_depth) + 1,
+				"run %d: D.depth = STARTED.depth+1" % i)
 			_assert(int(M_e.chain_depth) == int(S_e.chain_depth) + 1,
 				"run %d: M.depth = S.depth+1" % i)
 			_assert(String(A_e.tag) == "attack_of_opportunity",
@@ -887,10 +920,24 @@ func _world_snapshot(sim) -> Dictionary:
 # Causal quartet identifier. Returns dict of indices (-1 if absent)
 # plus the located events.
 func _find_quartet(events: Array) -> Dictionary:
+	# B6.4c: the causal shape of the AoO quartet is now:
+	#
+	#   UNIT_MOVE_STARTED (S)
+	#   └ ATTACK_RESOLVED (A, tag="attack_of_opportunity")
+	#     └ DAMAGE_STARTED        (B6.4c pre-damage window layer)
+	#       └ DAMAGE_APPLIED (D)
+	#
+	# The B6.4c window inserts the DAMAGE_STARTED layer between
+	# the intent (A) and the commit (D). The helper walks the
+	# FULL bridge via parent linkage — it does NOT assert a
+	# single parent link, and it does NOT use root_action_id as
+	# a discriminator (root parity is asserted separately as an
+	# invariant of the bridge).
 	var S_idx: int = -1
 	var A_idx: int = -1
 	var D_idx: int = -1
 	var M_idx: int = -1
+	var B_idx: int = -1
 	for i in events.size():
 		var e = events[i]
 		if int(e.type) == BattleEventTypeScript.UNIT_MOVE_STARTED \
@@ -900,8 +947,8 @@ func _find_quartet(events: Array) -> Dictionary:
 		elif int(e.type) == BattleEventTypeScript.UNIT_MOVED:
 			M_idx = i
 	if S_idx < 0:
-		return {"s": -1, "a": -1, "d": -1, "m": -1,
-			"S": null, "A": null, "D": null, "M": null}
+		return {"s": -1, "a": -1, "b": -1, "d": -1, "m": -1,
+			"S": null, "A": null, "B": null, "D": null, "M": null}
 	var S = events[S_idx]
 	for i in events.size():
 		var e = events[i]
@@ -913,18 +960,29 @@ func _find_quartet(events: Array) -> Dictionary:
 			A_idx = i
 			break
 	if A_idx < 0:
-		return {"s": S_idx, "a": -1, "d": -1, "m": M_idx,
-			"S": S, "A": null, "D": null, "M": null}
+		return {"s": S_idx, "a": -1, "b": -1, "d": -1, "m": M_idx,
+			"S": S, "A": null, "B": null, "D": null, "M": null}
 	var A = events[A_idx]
+	# B6.4c: DAMAGE_STARTED (parent = A.event_id).
+	for i in events.size():
+		var e = events[i]
+		if int(e.type) == BattleEventTypeScript.DAMAGE_STARTED \
+				and int(e.parent_event_id) == int(A.event_id):
+			B_idx = i
+			break
+	if B_idx < 0:
+		return {"s": S_idx, "a": A_idx, "b": -1, "d": -1, "m": M_idx,
+			"S": S, "A": A, "B": null, "D": null, "M": null}
+	var B = events[B_idx]
+	# DAMAGE_APPLIED (parent = B.event_id).
 	for i in events.size():
 		var e = events[i]
 		if int(e.type) == BattleEventTypeScript.DAMAGE_APPLIED \
 				and String(e.tag) == "attack_of_opportunity" \
-				and int(e.parent_event_id) == int(A.event_id) \
-				and int(e.root_action_id) == int(S.root_action_id) \
-				and int(e.chain_depth) == int(A.chain_depth) + 1:
+				and int(e.parent_event_id) == int(B.event_id):
 			D_idx = i
 			break
-	return {"s": S_idx, "a": A_idx, "d": D_idx, "m": M_idx,
-		"S": S, "A": A, "D": events[D_idx] if D_idx >= 0 else null,
+	return {"s": S_idx, "a": A_idx, "b": B_idx, "d": D_idx, "m": M_idx,
+		"S": S, "A": A, "B": B,
+		"D": events[D_idx] if D_idx >= 0 else null,
 		"M": events[M_idx] if M_idx >= 0 else null}

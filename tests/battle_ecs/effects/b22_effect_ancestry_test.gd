@@ -31,6 +31,16 @@ const RemoveStatusEffectScript = preload("res://core/battle_ecs/effects/remove_s
 const BattleSimulationScript = preload("res://core/battle_ecs/battle_simulation.gd")
 const BattleSetupScript = preload("res://core/battle_ecs/battle_setup.gd")
 const BattleUnitSetupScript = preload("res://core/battle_ecs/battle_unit_setup.gd")
+const TriggerDispatcherScript = preload(
+	"res://core/battle_ecs/triggers/trigger_dispatcher.gd")
+const TriggerLimitsScript = preload(
+	"res://core/battle_ecs/triggers/trigger_limits.gd")
+const TriggerDispatchSessionScript = preload(
+	"res://core/battle_ecs/triggers/trigger_dispatch_session.gd")
+const TriggerProviderScript = preload(
+	"res://core/battle_ecs/triggers/trigger_provider.gd")
+const DamageBridgeScript = preload(
+	"res://tests/battle_ecs/effects/b64c_damage_bridge.gd")
 
 var _passed: int = 0
 var _failed: int = 0
@@ -400,10 +410,25 @@ func _test_damage_non_lethal_returns_one_event() -> void:
 		EffectKindScript.DAMAGE, 0, 1, 10, -1, -1, 0)
 	var result = DamageEffectScript.execute(ctx, req)
 	_assert(result.success, "damage succeeds")
+	# B6.4c: the DamageEffect OPENS a pre-damage window. Its own
+	# events are the INTENT layer (DAMAGE_STARTED); the commit
+	# (DAMAGE_APPLIED) is produced when the window is drained.
 	_assert(result.events.size() == 1,
-		"non-lethal returns exactly 1 event (got %d)" % result.events.size())
-	_assert(int(result.events[0].type) == BattleEventTypeScript.DAMAGE_APPLIED,
-		"event is DAMAGE_APPLIED")
+		"non-lethal returns exactly 1 intent event (got %d)"
+			% result.events.size())
+	_assert(int(result.events[0].type) == BattleEventTypeScript.DAMAGE_STARTED,
+		"event is DAMAGE_STARTED (intent)")
+	_assert(result.dispatch_work != null
+			and result.dispatch_work.size() == 1,
+		"exactly one damage window work item pending")
+	# The commit phase produces the DAMAGE_APPLIED.
+	var committed: Array = _drain_window(w, arr, result)
+	var applied = null
+	for e in committed:
+		if int(e.type) == BattleEventTypeScript.DAMAGE_APPLIED:
+			applied = e
+			break
+	_assert(applied != null, "DAMAGE_APPLIED emitted on commit")
 
 
 func _test_damage_lethal_returns_two_events_in_order() -> void:
@@ -416,16 +441,40 @@ func _test_damage_lethal_returns_two_events_in_order() -> void:
 		EffectKindScript.DAMAGE, 0, 1, 1000, -1, -1, 0)
 	var result = DamageEffectScript.execute(ctx, req)
 	_assert(result.success, "lethal damage succeeds")
-	_assert(result.events.size() == 2,
-		"lethal returns exactly 2 events (got %d)" % result.events.size())
-	_assert(int(result.events[0].type) == BattleEventTypeScript.DAMAGE_APPLIED,
-		"events[0] == DAMAGE_APPLIED")
-	_assert(int(result.events[1].type) == BattleEventTypeScript.UNIT_DIED,
-		"events[1] == UNIT_DIED")
-	_assert(result.events[1].parent_event_id == result.events[0].event_id,
-		"UNIT_DIED.parent_event_id == DAMAGE_APPLIED.event_id")
-	_assert(result.events[1].chain_depth == result.events[0].chain_depth + 1,
-		"UNIT_DIED.chain_depth == DAMAGE_APPLIED.chain_depth + 1")
+	# B6.4c: the intent layer is DAMAGE_STARTED; the commit layer
+	# is DAMAGE_APPLIED + UNIT_DIED.
+	_assert(result.events.size() == 1,
+		"lethal returns exactly 1 intent event (got %d)"
+			% result.events.size())
+	_assert(int(result.events[0].type) == BattleEventTypeScript.DAMAGE_STARTED,
+		"events[0] == DAMAGE_STARTED (intent)")
+	var committed: Array = _drain_window(w, arr, result)
+	var dmg_ev = null
+	var died_ev = null
+	for e in committed:
+		if int(e.type) == BattleEventTypeScript.DAMAGE_APPLIED and dmg_ev == null:
+			dmg_ev = e
+		if int(e.type) == BattleEventTypeScript.UNIT_DIED and died_ev == null:
+			died_ev = e
+	_assert(dmg_ev != null, "DAMAGE_APPLIED emitted on commit")
+	_assert(died_ev != null, "UNIT_DIED emitted on commit")
+	if dmg_ev != null and died_ev != null:
+		_assert(int(died_ev.parent_event_id) == int(dmg_ev.event_id),
+			"UNIT_DIED.parent_event_id == DAMAGE_APPLIED.event_id")
+		_assert(int(died_ev.chain_depth) == int(dmg_ev.chain_depth) + 1,
+			"UNIT_DIED.chain_depth == DAMAGE_APPLIED.chain_depth + 1")
+	# The direct-damage bridge proves the whole chain.
+	var full_trace: Array = []
+	for e in result.events:
+		full_trace.append(e)
+	for e2 in committed:
+		if not full_trace.has(e2):
+			full_trace.append(e2)
+	var bridge: Dictionary = \
+		DamageBridgeScript.assert_direct_damage_bridge(
+			full_trace, "lethal direct damage", _assert)
+	_assert(bridge.get("died", null) != null,
+		"direct damage bridge: UNIT_DIED committed")
 
 
 func _test_result_sink_parity() -> void:
@@ -525,6 +574,29 @@ func _make_world_and_ctx(hp: int) -> Array:
 	var sink: Array = []
 	var ctx = EffectContextScript.new(w, rng, emitter, sink)
 	return [w, ctx, sink, emitter]
+
+
+# B6.4c: drain a damage window and return the committed events.
+# The window's continuation is committed by the canonical work
+# pump — the effect itself never mutates HP.
+func _drain_window(p_world, p_arr: Array, p_result) -> Array:
+	var out: Array = []
+	if p_result == null:
+		return out
+	var work = p_result.dispatch_work
+	if work == null or work.size() == 0:
+		return out
+	var emitter = p_arr[3]
+	var rng = DeterministicRngScript.new(0)
+	var limits = TriggerLimitsScript.new()
+	var session = TriggerDispatchSessionScript.from_limits(limits)
+	var out_sink: Array = []
+	TriggerDispatcherScript.new().process_work(
+		work, p_world, rng, emitter, out_sink,
+		TriggerProviderScript.new(), limits, session)
+	for e in out_sink:
+		out.append(e)
+	return out
 
 
 func _make_sim() -> BattleSimulationScript:

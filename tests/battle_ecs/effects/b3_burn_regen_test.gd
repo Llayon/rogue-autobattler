@@ -50,6 +50,8 @@ const BattleUnitSetupScript = preload("res://core/battle_ecs/battle_unit_setup.g
 const StatusDefResolverScript = preload("res://core/battle_ecs/status/status_def_resolver.gd")
 const ContentDBScript = preload("res://core/utils/content_db.gd")
 const EffectExecutorScript = preload("res://core/battle_ecs/effects/effect_executor.gd")
+const DamageBridgeScript = preload(
+	"res://tests/battle_ecs/effects/b64c_damage_bridge.gd")
 
 var _passed: int = 0
 var _failed: int = 0
@@ -560,16 +562,24 @@ func _test_status_ticked_root_damage_child_shares_root() -> void:
 	_assert(ticked.size() == 1, "1 STATUS_TICKED")
 	_assert(dmg.size() == 1, "1 DAMAGE_APPLIED")
 	var root = ticked[0]
-	var child = dmg[0]
+	# B6.4c: the periodic damage origin has its OWN causal shape:
+	#   STATUS_TICKED
+	#   └ DAMAGE_STARTED    (intent, window opens)
+	#     └ DAMAGE_APPLIED (commit)
+	# The DAMAGE_APPLIED is no longer a DIRECT child of the
+	# STATUS_TICKED — the window layer sits between them. The
+	# shared periodic bridge helper proves the whole chain.
+	var bridge: Dictionary = \
+		DamageBridgeScript.assert_periodic_damage_bridge(
+			evs, root, "status ticked damage", _assert)
+	var child = bridge.get("applied", null)
+	_assert(child != null, "DAMAGE_APPLIED committed")
 	_assert(int(root.parent_event_id) == -1,
 		"STATUS_TICKED parent_event_id == -1 (root)")
 	_assert(int(root.chain_depth) == 0, "STATUS_TICKED chain_depth == 0")
-	_assert(int(child.parent_event_id) == int(root.event_id),
-		"DAMAGE_APPLIED.parent_event_id == STATUS_TICKED.event_id")
-	_assert(int(child.root_action_id) == int(root.root_action_id),
-		"DAMAGE_APPLIED shares root_action_id with STATUS_TICKED")
-	_assert(int(child.chain_depth) == 1,
-		"DAMAGE_APPLIED chain_depth == 1 (parent + 1)")
+	if child != null:
+		_assert(int(child.root_action_id) == int(root.root_action_id),
+			"DAMAGE_APPLIED shares root_action_id with STATUS_TICKED")
 
 
 func _test_status_ticked_root_heal_child_shares_root() -> void:

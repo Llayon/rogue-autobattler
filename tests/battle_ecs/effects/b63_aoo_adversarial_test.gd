@@ -162,7 +162,19 @@ func _test_nonlethal_aoo_SADAM_ancestry_order() -> void:
 	if a_idx < 0:
 		return
 	var A = events[a_idx]
-	# D: AoO DAMAGE child of A
+	# B6.4c: the AoO DAMAGE_APPLIED now hangs off the
+	# DAMAGE_STARTED layer. Walk the bridge via parent linkage.
+	var b_idx: int = -1
+	for i in events.size():
+		var e = events[i]
+		if int(e.type) == BattleEventTypeScript.DAMAGE_STARTED \
+				and int(e.parent_event_id) == int(A.event_id):
+			b_idx = i
+			break
+	_assert(b_idx >= 0, "nonlethal: AoO DAMAGE_STARTED (parent=A)")
+	if b_idx < 0:
+		return
+	# D: AoO DAMAGE child of the DAMAGE_STARTED
 	var d_idx: int = -1
 	for i in events.size():
 		var e = events[i]
@@ -170,12 +182,11 @@ func _test_nonlethal_aoo_SADAM_ancestry_order() -> void:
 				and int(e.source_entity) == int(C["knight"]) \
 				and int(e.target_entity) == int(C["mover"]) \
 				and String(e.tag) == "attack_of_opportunity" \
-				and int(e.parent_event_id) == int(A.event_id) \
-				and int(e.root_action_id) == int(S.root_action_id) \
-				and int(e.chain_depth) == int(A.chain_depth) + 1:
+				and int(e.parent_event_id) == int(events[b_idx].event_id):
 			d_idx = i
 			break
-	_assert(d_idx >= 0, "nonlethal: AoO DAMAGE_APPLIED D (parent=A)")
+	_assert(d_idx >= 0,
+		"nonlethal: AoO DAMAGE_APPLIED D (parent=AoO DAMAGE_STARTED)")
 	if d_idx < 0:
 		return
 	# M: UNIT_MOVED child of S
@@ -260,13 +271,24 @@ func _test_lethal_aao_SADX_no_movement() -> void:
 	if a_idx < 0:
 		return
 	var A = events[a_idx]
+	# B6.4c: the AoO DAMAGE_APPLIED hangs off the DAMAGE_STARTED
+	# layer. Walk the bridge via parent linkage.
+	var b_idx: int = -1
+	for i in events.size():
+		var e = events[i]
+		if int(e.type) == BattleEventTypeScript.DAMAGE_STARTED \
+				and int(e.parent_event_id) == int(A.event_id):
+			b_idx = i
+			break
+	_assert(b_idx >= 0, "lethal: AoO DAMAGE_STARTED (parent=A)")
+	if b_idx < 0:
+		return
 	var d_idx: int = -1
 	for i in events.size():
 		var e = events[i]
 		if int(e.type) == BattleEventTypeScript.DAMAGE_APPLIED \
 				and String(e.tag) == "attack_of_opportunity" \
-				and int(e.parent_event_id) == int(A.event_id) \
-				and int(e.root_action_id) == int(S.root_action_id):
+				and int(e.parent_event_id) == int(events[b_idx].event_id):
 			d_idx = i
 			break
 	_assert(d_idx >= 0, "lethal: D found")
@@ -452,18 +474,71 @@ func _test_first_aoo_lethal_second_aoo_does_not_commit() -> void:
 	var info = _init_sim(setup)
 	var sim = info["sim"]
 	var events: Array = sim._resolve_or_move(0, 3)
+	# B6.4c SIBLING-REACTION ORDERING.
+	#
+	# Legacy a5dd87d executed a damage-producing reaction
+	# SYNCHRONOUSLY: knight_a's AoO mutated HP (killing the
+	# mover) BEFORE knight_b's sibling reaction was admitted.
+	# knight_b's effect then hit the is_alive() pre-guard and
+	# was rejected BEFORE publishing anything.
+	#
+	# B6.4c splits intent from commit (DAMAGE_STARTED /
+	# DAMAGE_APPLIED). Without an ordering fix, the sibling
+	# knight_b would be admitted while knight_a's window was
+	# still open, and would publish its ATTACK_RESOLVED —
+	# leaking a legacy event that the baseline does not have
+	# (the semantic differential would fail).
+	#
+	# The fix completes the window opened by reaction A inline
+	# (same pump, no recursion) so the next sibling observes
+	# the POST-damage live world. The legacy protective
+	# invariant is therefore preserved EXACTLY:
+	#   - exactly ONE AoO ATTACK_RESOLVED
+	#   - exactly ONE AoO DAMAGE_APPLIED
+	#   - exactly ONE UNIT_DIED
+	#   - knight_b publishes NOTHING at all.
 	var aoo_atk_count: int = 0
 	var knight_b_atk_committed: bool = false
+	var knight_b_intent: bool = false
+	var knight_b_window_opened: bool = false
+	var knight_b_damage: bool = false
+	var unit_died_count: int = 0
 	for e in events:
 		if int(e.type) == BattleEventTypeScript.ATTACK_RESOLVED \
 				and String(e.tag) == "attack_of_opportunity":
 			aoo_atk_count += 1
 			if int(e.source_entity) == 2:
+				knight_b_intent = true
+		elif int(e.type) == BattleEventTypeScript.DAMAGE_STARTED \
+				and String(e.tag) == "attack_of_opportunity" \
+				and int(e.source_entity) == 2:
+			knight_b_window_opened = true
+		elif int(e.type) == BattleEventTypeScript.DAMAGE_APPLIED \
+				and String(e.tag) == "attack_of_opportunity":
+			if int(e.source_entity) == 2:
+				knight_b_damage = true
 				knight_b_atk_committed = true
+		elif int(e.type) == BattleEventTypeScript.UNIT_DIED:
+			unit_died_count += 1
+	# The legacy protective invariant, restored exactly.
 	_assert(aoo_atk_count == 1,
-		"first-lethal: exactly 1 AoO ATK (got %d)" % aoo_atk_count)
+		"first-lethal: exactly 1 AoO ATTACK_RESOLVED (got %d)" % aoo_atk_count)
 	_assert(not knight_b_atk_committed,
-		"first-lethal: knight_b ATK never committed")
+		"first-lethal: knight_b AoO never committed")
+	# B6.4c sibling ordering: knight_b must publish NOTHING —
+	# no intent, no window, no damage. This is the assertion
+	# that catches the sibling-ordering regression.
+	_assert(not knight_b_intent,
+		"first-lethal: knight_b AoO intent (ATTACK_RESOLVED) NOT published")
+	_assert(not knight_b_window_opened,
+		"first-lethal: knight_b window NOT opened (DAMAGE_STARTED absent)")
+	_assert(not knight_b_damage,
+		"first-lethal: knight_b has NO DAMAGE_APPLIED")
+	# Exactly one death: the mover, from knight_a's committed
+	# damage. The rejected sibling must NOT add a second
+	# UNIT_DIED.
+	_assert(unit_died_count == 1,
+		"first-lethal: exactly 1 UNIT_DIED (got %d)" % unit_died_count)
 
 
 # ============================================================

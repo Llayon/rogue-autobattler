@@ -10,6 +10,10 @@ class_name EffectContext extends RefCounted
 ##     observe externally. Effects still return the BattleEvent
 ##     objects they emit through their EffectResult. The sink is
 ##     a convenience for tests / snapshot output.
+##   - B6.4c: an optional DamageWindowHandle. Set ONLY when this
+##     effect is being executed as a DIRECT pre-damage reaction
+##     discovered from a DAMAGE_STARTED work item. Outside that
+##     context, damage_window is null.
 ##
 ## EffectContext does NOT expose RunDomain, Node, or scene
 ## references. Effects cannot reach outside the battle spine.
@@ -18,6 +22,7 @@ var _world = null
 var _rng = null
 var _emitter = null
 var _sink: Array = []
+var _damage_window = null
 
 
 func _init(p_world, p_rng, p_emitter, p_sink: Array = []) -> void:
@@ -25,6 +30,7 @@ func _init(p_world, p_rng, p_emitter, p_sink: Array = []) -> void:
 	_rng = p_rng
 	_emitter = p_emitter
 	_sink = p_sink
+	_damage_window = null
 
 
 ## Returns the BattleWorld (RefCounted).
@@ -58,3 +64,16 @@ func emit_through_sink(ev) -> RefCounted:
 	if ev != null:
 		_sink.append(ev)
 	return ev
+
+
+## B6.4c: returns the active DamageWindowHandle, or null if this
+## effect is not being executed inside a pre-damage window.
+func damage_window():
+	return _damage_window
+
+
+## B6.4c: BATTLE-SIMULATION-OWNED setter. Only the work-pump
+## sets this when constructing an EffectContext for a direct
+## pre-damage reaction. Never set by an effect.
+func _set_damage_window_for_window_reaction(p_handle) -> void:
+	_damage_window = p_handle

@@ -112,6 +112,121 @@ func _run_battle(setup) -> Array:
 
 
 # ============================================================
+# B6.4c — 3-segment attack bridge helper.
+#
+# The causal shape of every damage-producing attack atom is now:
+#
+#   ATTACK_RESOLVED
+#   └ DAMAGE_STARTED          (parent = attack.event_id, depth +1)
+#     └ DAMAGE_APPLIED        (parent = started.event_id, depth +1)
+#       └ UNIT_DIED?          (parent = damage.event_id, depth +1)
+#
+# The B6.4c pre-damage window inserts the DAMAGE_STARTED layer
+# between the intent and the commit. Everything else (root
+# parity, source/target, tag, ordering) is preserved.
+#
+# This helper PROVES the whole bridge instead of asserting a
+# single parent link. root_action_id is asserted as an
+# INVARIANT of the bridge, never used as a discriminator.
+#
+# Returns:
+#   {"atk": <ATTACK_RESOLVED>, "started": <DAMAGE_STARTED>,
+#    "damage": <DAMAGE_APPLIED>, "died": <UNIT_DIED> or null,
+#    "ok": bool}
+# ============================================================
+func _attack_bridge(p_events: Array, p_atk) -> Dictionary:
+	var out: Dictionary = {
+		"atk": p_atk, "started": null, "damage": null,
+		"died": null, "ok": false,
+	}
+	if p_atk == null:
+		return out
+	var started = null
+	for e in p_events:
+		if int(e.type) == BattleEventTypeScript.DAMAGE_STARTED \
+				and int(e.parent_event_id) == int(p_atk.event_id):
+			started = e
+			break
+	out["started"] = started
+	if started == null:
+		return out
+	var dmg = null
+	for e2 in p_events:
+		if int(e2.type) == BattleEventTypeScript.DAMAGE_APPLIED \
+				and int(e2.parent_event_id) == int(started.event_id):
+			dmg = e2
+			break
+	out["damage"] = dmg
+	if dmg == null:
+		return out
+	for e3 in p_events:
+		if int(e3.type) == BattleEventTypeScript.UNIT_DIED \
+				and int(e3.parent_event_id) == int(dmg.event_id):
+			out["died"] = e3
+			break
+	out["ok"] = true
+	return out
+
+
+# Assert the full bridge invariants for one attack atom.
+# Returns true when the bridge is complete AND every invariant
+# holds. Every invariant gets its own labelled assertion, so a
+# failure names the exact broken link.
+func _assert_attack_bridge(
+		p_events: Array, p_atk, p_label: String) -> Dictionary:
+	var b: Dictionary = _attack_bridge(p_events, p_atk)
+	_assert(b["started"] != null,
+		"%s: DAMAGE_STARTED (parent=attack.event_id) present" % p_label)
+	if b["started"] == null:
+		return b
+	var s = b["started"]
+	_assert(int(s.parent_event_id) == int(p_atk.event_id),
+		"%s: started.parent_event_id == attack.event_id" % p_label)
+	_assert(int(s.root_action_id) == int(p_atk.root_action_id),
+		"%s: started.root_action_id == attack.root_action_id" % p_label)
+	_assert(int(s.chain_depth) == int(p_atk.chain_depth) + 1,
+		"%s: started.chain_depth == attack.chain_depth + 1" % p_label)
+	_assert(b["damage"] != null,
+		"%s: DAMAGE_APPLIED (parent=started.event_id) present" % p_label)
+	if b["damage"] == null:
+		return b
+	var d = b["damage"]
+	_assert(int(d.parent_event_id) == int(s.event_id),
+		"%s: damage.parent_event_id == started.event_id" % p_label)
+	_assert(int(d.root_action_id) == int(p_atk.root_action_id),
+		"%s: damage.root_action_id == attack.root_action_id" % p_label)
+	_assert(int(d.chain_depth) == int(s.chain_depth) + 1,
+		"%s: damage.chain_depth == started.chain_depth + 1" % p_label)
+	_assert(int(d.source_entity) == int(p_atk.source_entity)
+			and int(d.target_entity) == int(p_atk.target_entity),
+		"%s: damage source/target parity with attack" % p_label)
+	# Trace order: attack < started < damage.
+	var ai: int = p_events.find(p_atk)
+	var si: int = p_events.find(s)
+	var di: int = p_events.find(d)
+	_assert(ai >= 0 and si >= 0 and di >= 0,
+		"%s: attack / started / damage all in trace" % p_label)
+	_assert(ai < si and si < di,
+		"%s: trace order attack < started < damage" % p_label)
+	_assert(int(p_atk.event_id) < int(s.event_id)
+			and int(s.event_id) < int(d.event_id),
+		"%s: event_id monotonic attack < started < damage" % p_label)
+	return b
+
+
+# Find the ATTACK_RESOLVED of the given reaction-origin tag whose
+# parent is the given parent event id.
+func _find_atk_by_tag(
+		p_events: Array, p_tag: String, p_parent_event_id: int) -> Variant:
+	for e in p_events:
+		if int(e.type) == BattleEventTypeScript.ATTACK_RESOLVED \
+				and String(e.tag) == p_tag \
+				and int(e.parent_event_id) == int(p_parent_event_id):
+			return e
+	return null
+
+
+# ============================================================
 # D1 — Normal counter exact trace ancestry
 # ============================================================
 func _test_normal_counter_exact_trace_ancestry() -> void:
@@ -168,20 +283,23 @@ func _test_normal_counter_exact_trace_ancestry() -> void:
 		"counter ATK target == 1 (enemy)")
 	_assert(String(counter_atk.tag) == "counterattack",
 		"counter ATK tag == 'counterattack'")
-	# counter DMG: child of counter ATK.
-	var counter_dmg = null
-	for e in events:
-		if int(e.type) == BattleEventTypeScript.DAMAGE_APPLIED \
-				and int(e.parent_event_id) == int(counter_atk.event_id) \
-				and int(e.root_action_id) == int(normal_atk.root_action_id):
-			counter_dmg = e
-			break
+	# B6.4c: the counter attack's damage now hangs off a
+	# DAMAGE_STARTED layer (the pre-damage window), NOT directly
+	# off the counter ATTACK_RESOLVED. Use the 3-segment bridge
+	# helper so the WHOLE causal chain is proven.
+	var cb: Dictionary = _assert_attack_bridge(
+		events, counter_atk, "D1 counter attack")
+	var counter_dmg = cb["damage"]
 	_assert(counter_dmg != null, "counter DMG under counter ATK")
 	if counter_dmg != null:
 		_assert(String(counter_dmg.tag) == "counterattack",
 			"counter DMG tag == 'counterattack'")
-		_assert(int(counter_dmg.chain_depth) == 2,
-			"counter DMG depth == 2")
+		# B6.4c: depth grew by one extra level for the inserted
+		# DAMAGE_STARTED layer. Legacy was counter DMG depth == 2
+		# (counter ATK depth 1 + 1); now it is 3.
+		_assert(int(counter_dmg.chain_depth)
+				== int(counter_atk.chain_depth) + 2,
+			"counter DMG depth == counter ATK depth + 2 (started layer)")
 	# No counter-counter (counter ATK must not have a counter child).
 	for e in events:
 		if int(e.type) == BattleEventTypeScript.ATTACK_RESOLVED \
@@ -549,23 +667,17 @@ func _test_lethal_base_attack_no_counter() -> void:
 	if n_idx < 0:
 		return
 	var N = events[n_idx]
-	# 2) Find counter DMG D (parent=N.event_id, same root, depth+1).
-	var d_idx: int = -1
-	for i in events.size():
-		var e = events[i]
-		if int(e.type) == BattleEventTypeScript.DAMAGE_APPLIED \
-				and int(e.source_entity) == 0 \
-				and int(e.target_entity) == 1 \
-				and int(e.parent_event_id) == int(N.event_id) \
-				and int(e.root_action_id) == int(N.root_action_id) \
-				and int(e.chain_depth) == int(N.chain_depth) + 1:
-			d_idx = i
-			break
-	_assert(d_idx >= 0,
+	# B6.4c: the damage now hangs off the DAMAGE_STARTED layer.
+	# Prove the whole 3-segment bridge instead of a single parent
+	# link.
+	var nb: Dictionary = _assert_attack_bridge(
+		events, N, "lethal base player attack")
+	var D = nb["damage"]
+	_assert(D != null,
 		"lethal base: DAMAGE_APPLIED D (parent=N, depth+1) not found")
-	if d_idx < 0:
+	if D == null:
 		return
-	var D = events[d_idx]
+	var d_idx: int = events.find(D)
 	# 3) Find lethal UNIT_DIED X (parent=D.event_id, same root, depth+1).
 	var x_idx: int = -1
 	for i in events.size():
@@ -581,9 +693,13 @@ func _test_lethal_base_attack_no_counter() -> void:
 		"lethal base: UNIT_DIED X (parent=D, depth+1) not found")
 	if x_idx < 0:
 		return
-	# 4) Public trace order: index(N) < index(D) < index(X).
-	_assert(n_idx < d_idx,
-		"lethal base: index(N)=%d < index(D)=%d" % [n_idx, d_idx])
+	# 4) Public trace order: index(N) < index(STARTED) <
+	# index(D) < index(X).
+	var s_idx: int = events.find(nb["started"])
+	_assert(n_idx < s_idx,
+		"lethal base: index(N)=%d < index(STARTED)=%d" % [n_idx, s_idx])
+	_assert(s_idx < d_idx,
+		"lethal base: index(STARTED)=%d < index(D)=%d" % [s_idx, d_idx])
 	_assert(d_idx < x_idx,
 		"lethal base: index(D)=%d < index(X)=%d" % [d_idx, x_idx])
 	# 5) Enemy is actually dead.
@@ -690,26 +806,22 @@ func _test_lethal_counterattack_kills_attacker() -> void:
 	if c_idx < 0:
 		return
 	var C = events[c_idx]
-	# 3) Identify EXACT counter DAMAGE_APPLIED D:
-	# source=1, target=0, tag="counterattack", parent=C.event_id,
-	# root_action_id=C.root_action_id, depth=C.depth+1.
-	var d_idx: int = -1
-	for i in events.size():
-		var e = events[i]
-		if int(e.type) == BattleEventTypeScript.DAMAGE_APPLIED \
-				and int(e.source_entity) == 1 \
-				and int(e.target_entity) == 0 \
-				and String(e.tag) == "counterattack" \
-				and int(e.parent_event_id) == int(C.event_id) \
-				and int(e.root_action_id) == int(C.root_action_id) \
-				and int(e.chain_depth) == int(C.chain_depth) + 1:
-			d_idx = i
-			break
-	_assert(d_idx >= 0,
+	# B6.4c: the counter's damage now hangs off the DAMAGE_STARTED
+	# layer. Prove the whole 3-segment bridge.
+	var cbrid: Dictionary = _assert_attack_bridge(
+		events, C, "lethal counter counterattack")
+	var D = cbrid["damage"]
+	_assert(D != null,
 		"lethal counter: counter DAMAGE_APPLIED D (parent=C) not found")
-	if d_idx < 0:
+	if D == null:
 		return
-	var D = events[d_idx]
+	var d_idx: int = events.find(D)
+	# The counter damage must still carry the reaction tag and
+	# the source/target inversion of the counterattack.
+	_assert(String(D.tag) == "counterattack",
+		"lethal counter: counter DAMAGE_APPLIED tag == 'counterattack'")
+	_assert(int(D.source_entity) == 1 and int(D.target_entity) == 0,
+		"lethal counter: counter DAMAGE_APPLIED source=1 target=0 (inverted)")
 	# 4) Identify EXACT lethal counter UNIT_DIED X:
 	# target=0, tag="counterattack", parent=D.event_id,
 	# root_action_id=D.root_action_id, depth=D.depth+1.
@@ -972,16 +1084,21 @@ func _test_20_run_shipping_determinism() -> void:
 		_assert(normal_atk != null,
 			"run %d: normal root ATTACK_RESOLVED with counter child found" % run)
 		if counter_atk != null:
-			for d in events:
-				if int(d.type) == BattleEventTypeScript.DAMAGE_APPLIED \
-						and String(d.tag) == "counterattack" \
-						and int(d.parent_event_id) == int(counter_atk.event_id) \
-						and int(d.root_action_id) == int(normal_atk.root_action_id) \
-						and int(d.chain_depth) == int(counter_atk.chain_depth) + 1:
-					counter_dmg = d
-					break
+			# B6.4c: the counter damage hangs off the
+			# DAMAGE_STARTED layer. Use the bridge helper.
+			var cb2: Dictionary = _attack_bridge(events, counter_atk)
+			counter_dmg = cb2["damage"]
 			_assert(counter_dmg != null,
 				"run %d: counterattack DAMAGE_APPLIED child found" % run)
+			if counter_dmg != null:
+				_assert(String(counter_dmg.tag) == "counterattack",
+					"run %d: counterattack DAMAGE_APPLIED tag == 'counterattack'" % run)
+				_assert(int(counter_dmg.root_action_id)
+						== int(normal_atk.root_action_id),
+					"run %d: counterattack DAMAGE_APPLIED root parity with normal ATK" % run)
+				_assert(int(counter_dmg.chain_depth)
+						== int(counter_atk.chain_depth) + 2,
+					"run %d: counterattack DAMAGE_APPLIED depth == counter ATK depth + 2" % run)
 		# 3) Unique event_ids.
 		var seen: Dictionary = {}
 		for e in events:

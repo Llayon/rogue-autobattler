@@ -19,6 +19,8 @@ const BattleWorldScript = preload("res://core/battle_ecs/world/battle_world.gd")
 const BattleSetupScript = preload("res://core/battle_ecs/battle_setup.gd")
 const BattleUnitSetupScript = preload("res://core/battle_ecs/battle_unit_setup.gd")
 const BattleResultScript = preload("res://core/battle_ecs/battle_result.gd")
+const DamageBridgeScript = preload(
+	"res://tests/battle_ecs/effects/b64c_damage_bridge.gd")
 
 var _passed: int = 0
 var _failed: int = 0
@@ -74,6 +76,17 @@ func _test_event_type_registry_uniqueness_and_frozen_values() -> void:
 		"STATUS_EXPIRED": 10,
 		# B6.3: pre-move window. Logical movement intent event.
 		"UNIT_MOVE_STARTED": 11,
+		# B6.4c: pre-damage reaction window. The damage INTENT
+		# event, published when a damage transaction opens and
+		# before any HP mutation. DAMAGE_APPLIED (the commit) is
+		# its child, so the causal shape is:
+		#   ATTACK_RESOLVED / STATUS_TICKED
+		#   └ DAMAGE_STARTED   (intent, window opens)
+		#     └ DAMAGE_APPLIED (commit, HP mutated)
+		# This is an intentional SCHEMA EVOLUTION of the frozen
+		# namespace: value 12 was the reserved slot (-1 sentinel
+		# before), and it is now claimed by DAMAGE_STARTED.
+		"DAMAGE_STARTED": 12,
 	}
 	for e in entries:
 		var name: String = String(e[0])
@@ -83,7 +96,8 @@ func _test_event_type_registry_uniqueness_and_frozen_values() -> void:
 			"frozen value %s == %d (got %d)" % [name, int(expected.get(name, -1)), v])
 		_assert(not values.has(v), "value %d unique (collision on %s)" % [v, name])
 		values[v] = true
-	_assert(values.size() == 12, "12 unique values total")
+	# B6.4c: 13 registered types (12 frozen + DAMAGE_STARTED).
+	_assert(values.size() == 13, "13 unique values total (got %d)" % values.size())
 
 
 func _test_no_local_event_type_constants_in_phase3_effects() -> void:
@@ -179,17 +193,29 @@ func _test_basic_attack_ancestry() -> void:
 		"ATTACK_RESOLVED chain_depth == 0 (got %d)" % int(attack_ev.chain_depth))
 	_assert(int(attack_ev.root_action_id) > 0,
 		"ATTACK_RESOLVED root_action_id > 0 (got %d)" % int(attack_ev.root_action_id))
-	_assert(int(damage_ev.parent_event_id) == int(attack_ev.event_id),
-		"DAMAGE_APPLIED parent == ATTACK_RESOLVED.event_id (got %d, expected %d)" % [int(damage_ev.parent_event_id), int(attack_ev.event_id)])
-	_assert(int(damage_ev.root_action_id) == int(attack_ev.root_action_id),
-		"DAMAGE_APPLIED shares root_action_id with ATTACK_RESOLVED")
-	_assert(int(damage_ev.chain_depth) == 1,
-		"DAMAGE_APPLIED chain_depth == 1 (got %d)" % int(damage_ev.chain_depth))
-	if died_ev != null:
-		_assert(int(died_ev.parent_event_id) == int(damage_ev.event_id),
-			"UNIT_DIED parent == DAMAGE_APPLIED.event_id")
-		_assert(int(died_ev.chain_depth) == 2,
-			"UNIT_DIED chain_depth == 2 (got %d)" % int(died_ev.chain_depth))
+	# B6.4c: the pre-damage window inserts DAMAGE_STARTED between
+	# the attack intent and the damage commit:
+	#   ATTACK_RESOLVED -> DAMAGE_STARTED -> DAMAGE_APPLIED
+	# The DAMAGE_APPLIED is no longer a DIRECT child of the
+	# ATTACK_RESOLVED. The shared attack bridge helper proves the
+	# whole chain (parent link, root parity, depth +1, trace order,
+	# event-id monotonicity).
+	var bridge: Dictionary = \
+		DamageBridgeScript.assert_attack_damage_bridge(
+			evs, attack_ev, "basic attack ancestry", _assert)
+	var bridged_damage = bridge.get("applied", null)
+	_assert(bridged_damage != null,
+		"DAMAGE_APPLIED committed for the ATTACK_RESOLVED")
+	if bridged_damage != null:
+		_assert(int(bridged_damage.root_action_id) == int(attack_ev.root_action_id),
+			"DAMAGE_APPLIED shares root_action_id with ATTACK_RESOLVED")
+		var bridged_died = bridge.get("died", null)
+		if died_ev != null and bridged_died != null:
+			_assert(int(died_ev.parent_event_id) == int(bridged_damage.event_id),
+				"UNIT_DIED parent == DAMAGE_APPLIED.event_id")
+			_assert(int(died_ev.chain_depth) == int(bridged_damage.chain_depth) + 1,
+				"UNIT_DIED chain_depth == DAMAGE_APPLIED.chain_depth + 1 (got %d)"
+					% int(died_ev.chain_depth))
 
 
 func _test_basic_attack_root_action_id_allocated_once() -> void:

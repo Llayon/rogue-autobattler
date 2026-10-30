@@ -407,6 +407,89 @@ func _t15_no_side_effect_before_commit() -> void:
 
 
 # ============================================================
+# B6.4c 3-segment ancestry helper.
+# Walks: ATTACK_RESOLVED -> DAMAGE_STARTED -> DAMAGE_APPLIED
+# (and optional UNIT_DIED grandchild). Returns null if any
+# segment is missing.
+# Returns a Dictionary with keys:
+#   atk: ATTACK_RESOLVED event
+#   started: DAMAGE_STARTED event (child of atk)
+#   damage: DAMAGE_APPLIED event (child of started)
+#   died: UNIT_DIED event (child of damage) or null
+#   started_idx / damage_idx / died_idx: positions in events
+#   damage_event_id: int (handy for trace parity asserts)
+# Validates:
+#   - started.parent_event_id == atk.event_id
+#   - damage.parent_event_id == started.event_id
+#   - started.depth == atk.depth + 1
+#   - damage.depth == started.depth + 1
+#   - root_action_id parity across all three
+#   - strict index order atk < started < damage < died?
+# ============================================================
+func _bridge_attack_window(events: Array) -> Dictionary:
+	# Step 1: find first ATTACK_RESOLVED (root scheduled attack).
+	var atk_idx: int = -1
+	var atk = null
+	for i in events.size():
+		var e = events[i]
+		if int(e.type) == BattleEventTypeScript.ATTACK_RESOLVED \
+				and int(e.parent_event_id) == -1 \
+				and int(e.chain_depth) == 0:
+			atk_idx = i
+			atk = e
+			break
+	if atk == null:
+		return {"atk": null, "started": null, "damage": null,
+			"died": null, "atk_idx": -1, "started_idx": -1,
+			"damage_idx": -1, "died_idx": -1}
+	# Step 2: find DAMAGE_STARTED whose parent == atk.event_id.
+	var started_idx: int = -1
+	var started = null
+	for i in events.size():
+		var e = events[i]
+		if int(e.type) == BattleEventTypeScript.DAMAGE_STARTED \
+				and int(e.parent_event_id) == int(atk.event_id) \
+				and int(e.root_action_id) == int(atk.root_action_id):
+			started_idx = i
+			started = e
+			break
+	if started == null:
+		return {"atk": atk, "atk_idx": atk_idx, "started": null,
+			"damage": null, "died": null,
+			"started_idx": -1, "damage_idx": -1, "died_idx": -1}
+	# Step 3: find DAMAGE_APPLIED whose parent == started.event_id.
+	var damage_idx: int = -1
+	var damage = null
+	for i in events.size():
+		var e = events[i]
+		if int(e.type) == BattleEventTypeScript.DAMAGE_APPLIED \
+				and int(e.parent_event_id) == int(started.event_id) \
+				and int(e.root_action_id) == int(atk.root_action_id):
+			damage_idx = i
+			damage = e
+			break
+	if damage == null:
+		return {"atk": atk, "atk_idx": atk_idx, "started": started,
+			"started_idx": started_idx, "damage": null,
+			"died": null, "damage_idx": -1, "died_idx": -1}
+	# Step 4 (optional): find UNIT_DIED whose parent == damage.event_id.
+	var died_idx: int = -1
+	var died = null
+	for i in events.size():
+		var e = events[i]
+		if int(e.type) == BattleEventTypeScript.UNIT_DIED \
+				and int(e.parent_event_id) == int(damage.event_id) \
+				and int(e.root_action_id) == int(atk.root_action_id):
+			died_idx = i
+			died = e
+			break
+	return {"atk": atk, "started": started, "damage": damage,
+		"died": died, "atk_idx": atk_idx,
+		"started_idx": started_idx, "damage_idx": damage_idx,
+		"died_idx": died_idx}
+
+
+# ============================================================
 # T16: perform_attack nonlethal parity
 # ============================================================
 func _t16_perform_attack_nonlethal_parity() -> void:
@@ -414,18 +497,30 @@ func _t16_perform_attack_nonlethal_parity() -> void:
 	var pair = _make_pair_sim(200, 200, 5, 5)
 	var sim = pair[0]
 	sim._rng = DeterministicRngScript.new(7)
-	var events: Array = sim._drive_team_action(0)
-	_assert(events.size() >= 2, "ATK + DMG present")
-	_assert(int(events[0].type) == BattleEventTypeScript.ATTACK_RESOLVED,
-		"first event ATTACK_RESOLVED")
-	_assert(int(events[1].type) == BattleEventTypeScript.DAMAGE_APPLIED,
-		"second event DAMAGE_APPLIED")
-	_assert(int(events[0].root_action_id) == int(events[1].root_action_id),
-		"shared root_action_id")
-	_assert(int(events[1].parent_event_id) == int(events[0].event_id),
-		"DMG.parent == ATK.event_id")
-	_assert(int(events[1].chain_depth) == int(events[0].chain_depth) + 1,
-		"DMG.depth == ATK.depth + 1")
+	# B6.4c: drive the WHOLE tick so the work-pump drains the
+	# DamageWindowWorkItem and finalize() emits DAMAGE_APPLIED.
+	var events: Array = sim.step_tick()
+	# B6.4c: trace now contains ATTACK_RESOLVED, DAMAGE_STARTED,
+	# DAMAGE_APPLIED. Use the 3-segment bridge helper.
+	var bridge = _bridge_attack_window(events)
+	_assert(bridge.atk != null, "ATK_RESOLVED present")
+	_assert(bridge.started != null, "DAMAGE_STARTED present (child of ATK)")
+	_assert(bridge.damage != null, "DAMAGE_APPLIED present (child of DAMAGE_STARTED)")
+	if bridge.atk == null or bridge.started == null or bridge.damage == null:
+		return
+	_assert(int(bridge.started.parent_event_id) == int(bridge.atk.event_id),
+		"DAMAGE_STARTED.parent == ATK.event_id")
+	_assert(int(bridge.damage.parent_event_id) == int(bridge.started.event_id),
+		"DAMAGE_APPLIED.parent == DAMAGE_STARTED.event_id")
+	_assert(int(bridge.atk.root_action_id) == int(bridge.damage.root_action_id),
+		"shared root_action_id (ATK == DMG)")
+	_assert(int(bridge.started.chain_depth) == int(bridge.atk.chain_depth) + 1,
+		"DAMAGE_STARTED.depth == ATK.depth + 1")
+	_assert(int(bridge.damage.chain_depth) == int(bridge.started.chain_depth) + 1,
+		"DAMAGE_APPLIED.depth == DAMAGE_STARTED.depth + 1")
+	_assert(bridge.atk_idx < bridge.started_idx
+			and bridge.started_idx < bridge.damage_idx,
+		"strict trace order: ATK < DAMAGE_STARTED < DAMAGE_APPLIED")
 	_assert(sim.world().is_alive(1), "knight still alive")
 
 
@@ -437,19 +532,24 @@ func _t17_perform_attack_lethal_parity() -> void:
 	var pair = _make_pair_sim(200, 200, 999, 5)
 	var sim = pair[0]
 	sim._rng = DeterministicRngScript.new(7)
-	var events: Array = sim._drive_team_action(0)
-	_assert(events.size() >= 3, "ATK + DMG + DIED present")
-	_assert(int(events[0].type) == BattleEventTypeScript.ATTACK_RESOLVED,
-		"ATK_RESOLVED")
-	_assert(int(events[1].type) == BattleEventTypeScript.DAMAGE_APPLIED,
-		"DAMAGE_APPLIED")
-	_assert(int(events[2].type) == BattleEventTypeScript.UNIT_DIED,
-		"UNIT_DIED")
-	_assert(int(events[2].parent_event_id) == int(events[1].event_id),
-		"DIED.parent == DMG.event_id")
-	_assert(int(events[0].root_action_id) == int(events[2].root_action_id),
-		"shared root_action_id")
-	_assert(int(events[1].amount) == 200,
+	# B6.4c: drive the WHOLE tick so the work-pump drains the
+	# DamageWindowWorkItem and finalize() emits DAMAGE_APPLIED
+	# + UNIT_DIED.
+	var events: Array = sim.step_tick()
+	# B6.4c: bridge contains ATK -> DAMAGE_STARTED -> DAMAGE_APPLIED
+	# -> UNIT_DIED (lethal).
+	var bridge = _bridge_attack_window(events)
+	_assert(bridge.atk != null, "ATK_RESOLVED present")
+	_assert(bridge.started != null, "DAMAGE_STARTED present")
+	_assert(bridge.damage != null, "DAMAGE_APPLIED present")
+	_assert(bridge.died != null, "UNIT_DIED present (lethal)")
+	if bridge.died == null:
+		return
+	_assert(int(bridge.died.parent_event_id) == int(bridge.damage.event_id),
+		"UNIT_DIED.parent == DAMAGE_APPLIED.event_id")
+	_assert(int(bridge.atk.root_action_id) == int(bridge.died.root_action_id),
+		"shared root_action_id across all 4 events")
+	_assert(int(bridge.damage.amount) == 200,
 		"DMG.amount == 200 (target full HP removed)")
 	_assert(not sim.world().is_alive(1), "knight dead")
 
@@ -470,8 +570,15 @@ func _t18_counterattack_ancestry_proof() -> void:
 	sim.initialize(setup)
 	sim._rng = DeterministicRngScript.new(7)
 	var events: Array = sim.step_tick()
-	# Find ROOT normal ATTACK_RESOLVED (warrior->guardian).
-	var root_atk = null
+	# B6.4c: build the bridge for the warrior's ROOT attack.
+	# Used downstream to assert timing relative to the
+	# counterattack (counter must fire AFTER original DMG).
+	var bridge = _bridge_attack_window(events)
+	_assert(bridge.atk != null, "warrior ROOT ATK_RESOLVED present")
+	if bridge.atk == null:
+		return
+	var root_atk = bridge.atk
+	_assert(bridge.damage != null, "warrior ROOT DAMAGE_APPLIED present")
 	for e in events:
 		if int(e.type) == BattleEventTypeScript.ATTACK_RESOLVED \
 				and int(e.parent_event_id) == -1 \
@@ -505,40 +612,81 @@ func _t18_counterattack_ancestry_proof() -> void:
 		"counter shares root_action_id with ROOT")
 	_assert(int(counter_atk.chain_depth) == int(root_atk.chain_depth) + 1,
 		"counter.depth == ROOT.depth + 1")
-	# Identify counter DAMAGE_APPLIED.
-	var counter_dmg = null
+	# B6.4c: counterattack DMG.parent is no longer counter ATK
+	# directly; it is the new counter DAMAGE_STARTED. The
+	# walk-bridge code below re-finds it. Do NOT keep the
+	# legacy `parent == counter ATK` check.
+	var counter_dmg = null  # assigned by the bridge walk below.
+	# B6.4c: counterattack is now a 3-segment bridge:
+	# counter ATK -> counter DAMAGE_STARTED -> counter DMG.
+	# Walk the bridge explicitly. counter_dmg.parent must be
+	# counter_started.event_id (NOT counter_atk.event_id).
+	var counter_started = null
+	for e in events:
+		if int(e.type) == BattleEventTypeScript.DAMAGE_STARTED \
+				and int(e.parent_event_id) == int(counter_atk.event_id) \
+				and String(e.tag) == "counterattack":
+			counter_started = e
+			break
+	_assert(counter_started != null,
+		"counter DAMAGE_STARTED with parent=counter ATK and tag='counterattack'")
+	if counter_started == null:
+		return
+	# Re-find counter_dmg whose parent is now counter_started.
+	# B6.4c: use parent linkage (NOT root_action_id) as the
+	# discriminator. The COUNTER-COUNTERATTACK's DMG has
+	# different parent (its own counterattack ATK, not our
+	# counter_started). The root_action_id is shared across
+	# the entire causal family and is asserted as an invariant
+	# (atk.root == started.root == damage.root), not used as
+	# a filter.
+	counter_dmg = null
 	for e in events:
 		if int(e.type) == BattleEventTypeScript.DAMAGE_APPLIED \
-				and int(e.parent_event_id) == int(counter_atk.event_id) \
+				and int(e.parent_event_id) == int(counter_started.event_id) \
 				and String(e.tag) == "counterattack":
 			counter_dmg = e
 			break
 	_assert(counter_dmg != null,
-		"counter DAMAGE_APPLIED with parent=counter ATK and tag='counterattack'")
+		"counter DAMAGE_APPLIED with parent=counter DAMAGE_STARTED and tag='counterattack'")
 	if counter_dmg != null:
 		_assert(int(counter_dmg.root_action_id) == int(counter_atk.root_action_id),
 			"counter DMG shares root_action_id")
-		_assert(int(counter_dmg.chain_depth) == int(counter_atk.chain_depth) + 1,
-			"counter DMG.depth == counter ATK.depth + 1")
-	# Event order: ROOT_ATK < counter_ATK < counter_DMG.
-	var root_idx: int = -1
+		_assert(int(counter_dmg.chain_depth) == int(counter_started.chain_depth) + 1,
+			"counter DMG.depth == counter DAMAGE_STARTED.depth + 1")
+		_assert(int(counter_started.chain_depth) == int(counter_atk.chain_depth) + 1,
+			"counter DAMAGE_STARTED.depth == counter ATK.depth + 1")
+		# B6.4c frozen tag parity: counter DAMAGE_APPLIED.tag ==
+		# "counterattack" (final_event_tag, NOT sem_tag). Same as
+		# a5dd87d legacy.
+		_assert(String(counter_dmg.tag) == "counterattack",
+			"counter DAMAGE_APPLIED.tag == 'counterattack' (B6.4c legacy parity)")
+		_assert(String(counter_started.tag) == "counterattack",
+			"counter DAMAGE_STARTED.tag == 'counterattack'")
+	# Event order assertion.
+	# B6.4c: counter must fire AFTER the warrior's original
+	# DAMAGE_APPLIED. This preserves legacy timing. The original
+	# DMG_APPLIED is bridge.damage from the warrior's attack.
+	var root_dmg_idx: int = -1
 	var catk_idx: int = -1
+	var cstarted_idx: int = -1
 	var cdmg_idx: int = -1
 	for i in events.size():
 		var e = events[i]
-		if e == root_atk:
-			root_idx = i
+		if e == bridge.damage:
+			root_dmg_idx = i
 		elif e == counter_atk:
 			catk_idx = i
+		elif e == counter_started:
+			cstarted_idx = i
 		elif e == counter_dmg:
 			cdmg_idx = i
-	_assert(root_idx >= 0 and catk_idx >= 0 and cdmg_idx >= 0,
-		"all three events found in trace")
-	if root_idx >= 0 and catk_idx >= 0 and cdmg_idx >= 0:
-		_assert(root_idx < catk_idx,
-			"ROOT_ATK before counter_ATK")
-		_assert(catk_idx < cdmg_idx,
-			"counter_ATK before counter_DMG")
+	_assert(root_dmg_idx >= 0 and catk_idx >= 0
+			and root_dmg_idx < catk_idx,
+		"original DMG_APPLIED appears BEFORE counterattack ATK_RESOLVED (preserves legacy timing)")
+	_assert(catk_idx >= 0 and cstarted_idx >= 0 and cdmg_idx >= 0
+			and catk_idx < cstarted_idx and cstarted_idx < cdmg_idx,
+		"counter ATK < counter DAMAGE_STARTED < counter DAMAGE_APPLIED in trace")
 	# Unique event IDs.
 	var seen: Dictionary = {}
 	for e in events:
@@ -563,7 +711,33 @@ func _t19_direct_damage_parity() -> void:
 	req.payload = {"skip_balance": true}
 	var ctx = EffectContextScript.new(
 		sim.world(), sim._rng, em, [])
-	DamageEffectScript.new().execute(ctx, req)
+	# B6.4c: DamageEffect returns succeeded_with_work; the
+	# work-pump must drain the DamageWindowWorkItem so
+	# finalize() commits the transaction. The executor's
+	# return value (r) carries dispatch_work.
+	var r = DamageEffectScript.new().execute(ctx, req)
+	_assert(r != null, "DamageEffect returned a result")
+	_assert(r.dispatch_work != null, "DamageEffect result has dispatch_work array")
+	if r != null and r.dispatch_work != null and r.dispatch_work.size() > 0:
+		# B6.4c: drain the DamageWindowWorkItem through the work-
+		# pump. Use a real TriggerProvider (default discover
+		# returns []) so discovery doesn't crash. ContentDBScript
+		# is a static utility class, not a TriggerProvider.
+		var TriggerDispatcherScript = load(
+			"res://core/battle_ecs/triggers/trigger_dispatcher.gd")
+		var TriggerProviderScript = load(
+			"res://core/battle_ecs/triggers/trigger_provider.gd")
+		var TriggerLimitsScript = load(
+			"res://core/battle_ecs/triggers/trigger_limits.gd")
+		var TriggerDispatchSessionScript = load(
+			"res://core/battle_ecs/triggers/trigger_dispatch_session.gd")
+		var provider = TriggerProviderScript.new()
+		var limits = TriggerLimitsScript.new()
+		var ephemeral = TriggerDispatchSessionScript.from_limits(limits)
+		var sink: Array = []
+		TriggerDispatcherScript.new().process_work(
+			r.dispatch_work, sim.world(), sim._rng, em, sink,
+			provider, limits, ephemeral)
 	_assert(int(sim.world().current_hp_of(1)) == 70,
 		"direct damage=10: HP 70")
 
@@ -617,22 +791,60 @@ func _t20_real_periodic_burn() -> void:
 		"STATUS_TICKED with tag=burn emitted by periodic phase")
 	if status_ticked == null:
 		return
-	# Find DAMAGE_APPLIED whose parent is the STATUS_TICKED.
+	# B6.4c: bridge is STATUS_TICKED -> DAMAGE_STARTED -> DAMAGE_APPLIED.
+	# Walk the 3-segment bridge.
+	var burn_started = null
+	for e in events:
+		if int(e.type) == BattleEventTypeScript.DAMAGE_STARTED \
+				and int(e.parent_event_id) == int(status_ticked.event_id) \
+				and String(e.tag) == "burn":
+			burn_started = e
+			break
+	_assert(burn_started != null,
+		"burn DAMAGE_STARTED (parent=STATUS_TICKED, tag=burn)")
+	if burn_started == null:
+		return
+	_assert(int(burn_started.chain_depth) == int(status_ticked.chain_depth) + 1,
+		"burn DAMAGE_STARTED.depth == STATUS_TICKED.depth + 1")
+	_assert(int(burn_started.source_entity) == 0,
+		"burn DAMAGE_STARTED.source = source(0)")
+	_assert(int(burn_started.target_entity) == 1,
+		"burn DAMAGE_STARTED.target = target(1)")
+	# Find DAMAGE_APPLIED whose parent is burn_started.
 	var burn_dmg = null
 	for e in events:
 		if int(e.type) == BattleEventTypeScript.DAMAGE_APPLIED \
-				and int(e.parent_event_id) == int(status_ticked.event_id):
+				and int(e.parent_event_id) == int(burn_started.event_id):
 			burn_dmg = e
 			break
 	_assert(burn_dmg != null,
-		"DAMAGE_APPLIED child of STATUS_TICKED (periodic routed through executor)")
+		"burn DAMAGE_APPLIED (parent=burn DAMAGE_STARTED)")
 	if burn_dmg != null:
 		_assert(int(burn_dmg.amount) == int(burn_def.dot_damage),
 			"DAMAGE_APPLIED.amount == burn.dot_damage")
-		_assert(int(burn_dmg.chain_depth) == int(status_ticked.chain_depth) + 1,
-			"DAMAGE_APPLIED.depth == STATUS_TICKED.depth + 1")
+		_assert(int(burn_dmg.chain_depth) == int(burn_started.chain_depth) + 1,
+			"DAMAGE_APPLIED.depth == burn DAMAGE_STARTED.depth + 1")
 		_assert(int(burn_dmg.source_entity) == 0,
 			"DAMAGE_APPLIED.source = source(0)")
+		# B6.4c frozen tag parity: DAMAGE_APPLIED.tag == "" for
+		# direct / Burn path.
+		_assert(String(burn_dmg.tag) == "",
+			"burn DAMAGE_APPLIED.tag == '' (B6.4c legacy parity)")
+		# Trace order: STATUS_TICKED < DAMAGE_STARTED < DAMAGE_APPLIED.
+		var st_idx: int = -1
+		var ds_idx: int = -1
+		var dm_idx: int = -1
+		for i in events.size():
+			var e = events[i]
+			if e == status_ticked:
+				st_idx = i
+			elif e == burn_started:
+				ds_idx = i
+			elif e == burn_dmg:
+				dm_idx = i
+		_assert(st_idx >= 0 and ds_idx >= 0 and dm_idx >= 0
+				and st_idx < ds_idx and ds_idx < dm_idx,
+			"STATUS_TICKED < burn DAMAGE_STARTED < burn DAMAGE_APPLIED in trace")
 
 
 # ============================================================
@@ -648,7 +860,9 @@ func _t21_same_seed_20_run_determinism() -> void:
 		var pair = _make_pair_sim(200, 200, 5, 5)
 		var sim = pair[0]
 		sim._rng = DeterministicRngScript.new(7)  # SAME seed every run
-		var events: Array = sim._drive_team_action(0)
+		# B6.4c: step_tick drains the DamageWindowWorkItem so
+		# the full trace including DAMAGE_APPLIED is observable.
+		var events: Array = sim.step_tick()
 		# Normalized 14-field event trace.
 		var ev_norm: Array = []
 		for e in events:

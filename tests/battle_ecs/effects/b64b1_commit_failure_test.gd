@@ -279,39 +279,48 @@ func _cf3_perform_attack_setup_rejection_fail_closed() -> void:
 	# We DO prove the negative-amount setup-fail path here by
 	# using the same code review: assert that the production
 	# code's commit-fail branch returns failed with empty
-	# events. This is a meta-test that reads the source file
-	# and asserts the literal return signature.
-	var pa_path: String = "res://core/battle_ecs/effects/perform_attack_effect.gd"
+	# events. B6.4c refactored: the fail-closed branch is now
+	# in DamageWindowContinuation.finalize() (the continuation
+	# owns the commit). Update the file-source review target.
+	var pa_path: String = "res://core/battle_ecs/effects/damage_window_continuation.gd"
 	var f: FileAccess = FileAccess.open(pa_path, FileAccess.READ)
-	_assert(f != null, "perform_attack_effect.gd readable")
+	_assert(f != null, "damage_window_continuation.gd readable")
 	if f == null:
 		return
 	var src: String = f.get_as_text()
 	f.close()
-	# The commit-fail branch in b446125 has the literal return:
-	#   return EffectResultScript.failed(
-	#       "perform_attack: damage commit failed: %s" % ...,
-	#       [], false)
-	_assert(src.find("damage commit failed") >= 0,
-		"perform_attack_effect.gd has commit-fail branch with literal reason")
-	_assert(src.find("return EffectResultScript.failed") >= 0,
-		"perform_attack_effect.gd has failed() return in fail-closed branch")
-	# DamageEffect commit-fail branch.
-	var de_path: String = "res://core/battle_ecs/effects/damage_effect.gd"
-	var g: FileAccess = FileAccess.open(de_path, FileAccess.READ)
-	_assert(g != null, "damage_effect.gd readable")
+	# The continuation's finalize() must fail-closed on target_dead
+	# and commit failure.
+	_assert(src.find("world.is_alive") >= 0,
+		"continuation.finalize: target-alive revalidation")
+	_assert(src.find("return FinalizeResult.new([])") >= 0,
+		"continuation.finalize: empty emitted on fail-closed")
+	_assert(src.find("handle.close()") >= 0,
+		"continuation.finalize: closes handle on fail-closed")
+	# The setup-rejection branch in perform_attack_effect.gd
+	# must also fail-closed (negative base, etc.).
+	var pat: String = "res://core/battle_ecs/effects/perform_attack_effect.gd"
+	var g: FileAccess = FileAccess.open(pat, FileAccess.READ)
+	_assert(g != null, "perform_attack_effect.gd readable")
 	if g != null:
 		var src2: String = g.get_as_text()
 		g.close()
-		_assert(src2.find("damage commit failed") >= 0,
-			"damage_effect.gd has commit-fail branch with literal reason")
 		_assert(src2.find("return EffectResultScript.failed") >= 0,
-			"damage_effect.gd has failed() return in fail-closed branch")
+			"perform_attack_effect.gd has failed() return for setup rejection")
+	# Same for DamageEffect.
+	var de_path: String = "res://core/battle_ecs/effects/damage_effect.gd"
+	var h: FileAccess = FileAccess.open(de_path, FileAccess.READ)
+	_assert(h != null, "damage_effect.gd readable")
+	if h != null:
+		var src3: String = h.get_as_text()
+		h.close()
+		_assert(src3.find("return EffectResultScript.failed") >= 0,
+			"damage_effect.gd has failed() return for setup rejection")
 	# CF1 already proved the transaction's fail-closed contract.
 	# This CF3 proves the same contract is preserved through
 	# the Effect-level return shape (production code review).
 	_assert(true,
-		"PerformAttackEffect fail-closed: return shape matches CF1 contract")
+		"PerformAttackEffect + DamageEffect + Continuation: fail-closed return shape matches CF1 contract")
 
 
 # ============================================================
@@ -375,15 +384,29 @@ func _cf5_burn_causal_ancestry_strengthened() -> void:
 		"STATUS_TICKED (tag=burn) present")
 	if status_ticked == null:
 		return
-	# Find DAMAGE_APPLIED with tag=burn and parent=STATUS_TICKED.
+	# B6.4c: B6.4b.1 trace ancestry. Real production path is:
+	#   STATUS_TICKED
+	#   └ DAMAGE_STARTED  (parent=STATUS_TICKED, depth + 1)
+	#     └ DAMAGE_APPLIED (parent=DAMAGE_STARTED, depth + 2)
+	# DAMAGE_STARTED is the new pre-damage intent event (12).
+	# Find DAMAGE_STARTED with parent=STATUS_TICKED.
+	var dmg_started = null
+	for e in events:
+		if int(e.type) == BattleEventTypeScript.DAMAGE_STARTED \
+				and int(e.parent_event_id) == int(status_ticked.event_id):
+			dmg_started = e
+			break
+	_assert(dmg_started != null,
+		"burn DAMAGE_STARTED (parent=STATUS_TICKED) present")
+	# Find DAMAGE_APPLIED with parent=DAMAGE_STARTED.
 	var burn_dmg = null
 	for e in events:
 		if int(e.type) == BattleEventTypeScript.DAMAGE_APPLIED \
-				and int(e.parent_event_id) == int(status_ticked.event_id):
+				and int(e.parent_event_id) == int(dmg_started.event_id):
 			burn_dmg = e
 			break
 	_assert(burn_dmg != null,
-		"burn DAMAGE_APPLIED (parent=STATUS_TICKED) present")
+		"burn DAMAGE_APPLIED (parent=DAMAGE_STARTED) present")
 	if burn_dmg == null:
 		return
 	# Strengthened causal-ancestry assertions.
@@ -391,29 +414,46 @@ func _cf5_burn_causal_ancestry_strengthened() -> void:
 		"burn DMG shares root_action_id with STATUS_TICKED")
 	_assert(int(burn_dmg.target_entity) == 1,
 		"burn DMG target_entity == knight (1)")
-	_assert(int(burn_dmg.chain_depth) == int(status_ticked.chain_depth) + 1,
-		"burn DMG.chain_depth == STATUS_TICKED.chain_depth + 1")
+	# B6.4c: DAMAGE_APPLIED is at chain_depth = STATUS_TICKED + 2
+	# (STATUS_TICKED -> DAMAGE_STARTED -> DAMAGE_APPLIED).
+	_assert(int(burn_dmg.chain_depth) == int(status_ticked.chain_depth) + 2,
+		"burn DMG.chain_depth == STATUS_TICKED.chain_depth + 2")
 	_assert(int(burn_dmg.source_entity) == 0,
 		"burn DMG source_entity == source(0)")
-	# B6.4b.1: DAMAGE_APPLIED does NOT carry the status tag
-	# (the periodic processor does not propagate it). The
-	# status identity is preserved via parent_event_id pointing
-	# to STATUS_TICKED. We assert the tag is empty on the
-	# child to document the current production contract.
+	# B6.4c frozen tag contract: DAMAGE_APPLIED.tag = "" for
+	# direct / Burn path. Status identity is preserved via
+	# the parent_event_id chain (DAMAGE_STARTED carries the
+	# status_id tag). This matches a5dd87d legacy parity
+	# and the semantic differential projection requirement.
 	_assert(String(burn_dmg.tag) == "",
-		"burn DMG tag == '' (status identity via parent_event_id, not tag)")
+		"burn DMG.tag == '' (B6.4c legacy contract preserved)")
 	_assert(int(burn_dmg.amount) == int(burn_def.dot_damage),
 		"burn DMG.amount == burn.dot_damage")
-	_assert(int(burn_dmg.parent_event_id) == int(status_ticked.event_id),
-		"burn DMG parent_event_id == STATUS_TICKED.event_id")
-	# Event order: STATUS_TICKED strictly before DAMAGE_APPLIED.
+	_assert(int(burn_dmg.parent_event_id) == int(dmg_started.event_id),
+		"burn DMG parent_event_id == DAMAGE_STARTED.event_id")
+	_assert(String(dmg_started.tag) == "burn",
+		"DAMAGE_STARTED.tag == 'burn' (status identity on the intent event)")
+	_assert(int(dmg_started.amount) == int(burn_def.dot_damage),
+		"DAMAGE_STARTED.amount == burn.dot_damage (immutable base)")
+	_assert(int(dmg_started.source_entity) == 0,
+		"DAMAGE_STARTED.source_entity == 0 (status source)")
+	_assert(int(dmg_started.target_entity) == 1,
+		"DAMAGE_STARTED.target_entity == 1 (status owner)")
+	_assert(int(dmg_started.chain_depth) == int(status_ticked.chain_depth) + 1,
+		"DAMAGE_STARTED.chain_depth == STATUS_TICKED.chain_depth + 1")
+	# Event order: STATUS_TICKED strictly before DAMAGE_STARTED
+	# strictly before DAMAGE_APPLIED.
 	var st_idx: int = -1
+	var ds_idx: int = -1
 	var dm_idx: int = -1
 	for i in events.size():
 		var e = events[i]
 		if e == status_ticked:
 			st_idx = i
+		elif e == dmg_started:
+			ds_idx = i
 		elif e == burn_dmg:
 			dm_idx = i
-	_assert(st_idx >= 0 and dm_idx >= 0 and st_idx < dm_idx,
-		"STATUS_TICKED strictly before DAMAGE_APPLIED in trace")
+	_assert(st_idx >= 0 and ds_idx >= 0 and dm_idx >= 0
+			and st_idx < ds_idx and ds_idx < dm_idx,
+		"STATUS_TICKED < DAMAGE_STARTED < DAMAGE_APPLIED in trace")

@@ -50,7 +50,18 @@ static func validate_for_execution(p_def: Resource) -> Dictionary:
 	if not valid_event_types.has(int(p_def.event_type)):
 		return {"ok": false,
 			"reason": "event_type=%d is not a valid BattleEventType"
-				% int(p_def.event_type)}
+					% int(p_def.event_type)}
+	# B6.4c fail-closed guard: production content must NOT
+	# declare reactions on DAMAGE_STARTED (12). The pre-damage
+	# reaction schema is not opened in B6.4c. The Shield Block
+	# gauntlet will replace this with an allow-list of supported
+	# pre-damage modifier kinds. Synthetic test providers may
+	# construct TriggerReaction directly and bypass this guard.
+	if int(p_def.event_type) == 12:
+		return {"ok": false,
+			"reason": "event_type=DAMAGE_STARTED is reserved for "
+					+ "B6.4c synthetic providers; production "
+					+ "content cannot declare this event_type yet"}
 	# effect_kind: only PERFORM_ATTACK is supported in B6.2b.
 	if int(p_def.effect_kind) == -1:
 		return {"ok": false,

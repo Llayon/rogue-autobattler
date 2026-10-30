@@ -243,18 +243,28 @@ func _test_default_provider_runs_counterattack_e2e() -> void:
 				break
 	_assert(normal_atk != null and counter_atk != null,
 		"enemy normal ATTACK_RESOLVED with counterattack child found")
-	# Find counter DAMAGE_APPLIED whose parent is counter_atk.
+	# B6.4c: the counter DAMAGE_APPLIED now hangs off the
+	# DAMAGE_STARTED layer (the pre-damage window), NOT directly
+	# off the counter ATTACK_RESOLVED. Walk the bridge via
+	# parent linkage.
 	if counter_atk != null:
 		var counter_dmg = null
+		var counter_started = null
 		for e in events:
-			if int(e.type) == BattleEventTypeScript.DAMAGE_APPLIED \
-					and int(e.parent_event_id) == int(counter_atk.event_id) \
-					and int(e.root_action_id) == int(counter_atk.root_action_id) \
-					and int(e.chain_depth) == int(counter_atk.chain_depth) + 1:
-				counter_dmg = e
+			if int(e.type) == BattleEventTypeScript.DAMAGE_STARTED \
+					and int(e.parent_event_id) == int(counter_atk.event_id):
+				counter_started = e
 				break
+		_assert(counter_started != null,
+			"counterattack DAMAGE_STARTED under counter_atk")
+		if counter_started != null:
+			for e2 in events:
+				if int(e2.type) == BattleEventTypeScript.DAMAGE_APPLIED \
+						and int(e2.parent_event_id) == int(counter_started.event_id):
+					counter_dmg = e2
+					break
 		_assert(counter_dmg != null,
-			"counterattack DAMAGE_APPLIED under counter_atk")
+			"counterattack DAMAGE_APPLIED under counter DAMAGE_STARTED")
 		_assert(counter_dmg != null and String(counter_dmg.tag) == "counterattack",
 			"counterattack DAMAGE_APPLIED tagged 'counterattack'")
 	# Causal trace integrity.

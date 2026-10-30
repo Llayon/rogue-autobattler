@@ -274,50 +274,84 @@ func step_tick() -> Array:
 	_tick_count += 1
 	_event_emitter.set_tick(_tick_count)
 	var events: Array = []
-	# B6-2 / B6-3: fresh session per tick. The session
-	# snapshots TriggerLimits numeric values so the
-	# in-progress tick cannot be affected by external
-	# mutation of the underlying Resource.
+	# B6-2 / B6-3 / B6.4c: ONE TriggerDispatchSession per tick.
+	# The session snapshots TriggerLimits numeric values so the
+	# in-progress tick cannot be affected by external mutation
+	# of the underlying Resource. The session is shared across
+	# periodic, player, and enemy phases, so reaction budget
+	# and the seen-set cover the whole tick.
 	_trigger_session = _trigger_dispatcher.begin_session(
 		_trigger_limits)
-	var status_events: Array = []
-	# === 1. periodic status phase ===
+	# === 1. periodic status phase (lazy cursor) ===
 	if _periodic_status_processor != null:
-		status_events = _periodic_status_processor.process_tick(
+		# Use the new cursor API. Each step's dispatch_work
+		# drains BEFORE the next step's status is read.
+		var cursor = _periodic_status_processor.begin_tick(
 			_world, _rng, _event_emitter)
-		for e in status_events:
+		while cursor.has_next():
+			var step = cursor.next_step()
+			if step == null:
+				break
+			for e in step.events:
+				events.append(e)
+			# Drain the step's window work. The dispatcher
+			# processes DamageWindowWorkItem via the work
+			# path; finalize() commits HP; ATTACK_RESOLVED /
+			# STATUS_TICKED discovery is delayed.
+			#
+			# B6.4c PERIODIC-PHASE DISCOVERY (regression fix).
+			# Legacy a5dd87d dispatched the periodic phase's
+			# PUBLIC events (STATUS_TICKED, STATUS_EXPIRED) to
+			# the dispatcher. The cursor refactor drained ONLY
+			# `step.dispatch_work`, so a heal-only status tick
+			# (REGEN — no damage window, hence no dispatch work)
+			# never reached the dispatcher and its STATUS_TICKED
+			# reaction never fired.
+			#
+			# The step's own events are dispatched AFTER the
+			# window work, so a damage window's STATUS_TICKED is
+			# still discovered AFTER its commit (the window's
+			# delayed_dispatch_seeds path). The session's seen-set
+			# makes the second delivery a no-op, so nothing is
+			# discovered twice.
+			if step.dispatch_work != null and step.dispatch_work.size() > 0:
+				_last_trigger_dispatch_result = \
+					_trigger_dispatcher.process_work(
+						step.dispatch_work, _world, _rng, _event_emitter, events,
+						_trigger_provider, _trigger_limits, _trigger_session)
+			if step.events != null and step.events.size() > 0:
+				_last_trigger_dispatch_result = \
+					_trigger_dispatcher.process_work(
+						step.events, _world, _rng, _event_emitter, events,
+						_trigger_provider, _trigger_limits, _trigger_session)
+			# Refresh: if a lethal tick happened, the cursor's
+			# next iteration will observe updated world state.
+	# === 2-3. player normal action ===
+	if not _world.one_side_empty():
+		var player_work: Array = []
+		var player_events: Array = _drive_team_action(0, player_work)
+		for e in player_events:
 			events.append(e)
-	# === 2. dispatch reactions to status-phase events ===
-	# `events` is the EffectContext sink; reaction events
-	# are committed into it directly by the dispatcher.
-	# We do NOT post-append r1.events / r2.events / r3.events
-	# here because that would duplicate the same event_id.
-	if status_events.size() > 0:
-		_last_trigger_dispatch_result = _trigger_dispatcher.process(
-			status_events, _world, _rng, _event_emitter, events,
-			_trigger_provider, null, _trigger_session)
-	# === 3-4. player normal action ===
-	var natural_after_status: bool = _world.one_side_empty()
-	if not natural_after_status:
-		var player_action_events: Array = _drive_team_action(0)
-		for e in player_action_events:
+		if player_work.size() > 0:
+			_last_trigger_dispatch_result = \
+				_trigger_dispatcher.process_work(
+				player_work, _world, _rng, _event_emitter, events,
+				_trigger_provider, _trigger_limits, _trigger_session)
+		# Drain any post-action events that the dispatcher
+		# produced (e.g. reaction-emitted BattleEvents whose
+		# dispatch_work went into player_work). The
+		# process_work call above is the canonical drain.
+	# === 4-5. enemy normal action (only if not yet natural) ===
+	if not _world.one_side_empty():
+		var enemy_work: Array = []
+		var enemy_events: Array = _drive_team_action(1, enemy_work)
+		for e in enemy_events:
 			events.append(e)
-		# Dispatch reactions to player action events.
-		if player_action_events.size() > 0:
-			_last_trigger_dispatch_result = _trigger_dispatcher.process(
-				player_action_events, _world, _rng, _event_emitter, events,
-				_trigger_provider, null, _trigger_session)
-	# === 5-6. enemy normal action (only if not yet natural) ===
-	var natural_after_player: bool = _world.one_side_empty()
-	if not natural_after_player:
-		var enemy_action_events: Array = _drive_team_action(1)
-		for e in enemy_action_events:
-			events.append(e)
-		# Dispatch reactions to enemy action events.
-		if enemy_action_events.size() > 0:
-			_last_trigger_dispatch_result = _trigger_dispatcher.process(
-				enemy_action_events, _world, _rng, _event_emitter, events,
-				_trigger_provider, null, _trigger_session)
+		if enemy_work.size() > 0:
+			_last_trigger_dispatch_result = \
+				_trigger_dispatcher.process_work(
+				enemy_work, _world, _rng, _event_emitter, events,
+				_trigger_provider, _trigger_limits, _trigger_session)
 	# === termination / progress ===
 	var natural: bool = _world.one_side_empty()
 	var budget: bool = _max_ticks > 0 and _tick_count >= _max_ticks
@@ -339,6 +373,18 @@ func step_tick() -> Array:
 	if _finished:
 		_result = _build_result()
 		events.append(_make_battle_ended_event())
+	# B6.4c: invariant. If any damage window is still open
+	# at end-of-tick, that is a BUG.
+	#
+	# NOTE: no assert() here — assert() is stripped in release
+	# builds (and the lint forbids it in core/). The invariant is
+	# checked with a plain runtime branch that FAILS SAFE: the
+	# tick is still terminated normally, but the condition is
+	# recorded so it cannot pass silently.
+	if int(_trigger_dispatcher.pending_count()) != 0:
+		GameLog.error("battle_simulation",
+			"B6.4c: dangling damage windows at end of step_tick (%d)"
+				% int(_trigger_dispatcher.pending_count()))
 	_trigger_session = null
 	return events
 
@@ -367,7 +413,10 @@ func step_tick() -> Array:
 ## Movement (out-of-range) is NOT moved through PERFORM_ATTACK.
 ## It uses `_resolve_or_move` directly as the scheduler's
 ## job; PERFORM_ATTACK itself rejects out-of-range cleanly.
-func _drive_team_action(team_id: int) -> Array:
+## B6.4c: p_work_sink is filled with EffectResult.dispatch_work
+## items. step_tick owns draining the work via the SAME
+## TriggerDispatchSession shared across phases.
+func _drive_team_action(team_id: int, p_work_sink: Array = []) -> Array:
 	var events: Array = []
 	var attacker_id: int = -1
 	var target_id: int = -1
@@ -396,14 +445,22 @@ func _drive_team_action(team_id: int) -> Array:
 	# through EffectExecutor. amount=0 enforced; damage is
 	# computed inside PerformAttackEffect from the live
 	# BattleWorld stats.
+	#
+	# B6.4c: dispatch_work is placed into p_work_sink. The
+	# tick-level step_tick owns draining work via the SAME
+	# TriggerDispatchSession shared across phases. This
+	# function MUST NOT call the dispatcher itself.
 	var req = EffectRequestScript.root(
 		EffectKindScript.PERFORM_ATTACK,
 		attacker_id, target_id, 0)
 	var action_sink: Array = []
 	var ctx = EffectContextScript.new(
 		_world, _rng, _event_emitter, action_sink)
-	EffectExecutorScript.new().execute(ctx, req)
+	var r = EffectExecutorScript.new().execute(ctx, req)
 	events.append_array(action_sink)
+	if r != null and r.dispatch_work != null and r.dispatch_work.size() > 0:
+		for w in r.dispatch_work:
+			p_work_sink.append(w)
 	return events
 
 
