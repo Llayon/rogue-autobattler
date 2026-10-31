@@ -18,11 +18,15 @@ extends SceneTree
 ##        no UNIT_DIED, no HP mutation, sink empty, no public
 ##        causal tree.
 ##
-##   CF3  PerformAttackEffect's tx.setup() rejection branch
-##        is exercised as a proxy for the tx.commit() failure
-##        branch (same reasoning as CF2). Proves: no
-##        ATTACK_RESOLVED, no DAMAGE_APPLIED, no UNIT_DIED,
-##        no orphan causal tree.
+##   CF3  PerformAttack-origin FINALIZE proven at RUNTIME to
+##        fail closed through the B6.4c window path: the attack
+##        opens a damage window, the target is made invalid
+##        between open and finalize, and the canonical pump's
+##        finalize fails closed. Proves: the intent events stay
+##        published, no DAMAGE_APPLIED, no UNIT_DIED, no extra
+##        HP mutation, tx stays PENDING, handle closes, no
+##        pending window leak, RNG unchanged. The transaction's
+##        own target_dead refusal is proven separately by CF1.
 ##
 ##   CF4  T21 RNG proof extended: capture the full
 ##        DeterministicRng.snapshot() Dictionary (seed +
@@ -62,6 +66,16 @@ const StatusDefResolverScript = preload(
 	"res://core/battle_ecs/status/status_def_resolver.gd")
 const StatusInstanceScript = preload(
 	"res://core/battle_ecs/status/status_instance.gd")
+const TriggerDispatcherScript = preload(
+	"res://core/battle_ecs/triggers/trigger_dispatcher.gd")
+const TriggerLimitsScript = preload(
+	"res://core/battle_ecs/triggers/trigger_limits.gd")
+const TriggerDispatchSessionScript = preload(
+	"res://core/battle_ecs/triggers/trigger_dispatch_session.gd")
+const TriggerProviderScript = preload(
+	"res://core/battle_ecs/triggers/trigger_provider.gd")
+const EffectKindScript = preload(
+	"res://core/battle_ecs/effects/effect_kind.gd")
 
 var _passed: int = 0
 var _failed: int = 0
@@ -71,13 +85,14 @@ func _initialize() -> void:
 	ContentDBScript.load_all()
 	await _cf1_damage_transaction_target_dead_fail_closed()
 	await _cf2_damage_effect_setup_rejection_fail_closed()
-	await _cf3_perform_attack_setup_rejection_fail_closed()
+	await _cf3_perform_attack_finalize_fails_closed()
 	await _cf4_rng_full_state_same_seed_determinism()
 	await _cf5_burn_causal_ancestry_strengthened()
 	print("\n=== B6.4b.1 commit-failure closure proofs: %d pass / %d fail ===\n"
 		% [_passed, _failed])
 	if _failed > 0:
 		quit(1)
+		return
 	quit(0)
 
 
@@ -112,6 +127,24 @@ func _state_to_string(p_state) -> String:
 	if p_state is PackedByteArray:
 		return String((p_state as PackedByteArray).hex_encode())
 	return str(p_state)
+
+
+# Capture the HP of EVERY entity as a sorted array of
+# "<id>:<hp>:<alive>" entries.
+#
+# Why not just the target's HP: after the test interposition the
+# target is dead with HP 0, and BattleWorld.apply_damage() returns
+# 0 immediately for a non-alive entity, so the target's HP can
+# never change again. A target-only HP assertion would therefore
+# be unfalsifiable. The full vector is falsifiable: ANY world
+# mutation during the finalize changes it.
+func _world_hp_vector(p_world) -> Array:
+	var out: Array = []
+	for id in p_world.all_known_ids():
+		var eid: int = int(id)
+		var alive_flag: int = 1 if bool(p_world.is_alive(eid)) else 0
+		out.append("%d:%d:%d" % [eid, int(p_world.current_hp_of(eid)), alive_flag])
+	return out
 
 
 # Capture full RNG snapshot (seed + draw_count + state) for equality.
@@ -242,85 +275,251 @@ func _cf2_damage_effect_setup_rejection_fail_closed() -> void:
 	# (We document the observation without enforcing it.)
 	print("  [INFO] emitter before=%d after=%d (publication invariant is the contract)"
 		% [before_next_id, after_next_id])
-	_assert(true,
-		"DamageEffect fail-closed return shape proven via pre-guard path")
-	_assert(true,
-		"CF1 proves the same shape via the commit-fail path")
-	# hp_before used to be a check; target was killed intentionally
-	# so we don't assert it. The pre/post HP is 0/0.
-	_assert(true, "HP invariance proven (target pre-dead, post-dead, no resurrection)")
+	# B6.4c TEST-HARDENING: these three were unconditional
+	# `_assert(true, ...)`. They now assert the real fail-closed
+	# return shape instead of merely documenting it.
+	_assert(String(r.reason) != "",
+		"the failure carries a non-empty reason (got '%s')"
+			% String(r.reason))
+	_assert(r.dispatch_work != null and r.dispatch_work.is_empty(),
+		"the failed result enqueues NO work (got %d item(s))"
+			% r.dispatch_work.size())
+	_assert(bool(r.continues_chain) == false,
+		"the failed result does not continue the effect chain")
+	# HP invariance: the target was killed intentionally before the
+	# call, so the pre/post HP must both be 0 — the failed effect
+	# performed no second mutation.
+	_assert(int(sim.world().current_hp_of(1)) == 0,
+		"HP invariance: target HP is 0 after the failed effect (got %d)"
+			% int(sim.world().current_hp_of(1)))
 
 
 # ============================================================
-# CF3: PerformAttackEffect's tx.setup() rejection branch.
-# PerformAttackEffect.execute returns failed with empty
-# events if setup() is rejected.
+# CF3: PerformAttack-origin FINALIZE FAILS CLOSED when the
+# target becomes invalid between the window open and the
+# finalize.
+#
+# B6.4c made a REAL runtime proof possible without any
+# production seam. The PerformAttack origin now:
+#
+#   1. validates the attack,
+#   2. allocates ATTACK_RESOLVED,
+#   3. creates the DamageTransaction,
+#   4. allocates DAMAGE_STARTED,
+#   5. publishes [ATTACK_RESOLVED, DAMAGE_STARTED],
+#   6. returns a DamageWindowWorkItem via dispatch_work,
+#   7. does NOT mutate HP yet.
+#
+# The commit happens later, in DamageWindowContinuation.finalize().
+# The test makes the target invalid BETWEEN the window open and
+# the finalize: a deliberate OUT-OF-BAND interposition
+# (world.apply_damage), which is explicitly NOT window damage.
+#
+# SCOPE — WHAT THIS PROOF DOES AND DOES NOT COVER:
+#
+# The interposition trips the CONTINUATION's target revalidation
+# (damage_window_continuation.gd:64-67), which returns BEFORE
+# tx.commit() is reached (line 69). So this proof measures
+#
+#   "the finalize of a PerformAttack window fails closed when the
+#    target is no longer valid"
+#
+# It does NOT exercise the transaction-level target_dead refusal
+# (damage_transaction.gd:137-138) — that branch is proven
+# DIRECTLY by CF1, which drives DamageTransaction.commit() with a
+# dead target.
+#
+# A commit failure reached THROUGH the window path is not
+# reachable with the current public API: every way of invalidating
+# the target before the commit is intercepted by the continuation
+# guard first. Reaching it would require a production seam, which
+# this test-only follow-up deliberately does not add.
+#
+# The contract under test:
+#
+#   intent published  -> window open -> target invalid
+#     -> finalize fails closed
+#     -> no phantom DAMAGE_APPLIED / UNIT_DIED
+#     -> no extra HP mutation
+#     -> transaction stays PENDING
+#     -> handle closes
+#     -> no pending window leak
+#     -> RNG unchanged
+#
+# NOTE: after B6.4c the ATTACK_RESOLVED intent REMAINS published
+# after a failed finalize. That is correct: the intent was
+# legitimately emitted before the window opened. Only the COMMIT
+# events must be absent.
 # ============================================================
-func _cf3_perform_attack_setup_rejection_fail_closed() -> void:
-	print("[CF3] perform_attack_setup_rejection_fail_closed")
-	# Use PerformAttackEffect's normal validation path: in
-	# range, alive, opposing team. The damage transaction
-	# cannot be rejected via a negative base because
-	# AttackMath.compute returns a non-negative value.
-	#
-	# The PerformAttackEffect code at b446125 has the SAME
-	# return shape for setup-fail and commit-fail (both
-	# return EffectResult.failed with empty events). The
-	# setup-fail path can only be reached if AttackMath
-	# produced a negative value, which it does not.
-	#
-	# For a direct proof of the commit-fail path, see CF1
-	# (transaction-level). The PerformAttackEffect branches
-	# both use the same code path: if commit_result.ok is
-	# false, return failed([], false). The fail-closed return
-	# shape is therefore structurally proven by CF1 + the
-	# code review of b446125.
-	#
-	# We DO prove the negative-amount setup-fail path here by
-	# using the same code review: assert that the production
-	# code's commit-fail branch returns failed with empty
-	# events. B6.4c refactored: the fail-closed branch is now
-	# in DamageWindowContinuation.finalize() (the continuation
-	# owns the commit). Update the file-source review target.
-	var pa_path: String = "res://core/battle_ecs/effects/damage_window_continuation.gd"
-	var f: FileAccess = FileAccess.open(pa_path, FileAccess.READ)
-	_assert(f != null, "damage_window_continuation.gd readable")
-	if f == null:
+func _cf3_perform_attack_finalize_fails_closed() -> void:
+	print("[CF3] perform_attack_finalize_fails_closed")
+	# Fixture: two living units of opposing teams, in attack
+	# range, with enough target HP that a normal PerformAttack
+	# would be perfectly valid.
+	var pair = _make_pair_sim(200, 200, 5, 5)
+	var sim = pair[0]
+	var world = pair[1]
+	var emitter = pair[2]
+	_assert(bool(world.is_alive(0)), "CF3: source alive")
+	_assert(bool(world.is_alive(1)), "CF3: target alive")
+	_assert(bool(world.in_attack_range(0, 1)), "CF3: target in range")
+	_assert(int(world.team_of(0)) != int(world.team_of(1)),
+		"CF3: opposing teams")
+
+	var hp_before: int = int(world.current_hp_of(1))
+	var rng = sim._rng
+	var sink: Array = []
+	var ctx = EffectContextScript.new(world, rng, emitter, sink)
+	# A normal PerformAttack request: amount MUST be 0 (the effect
+	# computes the damage itself from the attack/defence stats).
+	var req = EffectRequestScript.root(
+		EffectKindScript.PERFORM_ATTACK, 0, 1, 0)
+	req.source_entity = 0
+	req.target_entity = 1
+
+	# --- execute the REAL PerformAttack origin ---
+	var result = PerformAttackEffectScript.execute(ctx, req)
+	_assert(result != null, "CF3: execute returned a result")
+	if result == null:
 		return
-	var src: String = f.get_as_text()
-	f.close()
-	# The continuation's finalize() must fail-closed on target_dead
-	# and commit failure.
-	_assert(src.find("world.is_alive") >= 0,
-		"continuation.finalize: target-alive revalidation")
-	_assert(src.find("return FinalizeResult.new([])") >= 0,
-		"continuation.finalize: empty emitted on fail-closed")
-	_assert(src.find("handle.close()") >= 0,
-		"continuation.finalize: closes handle on fail-closed")
-	# The setup-rejection branch in perform_attack_effect.gd
-	# must also fail-closed (negative base, etc.).
-	var pat: String = "res://core/battle_ecs/effects/perform_attack_effect.gd"
-	var g: FileAccess = FileAccess.open(pat, FileAccess.READ)
-	_assert(g != null, "perform_attack_effect.gd readable")
-	if g != null:
-		var src2: String = g.get_as_text()
-		g.close()
-		_assert(src2.find("return EffectResultScript.failed") >= 0,
-			"perform_attack_effect.gd has failed() return for setup rejection")
-	# Same for DamageEffect.
-	var de_path: String = "res://core/battle_ecs/effects/damage_effect.gd"
-	var h: FileAccess = FileAccess.open(de_path, FileAccess.READ)
-	_assert(h != null, "damage_effect.gd readable")
-	if h != null:
-		var src3: String = h.get_as_text()
-		h.close()
-		_assert(src3.find("return EffectResultScript.failed") >= 0,
-			"damage_effect.gd has failed() return for setup rejection")
-	# CF1 already proved the transaction's fail-closed contract.
-	# This CF3 proves the same contract is preserved through
-	# the Effect-level return shape (production code review).
-	_assert(true,
-		"PerformAttackEffect + DamageEffect + Continuation: fail-closed return shape matches CF1 contract")
+	_assert(bool(result.success),
+		"CF3: execute succeeded (reason=%s)" % String(result.reason))
+	_assert(result.dispatch_work != null,
+		"CF3: dispatch_work is not null")
+	_assert(result.dispatch_work.size() == 1,
+		"CF3: exactly one work item (got %d)"
+			% result.dispatch_work.size())
+	if result.dispatch_work.size() != 1:
+		return
+	var item = result.dispatch_work[0]
+	var handle = item.handle
+	var tx = item.continuation.tx
+
+	# --- BEFORE finalize: the intent is published, HP is intact ---
+	var atk_intents: int = 0
+	var started_intents: int = 0
+	var applied_before: int = 0
+	var died_before: int = 0
+	for ev in sink:
+		var t: int = int(ev.type)
+		if t == BattleEventTypeScript.ATTACK_RESOLVED:
+			atk_intents += 1
+		elif t == BattleEventTypeScript.DAMAGE_STARTED:
+			started_intents += 1
+		elif t == BattleEventTypeScript.DAMAGE_APPLIED:
+			applied_before += 1
+		elif t == BattleEventTypeScript.UNIT_DIED:
+			died_before += 1
+	_assert(atk_intents == 1,
+		"CF3: exactly 1 ATTACK_RESOLVED intent (got %d)" % atk_intents)
+	_assert(started_intents == 1,
+		"CF3: exactly 1 DAMAGE_STARTED intent (got %d)" % started_intents)
+	_assert(applied_before == 0,
+		"CF3: NO DAMAGE_APPLIED before finalize (got %d)" % applied_before)
+	_assert(died_before == 0,
+		"CF3: NO UNIT_DIED before finalize (got %d)" % died_before)
+	_assert(int(world.current_hp_of(1)) == hp_before,
+		"CF3: target HP unchanged before finalize (%d == %d)"
+			% [int(world.current_hp_of(1)), hp_before])
+	_assert(not bool(tx.is_committed()),
+		"CF3: tx is PENDING before finalize")
+	_assert(bool(handle.is_active()),
+		"CF3: handle is active before finalize")
+
+	# --- test-only interposition: the target dies AFTER the window
+	#     opened and BEFORE the commit. This is NOT window damage. ---
+	world.apply_damage(1, 999)
+	_assert(not bool(world.is_alive(1)),
+		"CF3: target is dead after the test interposition")
+	var hp_after_interposition: int = int(world.current_hp_of(1))
+	# The whole-world HP vector is captured too: the target's own
+	# HP is 0 after the interposition and cannot change (a dead
+	# entity takes no damage), so a target-only comparison would be
+	# unfalsifiable. The vector is falsifiable — ANY world
+	# mutation during the finalize changes it.
+	var world_hp_before: Array = _world_hp_vector(world)
+	_assert(world_hp_before.size() >= 2,
+		"CF3: the HP vector covers both entities (got %d)"
+			% world_hp_before.size())
+
+	# --- RNG snapshot immediately before the finalize ---
+	var snap_before: Array = _rng_snapshot_full(sim)
+
+	# --- drive the REAL canonical pump ---
+	var dispatcher = TriggerDispatcherScript.new()
+	var limits = TriggerLimitsScript.new()
+	var session = TriggerDispatchSessionScript.from_limits(limits)
+	var dr = dispatcher.process_work(
+		result.dispatch_work, world, rng, emitter, sink,
+		TriggerProviderScript.new(), limits, session)
+
+	# --- RNG snapshot immediately after the finalize ---
+	var snap_after: Array = _rng_snapshot_full(sim)
+
+	# --- fail-closed assertions ---
+	#
+	# The sink is scanned AGAIN here: the intent counts are
+	# RECOUNTED from the live sink after the finalize, not reused
+	# from the pre-finalize scan. Reusing them would compare a
+	# value with itself and could never fail.
+	var applied_after: int = 0
+	var died_after: int = 0
+	var atk_intents_after: int = 0
+	var started_intents_after: int = 0
+	for ev in sink:
+		var t: int = int(ev.type)
+		if t == BattleEventTypeScript.ATTACK_RESOLVED:
+			atk_intents_after += 1
+		elif t == BattleEventTypeScript.DAMAGE_STARTED:
+			started_intents_after += 1
+		elif t == BattleEventTypeScript.DAMAGE_APPLIED:
+			applied_after += 1
+		elif t == BattleEventTypeScript.UNIT_DIED:
+			died_after += 1
+	_assert(applied_after == 0,
+		"CF3: NO DAMAGE_APPLIED from the failed window (got %d)"
+			% applied_after)
+	_assert(died_after == 0,
+		"CF3: NO UNIT_DIED from the failed window (got %d)" % died_after)
+	_assert(atk_intents_after == 1,
+		"CF3: the ATTACK_RESOLVED intent is still published after the "
+		+ "finalize (got %d)" % atk_intents_after)
+	_assert(started_intents_after == 1,
+		"CF3: the DAMAGE_STARTED intent is still published after the "
+		+ "finalize (got %d)" % started_intents_after)
+	_assert(int(world.current_hp_of(1)) == hp_after_interposition,
+		"CF3: fail-closed finalize did NOT mutate the target HP "
+		+ "(%d == %d)"
+			% [int(world.current_hp_of(1)), hp_after_interposition])
+	# The falsifiable form of the same invariant: the whole-world
+	# HP/alive vector must be byte-identical across the finalize.
+	var world_hp_after: Array = _world_hp_vector(world)
+	_assert(world_hp_after == world_hp_before,
+		"CF3: the world HP/alive vector is unchanged by the "
+		+ "fail-closed finalize (%s == %s)"
+			% [str(world_hp_after), str(world_hp_before)])
+	_assert(not bool(tx.is_committed()),
+		"CF3: tx still PENDING after the failed finalize")
+	_assert(not bool(handle.is_active()),
+		"CF3: handle closed after the fail-closed finalize")
+	_assert(int(dispatcher.pending_count()) == 0,
+		"CF3: pending_count == 0 on the SAME dispatcher (got %d)"
+			% int(dispatcher.pending_count()))
+	_assert(snap_before == snap_after,
+		"CF3: RNG snapshot unchanged by the fail-closed finalize")
+	_assert(snap_after[1] == 0,
+		"CF3: draw_count == 0 (the failed finalize consumed no RNG)")
+	# The pump itself published no commit event: the dispatch
+	# result's own event list is empty (a tautological "dr != null"
+	# would prove nothing — process_work always returns a result).
+	_assert(dr.events.is_empty(),
+		"CF3: the pump published no events of its own (got %d)"
+			% dr.events.size())
+	_assert(int(dr.reason) == 0,
+		"CF3: the pump did not report a truncation reason (got %d)"
+			% int(dr.reason))
+	_assert(bool(dr.truncated) == false,
+		"CF3: the pump did not report truncation")
 
 
 # ============================================================

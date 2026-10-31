@@ -664,7 +664,13 @@ func _t14_target_dies_between_open_and_finalize() -> void:
 	var limits = TriggerLimitsScript.new()
 	var session = TriggerDispatchSessionScript.from_limits(limits)
 	var sink: Array = []
-	var dr = TriggerDispatcherScript.new().process_work(
+	# B6.4c TEST-HARDENING: pending_count is INSTANCE-LOCAL
+	# (var _pending_count in trigger_dispatcher.gd). Reading it
+	# from a freshly constructed dispatcher asserted nothing —
+	# that instance had never seen the window. The counter must
+	# be read from the dispatcher that actually drove the window.
+	var dispatcher = TriggerDispatcherScript.new()
+	var dr = dispatcher.process_work(
 		work, world, sim._rng, sim._event_emitter, sink,
 		TriggerProviderScript.new(), limits, session)
 	var applied_count: int = 0
@@ -683,8 +689,9 @@ func _t14_target_dies_between_open_and_finalize() -> void:
 		"T14: handle closed after fail-closed finalize")
 	_assert(not bool(tx.is_committed()),
 		"T14: tx still PENDING after fail-closed finalize")
-	_assert(int(TriggerDispatcherScript.new().pending_count()) == 0,
-		"T14: pending_count == 0")
+	_assert(int(dispatcher.pending_count()) == 0,
+		"T14: pending_count == 0 on the SAME dispatcher (got %d)"
+			% int(dispatcher.pending_count()))
 
 
 # ============================================================
