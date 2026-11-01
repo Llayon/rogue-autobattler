@@ -40,6 +40,7 @@ func _initialize() -> void:
 	print("\n=== battle_ecs contracts/world: %d passed, %d failed ===\n" % [_passed, _failed])
 	if _failed > 0:
 		quit(1)
+		return
 	quit(0)
 
 
@@ -453,19 +454,76 @@ func _test_movement_both_axes_blocked_no_movement() -> void:
 
 func _test_movement_primary_free_wins_over_fallback() -> void:
 	print("[m-D] movement_primary_free_wins_over_fallback [HIGH 3]")
-	# HIGH 3.D: source (3, 0), target (3, 3). Primary Y axis.
-	# Y step is (3, 1) — FREE (no blocker). Even though Y is
-	# the primary axis, ALSO place a block on the X fallback
-	# cell (2, 0) to verify the deterministic primary axis is
-	# preferred when both are available.
-	# Expected: source moves to (3, 1) (primary Y), not (2, 0)
-	# (fallback X).
+	# HIGH 3.D — PRIMARY-vs-SECONDARY PRIORITY.
+	#
+	# The scenario must make BOTH routes available, otherwise it
+	# only proves that the single reachable step was taken.
+	#
+	#   source = (3, 0)
+	#   target = (2, 3)
+	#
+	#   dx = -1, dy = +3   ->   |dy| > |dx|
+	#
+	# The planner picks the primary axis first, so:
+	#
+	#   primary   (Y) = (3, 1)
+	#   secondary (X) = (2, 0)
+	#
+	# BOTH cells are free: the only occupied cells are the
+	# source (3, 0) and the target (2, 3). There is deliberately
+	# NO blocker, because a blocker on the secondary cell would
+	# make the secondary route unavailable and the test would
+	# degrade back into "the only reachable step was taken".
+	#
+	# Contract under test: when BOTH the primary and the
+	# secondary step are available, the deterministic planner
+	# still chooses the PRIMARY.
+	var source_cell: Vector2i = Vector2i(3, 0)
+	var target_cell: Vector2i = Vector2i(2, 3)
+	var primary_candidate: Vector2i = Vector2i(3, 1)
+	var secondary_candidate: Vector2i = Vector2i(2, 0)
+
+	# --- the scenario is the one we mean to test -------------
+	var dx: int = int(target_cell.x) - int(source_cell.x)
+	var dy: int = int(target_cell.y) - int(source_cell.y)
+	_assert(dx != 0,
+		"m-D: the scenario has a non-zero X offset (got %d)" % dx)
+	_assert(dy != 0,
+		"m-D: the scenario has a non-zero Y offset (got %d)" % dy)
+	_assert(absi(dy) > absi(dx),
+		"m-D: |dy| > |dx| so the primary axis is Y (|dy|=%d |dx|=%d)"
+			% [absi(dy), absi(dx)])
+
+	# --- the primary candidate is what the planner computes --
+	var computed_primary: Vector2i = BattleWorldScript.step_cell_toward(
+		source_cell, target_cell)
+	_assert(computed_primary == primary_candidate,
+		"m-D: the primary candidate is (3, 1) (got %s)"
+			% str(computed_primary))
+
+	# --- BOTH routes must be genuinely available -------------
 	var w: BattleWorldScript = _make_world_with_two_units(
-		Vector2i(3, 0), Vector2i(3, 3))
-	_add_blocker(w, 0, Vector2i(2, 0))
+		source_cell, target_cell)
+	var primary_free: bool = not w.is_cell_occupied(primary_candidate)
+	var secondary_free: bool = not w.is_cell_occupied(secondary_candidate)
+	_assert(primary_free,
+		"m-D: the primary candidate (3, 1) is free")
+	_assert(secondary_free,
+		"m-D: the secondary candidate (2, 0) is free")
+
+	# --- the planner still picks the PRIMARY ------------------
 	var result: Vector2i = w.try_move_toward(0, 1)
-	_assert(result == Vector2i(3, 1),
-		"primary Y free wins over X fallback (got %s)" % str(result))
+	_assert(result == primary_candidate,
+		"m-D: with BOTH routes free the PRIMARY (3, 1) is chosen "
+			+ "(got %s)" % str(result))
 	var src_after: Vector2i = w.position_of(0)
-	_assert(src_after == Vector2i(3, 1),
-		"world position updated to (3, 1) (got %s)" % str(src_after))
+	_assert(src_after == primary_candidate,
+		"m-D: world position updated to the primary (3, 1) (got %s)"
+			% str(src_after))
+
+	# --- the move genuinely reduced the distance by one ------
+	var dist_before: int = absi(int(source_cell.x) - int(target_cell.x)) 		+ absi(int(source_cell.y) - int(target_cell.y))
+	var dist_after: int = absi(int(src_after.x) - int(target_cell.x)) 		+ absi(int(src_after.y) - int(target_cell.y))
+	_assert(dist_before - dist_after == 1,
+		"m-D: the Manhattan distance to the target decreased by exactly "
+			+ "1 (before %d after %d)" % [dist_before, dist_after])
