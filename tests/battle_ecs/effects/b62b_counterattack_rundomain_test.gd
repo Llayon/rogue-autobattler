@@ -151,11 +151,22 @@ func _test_ownership_pipeline_proven_via_real_builder() -> void:
 	_assert(String(prow.definition_id) == "guardian",
 		"player row built from guardian (got '%s')"
 		% String(prow.definition_id))
-	# Row owns counterattack via builder.
+	# Row owns the guardian's reactions via builder.
+	#
+	# B6.4d: the guardian now owns [counterattack, shield_block],
+	# so the exact-list assertion is replaced by the STRONGER
+	# semantic equivalent: the row's snapshot must equal the
+	# source guardian's reaction list (same elements, same order),
+	# AND it must still contain counterattack (the point of this
+	# pipeline proof).
 	var prow_reactions: Array = Array(prow.reaction_ids)
-	_assert(prow_reactions.size() == 1
-			and String(prow_reactions[0]) == "counterattack",
-		"player row owns [counterattack] (got %s)"
+	_assert(prow_reactions.size() == original_guardian_ids.size()
+			and prow_reactions == original_guardian_ids,
+		"player row snapshot equals the guardian's reaction list "
+			+ "(got %s, expected %s)"
+			% [str(prow_reactions), str(original_guardian_ids)])
+	_assert(prow_reactions.has(&"counterattack"),
+		"player row still owns counterattack (got %s)"
 		% str(prow_reactions))
 	# source_run_unit_id preserved.
 	_assert(prow.source_run_unit_id == guardian_unit.instance_id,
@@ -164,10 +175,13 @@ func _test_ownership_pipeline_proven_via_real_builder() -> void:
 	var w = BattleWorldScript.new(7, 4)
 	w.spawn_from_setup(setup)
 	var w_reactions: Array = w.reaction_ids_of(0)
-	_assert(w_reactions.size() == 1
-			and String(w_reactions[0]) == "counterattack",
-		"BattleWorld entity 0 owns [counterattack] (got %s)"
-		% str(w_reactions))
+	_assert(w_reactions == prow_reactions,
+		"BattleWorld entity 0 snapshot equals the row snapshot "
+			+ "(got %s, expected %s)"
+			% [str(w_reactions), str(prow_reactions)])
+	_assert(w_reactions.has(&"counterattack"),
+		"BattleWorld entity 0 still owns counterattack (got %s)"
+			% str(w_reactions))
 	# Source Run identity from world accessor.
 	_assert(String(w.source_run_unit_id_of(0))
 			== guardian_unit.instance_id,

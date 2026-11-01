@@ -19,6 +19,8 @@ const BattleEventTypeScript = preload(
 	"res://core/battle_ecs/battle_event_type.gd")
 const EffectKindScript = preload(
 	"res://core/battle_ecs/effects/effect_kind.gd")
+const EffectRequestScript = preload(
+	"res://core/battle_ecs/effects/effect_request.gd")
 
 var _passed: int = 0
 var _failed: int = 0
@@ -146,18 +148,52 @@ func _test_reactiondef_legacy_compatibility() -> void:
 		_assert(int(r1.effect_kind) == int(EffectKindScript.PERFORM_ATTACK),
 			"attack_of_opportunity effect_kind == PERFORM_ATTACK (got %d)"
 			% int(r1.effect_kind))
+	# B6.4d: shield_block is no longer Phase-3 inert. It is the
+	# FIRST production reaction on DAMAGE_STARTED, and its scope
+	# is DIRECT damage only (exact legacy parity: the legacy
+	# Shield Block lived inside the shared core/effects/
+	# damage_effect.gd, which covered ability damage, while the
+	# legacy basic attack and the legacy Burn bypassed it).
 	if r2 != null:
-		_assert(int(r2.event_type) == -1,
-			"shield_block event_type == -1 (Phase-3 inert)")
-		_assert(int(r2.effect_kind) == -1,
-			"shield_block effect_kind == -1 (Phase-3 inert)")
+		_assert(int(r2.event_type) == int(BattleEventTypeScript.DAMAGE_STARTED),
+			"shield_block event_type == DAMAGE_STARTED (got %d)"
+			% int(r2.event_type))
+		_assert(int(r2.effect_kind) == int(EffectKindScript.MODIFY_PENDING_DAMAGE),
+			"shield_block effect_kind == MODIFY_PENDING_DAMAGE (got %d)"
+			% int(r2.effect_kind))
+		_assert(int(r2.pending_damage_percent) == 50,
+			"shield_block pending_damage_percent == 50 (got %d)"
+			% int(r2.pending_damage_percent))
+		_assert(int(r2.pending_damage_minimum) == 1,
+			"shield_block pending_damage_minimum == 1 (got %d)"
+			% int(r2.pending_damage_minimum))
+		# The origin mask must name DIRECT ONLY. The bit is
+		# derived from the enum, never hardcoded.
+		var direct_bit: int = EffectRequestScript.damage_origin_bit(
+			int(EffectRequestScript.DAMAGE_ORIGIN_DIRECT))
+		var attack_bit: int = EffectRequestScript.damage_origin_bit(
+			int(EffectRequestScript.DAMAGE_ORIGIN_PERFORM_ATTACK))
+		var periodic_bit: int = EffectRequestScript.damage_origin_bit(
+			int(EffectRequestScript.DAMAGE_ORIGIN_PERIODIC))
+		var origins: int = int(r2.pending_damage_origins)
+		_assert((origins & direct_bit) == direct_bit,
+			"shield_block covers the DIRECT origin (mask %d)" % origins)
+		_assert((origins & attack_bit) == 0,
+			"shield_block does NOT cover PERFORM_ATTACK (mask %d)" % origins)
+		_assert((origins & periodic_bit) == 0,
+			"shield_block does NOT cover PERIODIC (mask %d)" % origins)
 	# Legacy fields still present (no removal of legacy schema).
 	# Specific compatibility checks (not tautology):
 	# B6.3: shipping attack_of_opportunity.trigger is
 	# explicitly &"" (Phase-3-only) to prevent legacy GameBus
-	# path activation. shield_block retains its legacy default
-	# &"unit_attacked" because Shield Block is explicitly
-	# deferred and remains Phase-3 inert.
+	# path activation.
+	# B6.4d: shield_block.trigger is now ALSO explicitly &""
+	# (Phase-3-only), so the legacy GameBus "unit_attacked" path
+	# cannot activate it in parallel with the Phase-3 path.
+	if r2 != null:
+		_assert(String(r2.trigger) == "",
+			"shield_block.trigger == '' (Phase-3-only, got '%s')"
+			% String(r2.trigger))
 	if r1 != null:
 		_assert(String(r1.trigger) == "",
 			"attack_of_opportunity.trigger == '' (Phase-3-only, "
@@ -165,9 +201,9 @@ func _test_reactiondef_legacy_compatibility() -> void:
 		_assert(int(r1.trigger_chance) >= 0.0,
 			"attack_of_opportunity.trigger_chance is non-negative")
 	if r2 != null:
-		_assert(String(r2.trigger) == "unit_attacked",
-			"shield_block.trigger == 'unit_attacked' (default legacy; "
-			+ "got '%s')" % String(r2.trigger))
+		# B6.4d: the legacy trigger is GONE (replaced by the
+		# Phase-3-only &"" trigger asserted above), so the legacy
+		# GameBus path cannot double-activate Shield Block.
 		_assert(abs(float(r2.trigger_chance) - 0.3) < 0.001,
 			"shield_block.trigger_chance ~= 0.3 (got %s)"
 			% str(r2.trigger_chance))
