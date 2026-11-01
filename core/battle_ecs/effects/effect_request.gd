@@ -51,6 +51,80 @@ const ANCESTRY_INVALID: StringName = &"invalid"
 ## attacks use the empty default).
 const PAYLOAD_EVENT_TAG: StringName = &"event_tag"
 
+## B6.4d / Pre-damage percentage modifier payload keys.
+##
+## MODIFY_PENDING_DAMAGE has TWO modes:
+##
+##   ABSOLUTE (default, unchanged B6.4c contract):
+##     no percent payload -> req.amount IS the new pending damage
+##
+##   PERCENTAGE (B6.4d, content-driven):
+##     percent payload present -> the modifier reads
+##     handle.pending_amount() NOW, applies the deterministic
+##     percentage transform, and writes the result back. The
+##     immutable base amount is NEVER used as the source.
+##
+## The transform is:
+##   remaining = floor(current * percent / 100)
+##   if current > 0: remaining = max(minimum, remaining)
+##   if current == 0: remaining = 0
+const PAYLOAD_PENDING_DAMAGE_PERCENT: StringName = &"pending_damage_percent"
+const PAYLOAD_PENDING_DAMAGE_MINIMUM: StringName = &"pending_damage_minimum"
+
+## B6.4d / Origin discriminator payload key.
+##
+## Identifies the DAMAGE window's ORIGIN explicitly (never by
+## string guessing). The value is one of the ORIGIN_* constants
+## below. Shipped content declares which origins it covers.
+const PAYLOAD_DAMAGE_ORIGIN: StringName = &"damage_origin"
+
+## Damage window origins. The origin is a BATTLE-DOMAIN fact
+## about which effect opened the window, carried structurally.
+const DAMAGE_ORIGIN_PERFORM_ATTACK: int = 0
+const DAMAGE_ORIGIN_DIRECT: int = 1
+const DAMAGE_ORIGIN_PERIODIC: int = 2
+
+## Number of KNOWN damage origins. Any origin >= this count is
+## unknown and must fail closed (see damage_origin_bit).
+##
+## The origins are a dense enum starting at 0, so the count is the
+## last origin plus one. Deriving it this way means adding a
+## fourth origin cannot leave the fail-closed guard behind.
+const DAMAGE_ORIGIN_COUNT: int = DAMAGE_ORIGIN_PERIODIC + 1
+
+## Every bit that may legally appear in a ReactionDef
+## pending_damage_origins mask. Any other bit is malformed.
+const DAMAGE_ORIGIN_ALL_BITS: int = \
+	(1 << DAMAGE_ORIGIN_PERFORM_ATTACK) \
+	| (1 << DAMAGE_ORIGIN_DIRECT) \
+	| (1 << DAMAGE_ORIGIN_PERIODIC)
+
+## B6.4d / origin -> bitmask.
+##
+## The bit is DERIVED from the enum value, never hardcoded. The
+## enum starts at 0, so a hardcoded OR of the raw enum values
+## would collapse PERFORM_ATTACK (0) into "no bits set" and make
+## it indistinguishable from an empty mask.
+static func damage_origin_bit(p_origin: int) -> int:
+	# Fail closed: a bit exists ONLY for a KNOWN origin.
+	#
+	# The shift `1 << origin` is undefined behaviour for a negative
+	# origin in GDScript and yields a NEGATIVE bit (e.g. NONE = -1
+	# produced -9223372036854775808). The provider's
+	# (allowed & bit) == 0 check happened to fail closed anyway,
+	# but that safety depended on undefined behaviour. An unknown
+	# origin (>= the origin count) produced a valid-looking high
+	# bit, which could match a malformed mask.
+	#
+	# NONE (-1) and any unknown origin therefore get NO bit at
+	# all: 0. The provider can never match them.
+	var origin: int = int(p_origin)
+	if origin < 0:
+		return 0
+	if origin >= DAMAGE_ORIGIN_COUNT:
+		return 0
+	return 1 << origin
+
 var kind: int = 0
 var source_entity: int = 0
 var target_entity: int = 0

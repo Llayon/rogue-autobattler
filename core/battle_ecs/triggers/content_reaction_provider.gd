@@ -120,7 +120,23 @@ func _react_participant(p_world, p_event, ev_type: int, entity_id: int,
 	for ex in excluded:
 		if StringName(String(ex)) == ev_tag:
 			return
-	# Resolve owner entity by selector.
+	# B6.4d / pre-damage origin filter.
+	#
+	# A pre-damage modifier only applies to the damage origins it
+	# declares. The origin is an EXPLICIT battle-domain field on
+	# the triggering event (set by the damage-origin effect), never
+	# a string guess.
+	if int(def.effect_kind) == int(EffectKindScript.MODIFY_PENDING_DAMAGE):
+		var allowed: int = int(def.pending_damage_origins)
+		if allowed == 0:
+			return
+		# B6.4d: the origin bit is DERIVED from the enum value via
+		# damage_origin_bit(). Never a hardcoded literal: the enum
+		# starts at 0, so a literal would be ambiguous.
+		var origin_bit: int = EffectRequestScript.damage_origin_bit(
+			int(p_event.damage_origin))
+		if (allowed & origin_bit) == 0:
+			return
 	var owner_entity: int = -1
 	if int(def.owner_selector) == \
 			int(ReactionDefScript.OWNER_EVENT_SOURCE):
@@ -250,19 +266,21 @@ func _manhattan(a: Vector2i, b: Vector2i) -> int:
 
 ## Emit a TriggerReaction template with the canonical
 ## owner/target pair. Used by both participant and spatial paths.
+##
+## B6.4d: the output effect is routed by def.effect_kind.
+## PERFORM_ATTACK keeps its exact B6.2b shape. A pre-damage
+## modifier (MODIFY_PENDING_DAMAGE) gets its percentage
+## configuration carried on the request payload.
+##
+## The provider stays RNG-PURE and MUTATION-FREE: it does not
+## touch the world, the emitter, the events, the pending damage,
+## or the ReactionDef.
 func _emit_reaction_template(p_world, rid_str: StringName, def: Resource,
 		owner_entity: int, selected_target: int,
 		reactions: Array) -> void:
-	var template = EffectRequestScript.root(
-		int(EffectKindScript.PERFORM_ATTACK),
-		int(owner_entity),
-		int(selected_target),
-		0)
-	if String(def.output_tag) != "":
-		var payload: Dictionary = {}
-		payload[EffectRequestScript.PAYLOAD_EVENT_TAG] = \
-			StringName(String(def.output_tag))
-		template.payload = payload
+	var template = _build_request(def, owner_entity, selected_target)
+	if template == null:
+		return
 	template.definition_id = rid_str
 	var tr = TriggerReactionScript.new()
 	tr.reacting_entity = int(owner_entity)
@@ -273,3 +291,33 @@ func _emit_reaction_template(p_world, rid_str: StringName, def: Resource,
 	# @GlobalScope.randf(), no RandomNumberGenerator.
 	tr.trigger_chance = float(def.trigger_chance)
 	reactions.append(tr)
+
+
+## B6.4d: build the reaction's output request from the def's
+## effect_kind. Returns null when the kind has no routing rule.
+func _build_request(def: Resource, owner_entity: int,
+		selected_target: int):
+	var kind: int = int(def.effect_kind)
+	if kind == int(EffectKindScript.PERFORM_ATTACK):
+		var attack_req = EffectRequestScript.root(
+			kind, int(owner_entity), int(selected_target), 0)
+		if String(def.output_tag) != "":
+			var payload: Dictionary = {}
+			payload[EffectRequestScript.PAYLOAD_EVENT_TAG] = \
+				StringName(String(def.output_tag))
+			attack_req.payload = payload
+		return attack_req
+	if kind == int(EffectKindScript.MODIFY_PENDING_DAMAGE):
+		# Pre-damage percentage modifier. The percent and the
+		# minimum are GENERIC configuration; no Shield Block
+		# semantics are hardcoded here.
+		var mod_req = EffectRequestScript.root(
+			kind, int(owner_entity), int(selected_target), 0)
+		var mod_payload: Dictionary = {}
+		mod_payload[EffectRequestScript.PAYLOAD_PENDING_DAMAGE_PERCENT] = \
+			int(def.pending_damage_percent)
+		mod_payload[EffectRequestScript.PAYLOAD_PENDING_DAMAGE_MINIMUM] = \
+			int(def.pending_damage_minimum)
+		mod_req.payload = mod_payload
+		return mod_req
+	return null

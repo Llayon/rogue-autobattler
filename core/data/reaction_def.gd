@@ -63,6 +63,41 @@ const TARGET_OWNER: int = 2
 @export var owner_selector: int = OWNER_EVENT_TARGET
 @export var target_selector: int = TARGET_EVENT_SOURCE
 
+# === Phase 3 / B6.4d / Pre-damage percentage modifier schema (additive).
+#
+# A ReactionDef may declare a GENERIC pre-damage percentage
+# modifier: the current pending damage is reduced to
+# percent% of its CURRENT value (not of the immutable base).
+#
+#   pending_damage_percent = -1  -> sentinel: "not configured"
+#   pending_damage_percent = 50  -> leave 50% of the CURRENT pending
+#   pending_damage_minimum = 0   -> no floor
+#   pending_damage_minimum = 1   -> a positive pending stays >= 1
+#
+# The rounding policy is floor(current * percent / 100) with the
+# minimum applied ONLY when the current pending is > 0. A pending
+# of 0 is NEVER resurrected to the minimum (composition safety
+# with other pre-damage modifiers).
+#
+# These fields are meaningful ONLY for the pair
+#   event_type == DAMAGE_STARTED
+#   effect_kind == MODIFY_PENDING_DAMAGE
+# The validator enforces that pairing fail-closed.
+@export var pending_damage_percent: int = -1
+@export var pending_damage_minimum: int = 0
+
+# B6.4d / Which damage origins this pre-damage reaction covers.
+#
+# A bitmask over EffectRequest.DAMAGE_ORIGIN_*:
+#   1 = PERFORM_ATTACK, 2 = DIRECT, 4 = PERIODIC.
+#
+# 0 means "not a pre-damage reaction" (the field is irrelevant
+# for every other effect kind). Shield Block uses DIRECT only:
+# the legacy Shield Block lived inside the shared legacy
+# core/effects/damage_effect.gd (ability damage), while the
+# legacy basic attack and the legacy Burn bypassed it.
+@export var pending_damage_origins: int = 0
+
 ## Optional semantic metadata for B6.2b + later stages.
 ## Empty means "no tag filter" / "no exclusions".
 @export var output_tag: StringName = &""

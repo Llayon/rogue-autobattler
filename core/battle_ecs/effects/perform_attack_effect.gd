@@ -153,7 +153,8 @@ static func execute(ctx, req) -> RefCounted:
 		int(atk_event.event_id), int(atk_event.root_action_id),
 		int(atk_event.chain_depth),
 		src, tgt, src_run, tgt_run, int(raw_dmg), sem_tag,
-		Vector2i(-1, -1), Vector2i(-1, -1))
+		Vector2i(-1, -1), Vector2i(-1, -1),
+		int(EffectRequestScript.DAMAGE_ORIGIN_PERFORM_ATTACK))
 	if dmg_started == null:
 		return EffectResultScript.failed(
 			"perform_attack: emitter refused DAMAGE_STARTED", [], false)

@@ -87,7 +87,8 @@ func emit(
 		p_amount: int = 0,
 		p_tag: String = "",
 		p_from_cell: Vector2i = Vector2i(-1, -1),
-		p_to_cell: Vector2i = Vector2i(-1, -1)) -> BattleEvent:
+		p_to_cell: Vector2i = Vector2i(-1, -1),
+		p_damage_origin: int = -1) -> BattleEvent:
 	var ev: BattleEvent = BattleEventScript.new()
 	ev.event_id = int(_next_event_id)
 	_next_event_id = int(_next_event_id) + 1
@@ -104,6 +105,8 @@ func emit(
 	ev.root_action_id = next_root_action_id()
 	ev.parent_event_id = -1
 	ev.chain_depth = 0
+	# B6.4d: damage origin discriminator.
+	ev.damage_origin = int(p_damage_origin)
 	return ev
 
 
@@ -129,7 +132,8 @@ func emit_child(
 		p_amount: int = 0,
 		p_tag: String = "",
 		p_from_cell: Vector2i = Vector2i(-1, -1),
-		p_to_cell: Vector2i = Vector2i(-1, -1)) -> RefCounted:
+		p_to_cell: Vector2i = Vector2i(-1, -1),
+		p_damage_origin: int = -1) -> RefCounted:
 	if int(p_parent_event_id) <= 0:
 		return null
 	if int(p_parent_root_action_id) <= 0:
@@ -152,6 +156,8 @@ func emit_child(
 	ev.parent_event_id = int(p_parent_event_id)
 	ev.root_action_id = int(p_parent_root_action_id)
 	ev.chain_depth = int(p_parent_chain_depth) + 1
+	# B6.4d: damage origin discriminator.
+	ev.damage_origin = int(p_damage_origin)
 	return ev
 
 

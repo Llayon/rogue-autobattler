@@ -96,12 +96,16 @@ static func execute(ctx, req) -> RefCounted:
 			BattleEventTypeScript.DAMAGE_STARTED,
 			req_parent, req_root, req_depth - 1,
 			src, tgt, "", "",
-			int(dmg), String(sem_tag))
+			int(dmg), String(sem_tag),
+			Vector2i(-1, -1), Vector2i(-1, -1),
+			int(_origin_of_request(req)))
 	else:
 		dmg_started = emitter.emit(
 			BattleEventTypeScript.DAMAGE_STARTED,
 			src, tgt, "", "",
-			int(dmg), String(sem_tag))
+			int(dmg), String(sem_tag),
+			Vector2i(-1, -1), Vector2i(-1, -1),
+			int(_origin_of_request(req)))
 	if dmg_started == null:
 		return EffectResultScript.failed(
 			"damage emit failed (request was valid but emitter refused)",
@@ -159,3 +163,17 @@ static func execute(ctx, req) -> RefCounted:
 	# window after this synchronous phase.
 	return EffectResultScript.succeeded_with_work(
 		[dmg_started], [work_item], true)
+
+## B6.4d / damage origin discriminator.
+##
+## The origin is stated by the REQUEST, never guessed from a
+## string. A request may carry an explicit origin on its payload
+## (the periodic processor sets PERIODIC). Otherwise the request
+## is a DIRECT damage.
+static func _origin_of_request(req) -> int:
+	if req != null and req.payload != null:
+		var raw = req.payload.get(
+			EffectRequestScript.PAYLOAD_DAMAGE_ORIGIN, null)
+		if raw != null:
+			return int(raw)
+	return int(EffectRequestScript.DAMAGE_ORIGIN_DIRECT)

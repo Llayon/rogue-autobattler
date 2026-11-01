@@ -261,6 +261,14 @@ class PeriodicStatusCursor extends RefCounted:
 		if req.payload == null:
 			req.payload = {}
 		req.payload[EffectRequestScript.PAYLOAD_EVENT_TAG] = status_id
+		# B6.4d: state the damage origin explicitly so a pre-damage
+		# reaction can discriminate a periodic window from an attack
+		# window without string guessing. Only a DAMAGE request
+		# carries a damage origin: a HEAL opens no damage window, so
+		# stamping an origin on it would be meaningless metadata.
+		if effect_kind == int(EffectKindScript.DAMAGE):
+			req.payload[EffectRequestScript.PAYLOAD_DAMAGE_ORIGIN] = \
+				int(EffectRequestScript.DAMAGE_ORIGIN_PERIODIC)
 		var per_result: Array = _owner._execute_periodic_effect(
 			_world, _rng, _emitter, effect_kind, req)
 		var per_events: Array = per_result[0] if per_result.size() > 0 else []
@@ -396,6 +404,25 @@ static func process_tick(
 				periodic_amount)
 			if req == null:
 				continue
+			# B6.4d: state the damage origin explicitly.
+			#
+			# The cursor path above already sets it, but the LEGACY
+			# synchronous path built its request without the origin
+			# payload. DamageEffect._origin_of_request() then fell
+			# back to its default, DAMAGE_ORIGIN_DIRECT, which made
+			# a burn window indistinguishable from an ability-damage
+			# window. A pre-damage reaction with a DIRECT-only scope
+			# (Shield Block) would then have blocked Burn — violating
+			# the frozen "PERIODIC excluded" contract.
+			#
+			# Only a DAMAGE request carries a damage origin: a HEAL
+			# opens no damage window, so stamping an origin on it
+			# would be meaningless metadata.
+			if effect_kind == int(EffectKindScript.DAMAGE):
+				if req.payload == null:
+					req.payload = {}
+				req.payload[EffectRequestScript.PAYLOAD_DAMAGE_ORIGIN] = \
+					int(EffectRequestScript.DAMAGE_ORIGIN_PERIODIC)
 			var per_result: Array = _execute_periodic_effect(
 				p_world, p_rng, p_emitter, effect_kind, req)
 			var per_events: Array = per_result[0] if per_result.size() > 0 else []

@@ -29,6 +29,15 @@ class_name BattleEvent extends RefCounted
 ##     chain. Allocated by BattleEventEmitter. -1 if no chain.
 ##   - chain_depth: int 0 for the root event of a chain, depth+1
 ##     for each child reaction event.
+##
+## B6.4d:
+##   - damage_origin: int. Which damage origin opened this event's
+##     window. 0 = PERFORM_ATTACK, 1 = DIRECT, 2 = PERIODIC.
+##     -1 means "not a damage window / not applicable".
+##     This is a BATTLE-DOMAIN fact stated by the origin effect, NOT
+##     a string guess: a PerformAttack window and a Burn window have
+##     the same ancestry shape, so ancestry alone cannot tell them
+##     apart.
 
 var event_id: int = 0
 var type: int = 0
@@ -44,3 +53,7 @@ var to_cell: Vector2i = Vector2i(-1, -1)
 var parent_event_id: int = -1
 var root_action_id: int = -1
 var chain_depth: int = 0
+
+# B6.4d / damage origin discriminator. -1 = not applicable.
+# See EffectRequest.DAMAGE_ORIGIN_* for the canonical values.
+var damage_origin: int = -1

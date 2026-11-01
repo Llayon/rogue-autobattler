@@ -14,8 +14,19 @@ const PERFORM_ATTACK: int = 5
 ## Phase-3 B6.4c addition. Frozen at 6.
 ## MODIFY_PENDING_DAMAGE: generic pre-damage modifier effect.
 ## Operates ONLY inside an active damage window (ctx.damage_window
-## != null). Reads req.amount as the new pending damage. Negative
-## amounts are rejected. No Shield Block semantics, no percentages,
-## no rounding policy. Future Shield Block migration uses this
-## primitive.
+## != null). Negative amounts are rejected.
+##
+## B6.4d added a second, generic mode. The mode is selected by
+## the request payload:
+##   - no percent payload  -> ABSOLUTE: req.amount is the new
+##     pending damage (the B6.4c contract, unchanged).
+##   - percent payload     -> PERCENTAGE: the CURRENT pending
+##     amount is reduced to floor(current * percent / 100). A
+##     positive pending is then clamped to at least the
+##     configured minimum, and to at most the current pending, so
+##     the modifier is MONOTONIC and can never amplify damage.
+##     A pending of 0 stays 0.
+## There is no Shield Block semantics here: the percentage and
+## the minimum are generic configuration carried by the reaction
+## definition.
 const MODIFY_PENDING_DAMAGE: int = 6

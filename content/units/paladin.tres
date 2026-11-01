@@ -25,3 +25,4 @@ tier = 3
 cost = 7
 abilities = Array[Resource]([ExtResource("2_aoe_heal"), ExtResource("3_battle_cry")])
 description = "Гибридный танк-хилер. AOE Heal + Battle Cry."
+reaction_ids = Array[StringName]([&"shield_block"])

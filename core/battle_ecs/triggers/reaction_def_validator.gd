@@ -29,6 +29,8 @@ const EffectKindScript = preload(
 	"res://core/battle_ecs/effects/effect_kind.gd")
 const ReactionDefScript = preload(
 	"res://core/data/reaction_def.gd")
+const EffectRequestScript = preload(
+	"res://core/battle_ecs/effects/effect_request.gd")
 
 
 ## Returns Dictionary {ok: bool, reason: String}.
@@ -51,25 +53,75 @@ static func validate_for_execution(p_def: Resource) -> Dictionary:
 		return {"ok": false,
 			"reason": "event_type=%d is not a valid BattleEventType"
 					% int(p_def.event_type)}
-	# B6.4c fail-closed guard: production content must NOT
-	# declare reactions on DAMAGE_STARTED (12). The pre-damage
-	# reaction schema is not opened in B6.4c. The Shield Block
-	# gauntlet will replace this with an allow-list of supported
-	# pre-damage modifier kinds. Synthetic test providers may
-	# construct TriggerReaction directly and bypass this guard.
-	if int(p_def.event_type) == 12:
+	# B6.4d: DAMAGE_STARTED (12) is no longer blanket-prohibited.
+	# The pre-damage reaction schema is OPENED, but only for the
+	# single allowed pair:
+	#   event_type  == DAMAGE_STARTED
+	#   effect_kind == MODIFY_PENDING_DAMAGE
+	# and only with a valid pre-damage percentage configuration.
+	# Every other effect kind on DAMAGE_STARTED stays fail-closed.
+	# The pairing is symmetric: MODIFY_PENDING_DAMAGE on any
+	# OTHER event type is rejected too.
+	var def_is_damage_started: bool = int(p_def.event_type) == 12
+	var def_is_modify_pending: bool = int(p_def.effect_kind) == \
+		int(EffectKindScript.MODIFY_PENDING_DAMAGE)
+	if def_is_modify_pending and not def_is_damage_started:
 		return {"ok": false,
-			"reason": "event_type=DAMAGE_STARTED is reserved for "
-					+ "B6.4c synthetic providers; production "
-					+ "content cannot declare this event_type yet"}
-	# effect_kind: only PERFORM_ATTACK is supported in B6.2b.
+			"reason": "effect_kind=MODIFY_PENDING_DAMAGE requires "
+				+ "event_type=DAMAGE_STARTED (got %d)"
+				% int(p_def.event_type)}
+	# effect_kind: PERFORM_ATTACK (B6.2b) and
+	# MODIFY_PENDING_DAMAGE (B6.4d) are the supported kinds.
 	if int(p_def.effect_kind) == -1:
 		return {"ok": false,
 			"reason": "effect_kind is -1 (Phase-3 inert sentinel)"}
-	if int(p_def.effect_kind) != int(EffectKindScript.PERFORM_ATTACK):
+	if int(p_def.effect_kind) != int(EffectKindScript.PERFORM_ATTACK) \
+			and not def_is_modify_pending:
 		return {"ok": false,
-			"reason": "effect_kind=%d is not supported in B6.2b (only PERFORM_ATTACK)"
+			"reason": "effect_kind=%d is not supported (only PERFORM_ATTACK and MODIFY_PENDING_DAMAGE)"
 				% int(p_def.effect_kind)}
+	# B6.4d: on DAMAGE_STARTED the ONLY allowed effect kind is
+	# MODIFY_PENDING_DAMAGE. DAMAGE_STARTED + PERFORM_ATTACK (and
+	# every other kind) stays fail-closed.
+	if def_is_damage_started and not def_is_modify_pending:
+		return {"ok": false,
+			"reason": "event_type=DAMAGE_STARTED only allows "
+				+ "effect_kind=MODIFY_PENDING_DAMAGE (got %d)"
+				% int(p_def.effect_kind)}
+	# B6.4d: pre-damage percentage configuration domain.
+	# The percent must be EXPLICITLY configured (sentinel -1 is
+	# "not configured" and is rejected for this pair), within
+	# [0, 100]. Amplification above 100 is NOT opened for
+	# shipping content in this gauntlet. The minimum must be >= 0.
+	if def_is_damage_started:
+		var percent: int = int(p_def.pending_damage_percent)
+		if percent < 0:
+			return {"ok": false,
+				"reason": "event_type=DAMAGE_STARTED requires an explicit pending_damage_percent in [0,100] (got %d)" % [percent]}
+		if percent > 100:
+			return {"ok": false,
+				"reason": "pending_damage_percent=%d is outside [0,100]" % [percent]}
+		var minimum: int = int(p_def.pending_damage_minimum)
+		if minimum < 0:
+			return {"ok": false,
+				"reason": "pending_damage_minimum=%d is negative"
+					% minimum}
+		# B6.4d: origin mask domain.
+		#
+		# The mask must name at least one legal damage origin, and
+		# it may only contain legal bits. An empty mask means the
+		# reaction would never fire on any origin, which is a
+		# content authoring error rather than a valid "applies to
+		# everything" (that is expressed by naming all bits).
+		var origins: int = int(p_def.pending_damage_origins)
+		if origins == 0:
+			return {"ok": false,
+				"reason": "event_type=DAMAGE_STARTED requires a "
+					+ "non-empty pending_damage_origins mask"}
+		var legal_bits: int = int(EffectRequestScript.DAMAGE_ORIGIN_ALL_BITS)
+		if (origins & ~legal_bits) != 0:
+			return {"ok": false,
+				"reason": "pending_damage_origins=%d contains unknown origin bits" % [origins]}
 	# owner_selector must be OWNER_EVENT_SOURCE,
 	# OWNER_EVENT_TARGET, or OWNER_ENEMY_LEAVING_RANGE (B6.3).
 	var valid_owner: Array = [
