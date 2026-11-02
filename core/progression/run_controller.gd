@@ -35,6 +35,17 @@ const ShopScreenScript = preload("res://core/progression/shop_screen.gd")
 const RunDomainStateScript = preload("res://core/progression/run_domain_state.gd")
 const RunStateV4MapperScript = preload("res://core/progression/run_state_v4_mapper.gd")
 const LegacyBattleParticipantMapScript = preload("res://core/battle/legacy_battle_participant_map.gd")
+const ReactionDefScript = preload("res://core/data/reaction_def.gd")
+
+## Id of the LEGACY view of the Shield Block reaction.
+##
+## The shipping content id is &"shield_block" (the Phase-3
+## pre-damage window). The legacy view gets its own id so the two
+## combat systems can never select the same reaction object.
+const LEGACY_SHIELD_BLOCK_ID: StringName = &"shield_block_legacy"
+
+## The legacy trigger name the old combat system polls for.
+const LEGACY_SHIELD_BLOCK_TRIGGER: StringName = &"unit_attacked"
 
 var state: RunDomainState = RunDomainStateScript.new()
 var shop: Shop = Shop.new()
@@ -384,6 +395,63 @@ func exit_shop_to_map() -> void:
 
 
 ## Запускает бой текущего раунда.
+## Registers the LEGACY Shield Block view for a combatant.
+##
+## This is the production registration path for the legacy combat
+## system. It is static so the regression suite can exercise the
+## REAL path (including the ownership decision) without booting a
+## whole run.
+##
+## Ownership: only the Paladin and the Guardian carry Shield Block.
+static func _register_legacy_shield_block(p_combatant, p_unit_id: StringName) -> void:
+	if p_combatant == null:
+		return
+	if not (p_unit_id in [&"paladin", &"guardian"]):
+		return
+	var view = _make_legacy_shield_block_view()
+	if view == null:
+		return
+	GameBus.emit_reaction_registered(p_combatant, view)
+
+
+## Builds the LEGACY view of the Shield Block reaction.
+##
+## The shipping resource is the Phase-3 view (trigger = &"",
+## DAMAGE_STARTED + MODIFY_PENDING_DAMAGE). The legacy combat
+## system polls &"unit_attacked" and matches the trigger EXACTLY,
+## so it needs a view that declares that trigger.
+##
+## The view is a runtime duplicate of the shipping resource:
+##   - trigger_chance is inherited (30% stays a single source of
+##     truth — the shipping resource),
+##   - the id is the legacy id, so the Phase-3 provider (which only
+##     sees the reaction ids owned by a unit) never sees it,
+##   - the Phase-3 event/effect fields are cleared, because the
+##     legacy runtime does not use them and a legacy reaction must
+##     never be mistaken for an executable Phase-3 reaction.
+##
+## Returns null when the shipping resource is unavailable.
+##
+## Static so the legacy view can be inspected directly by the
+## regression suite without booting a whole run.
+static func _make_legacy_shield_block_view() -> Resource:
+	var shipping: Resource = ContentDB_static.get_by_id(&"shield_block")
+	if shipping == null:
+		return null
+	var view = ReactionDefScript.new()
+	view.id = LEGACY_SHIELD_BLOCK_ID
+	view.display_name = String(shipping.get("display_name"))
+	view.description = String(shipping.get("description"))
+	view.trigger = LEGACY_SHIELD_BLOCK_TRIGGER
+	view.trigger_chance = float(shipping.get("trigger_chance"))
+	view.output_tag = StringName(shipping.get("output_tag"))
+	# The legacy runtime drives the effect itself, so the Phase-3
+	# executable fields stay inert.
+	view.event_type = -1
+	view.effect_kind = -1
+	return view
+
+
 func start_battle() -> bool:
 	if phase != Phase.PREP and phase != Phase.MAP:
 		return false
@@ -433,10 +501,34 @@ func start_battle() -> bool:
 				{"combatant": str(c), "instance_id": u.instance_id,
 					"last_error": _battle_participants.get_last_error()})
 		# Shield Block для paladin и guardian.
+		#
+		# The LEGACY combat system (BattleRunner ->
+		# ReactionSystem.poll_reaction) selects a reaction by an
+		# EXACT trigger name match. The legacy chain polls
+		# &"unit_attacked".
+		#
+		# The shipping resource content/reactions/shield_block.tres
+		# is the PHASE-3 view: trigger = &"", event_type =
+		# DAMAGE_STARTED, effect_kind = MODIFY_PENDING_DAMAGE. It
+		# declares no legacy trigger on purpose, so the legacy
+		# runtime can never select it.
+		#
+		# The legacy chain therefore needs its own VIEW of the same
+		# reaction. The view is built at runtime from the shipping
+		# resource with a legacy trigger and a legacy id:
+		#
+		#   - the chance stays 30% (single source of truth: the
+		#     shipping resource; the legacy view never invents its
+		#     own chance),
+		#   - the id becomes &"shield_block_legacy" so the Phase-3
+		#     provider (which only sees the reaction ids owned by
+		#     the unit) and the legacy runtime never meet.
+		#
+		# The legacy DamageEffect recognises the reaction by its
+		# id, so the legacy view keeps a distinct id and the
+		# consumer check is taught to accept it.
 		if def.id in [&"paladin", &"guardian"]:
-			var sb: Resource = ContentDB_static.get_by_id(&"shield_block")
-			if sb != null:
-				GameBus.emit_reaction_registered(c, sb)
+			_register_legacy_shield_block(c, def.id)
 	# Расставляем врагов (1 волна для v1: 1-3 врага).
 	var wave: Array = _spawn_enemy_wave(state.round_index)
 	for i in wave.size():

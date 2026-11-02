@@ -80,4 +80,9 @@ func _check_shield_block(target) -> bool:
 	if reaction_system == null:
 		return false
 	var reaction: Resource = reaction_system.poll_reaction(target, &"unit_attacked", {"attacker": null})
-	return reaction != null and reaction.id == &"shield_block"
+	# The legacy view of Shield Block is registered under its own id
+	# (the shipping id belongs to the Phase-3 pre-damage window, and
+	# the two systems must never select the same reaction object).
+	return reaction != null and (
+		reaction.id == &"shield_block"
+		or reaction.id == &"shield_block_legacy")
