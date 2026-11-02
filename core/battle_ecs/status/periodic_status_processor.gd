@@ -201,6 +201,41 @@ class PeriodicStatusCursor extends RefCounted:
 		if inst == null:
 			return step
 		var status_id = inst.status_id
+		# B6.4c STALE-INSTANCE REVALIDATION.
+		#
+		# `_statuses` is a snapshot of the container's instances
+		# taken when this entity was loaded. The container can
+		# change between two next_step() calls: the simulation
+		# drains the previous step's events, window work and
+		# reactions in between, and those can remove a status, or
+		# remove it and re-apply the same status_id.
+		#
+		# The snapshot entry is allowed to execute ONLY when the
+		# EXACT same object is still the current live instance for
+		# that status_id in this entity's live container:
+		#
+		#   live_inst == snapshot_inst -> execute
+		#   live_inst == null           -> removed  -> skip
+		#   live_inst != snapshot_inst -> replaced -> skip
+		#
+		# Checking only status_id membership is NOT enough: after a
+		# remove + re-apply the id IS present again, but it is a
+		# DIFFERENT object. Ticking the stale one would mutate a
+		# detached instance, emit a stale STATUS_TICKED / heal, and
+		# — when the stale instance expires — remove the LIVE
+		# replacement by id.
+		#
+		# The check happens BEFORE any status mutation: no tick, no
+		# remaining change, no STATUS_EXPIRED, no STATUS_TICKED, no
+		# EffectRequest, no RNG draw.
+		var live_container = _world.get_status_container(entity_id)
+		if live_container == null:
+			return step
+		var live_inst = live_container.get_status(status_id)
+		if live_inst == null:
+			return step
+		if live_inst != inst:
+			return step
 		var expired: bool = inst.tick(1)
 		if expired:
 			var container = _world.get_status_container(entity_id)
