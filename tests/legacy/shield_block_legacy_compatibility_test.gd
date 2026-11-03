@@ -44,6 +44,8 @@ const ReactionSystemPureScript = preload(
 const RngServiceScript = preload("res://core/utils/rng_service.gd")
 const UnitDefScript = preload("res://core/data/unit_def.gd")
 const CombatantScript = preload("res://core/battle/combatant.gd")
+const BalanceScript = preload("res://core/balance.gd")
+const StatusDefScript = preload("res://core/data/status_def.gd")
 const DamageEffectScript = preload("res://core/effects/damage_effect.gd")
 const GameBusScript = preload("res://core/utils/event_bus.gd")
 const RunControllerScript = preload("res://core/progression/run_controller.gd")
@@ -60,6 +62,10 @@ func _initialize() -> void:
 	_test_chance_gate_contract()
 	_test_registration_does_not_inflate_chance()
 	_test_start_battle_registers_the_legacy_view()
+	_test_dedup_keeps_distinct_reactions_on_one_class()
+	_test_classes_keep_independent_registries()
+	_test_rounding_is_observed_through_production()
+	_test_real_basic_attack_and_burn_paths_are_not_mitigated()
 	_test_registration_dedup_keeps_distinct_triggers()
 	_test_no_double_activation()
 	_test_production_registration_path()
@@ -302,6 +308,18 @@ func _make_legacy_view(p_chance: float) -> Resource:
 	return legacy
 
 
+## A minimal legacy Burn status definition.
+##
+## The legacy StatusList ticks a DOT through Combatant._on_status_dot(),
+## which calls take_damage() directly and never reaches DamageEffect.
+func _make_burn_status_def(p_dot_damage: int) -> Resource:
+	var def = StatusDefScript.new()
+	def.id = &"cf14_burn"
+	def.dot_damage = p_dot_damage
+	def.tick_interval = 1.0
+	return def
+
+
 ## A minimal legacy BattleContext. The legacy DamageEffect only
 ## forwards it to the effect machinery; _check_shield_block reads
 ## the ReactionSystem autoload directly.
@@ -466,12 +484,18 @@ func _measure_rate(p_sys, p_combatant) -> float:
 ## DamageEffect: the damage is mitigated exactly ONCE.
 func _test_start_battle_registers_the_legacy_view() -> void:
 	_reset_reaction_system()
-	# A real controller with a Paladin on the board.
+	# A real controller with ONE unit of every relevant class on the
+	# board. The ownership decision lives in the CALLER, so every
+	# class must be observed: a guard widened to include knight (or
+	# to every unit) must be visible here.
 	var ctrl = RunControllerScript.new()
 	ctrl.state.create_unit(&"paladin", 100, RunUnit.LOCATION_BOARD)
+	ctrl.state.create_unit(&"guardian", 100, RunUnit.LOCATION_BOARD)
+	ctrl.state.create_unit(&"knight", 100, RunUnit.LOCATION_BOARD)
+	ctrl.state.create_unit(&"warrior", 100, RunUnit.LOCATION_BOARD)
 	var board: Array = ctrl.state.get_board_units()
-	_assert(board.size() == 1,
-		"SB-CF10: the controller has one board unit (got %d)" % board.size())
+	_assert(board.size() == 4,
+		"SB-CF10: the controller has four board units (got %d)" % board.size())
 	# start_battle() must register the LEGACY view for the Paladin.
 	var ok: bool = ctrl.start_battle()
 	_assert(ok,
@@ -493,6 +517,20 @@ func _test_start_battle_registers_the_legacy_view() -> void:
 		_assert(float(registered.get("trigger_chance")) == 0.3,
 			"SB-CF10: the registered legacy view inherits the shipping chance 0.3 (got %s)"
 				% str(registered.get("trigger_chance")))
+	# The classes that do NOT own Shield Block must have received
+	# NO registration at all.
+	for def_id in [&"knight", &"warrior"]:
+		var unwanted: int = 0
+		if sys._reactions.has(def_id):
+			unwanted = sys._reactions[def_id].size()
+		_assert(unwanted == 0,
+			"SB-CF10: %s received NO registration (got %d)" % [str(def_id), unwanted])
+	# The Guardian DOES own Shield Block.
+	var guardian_entries: int = 0
+	if sys._reactions.has(&"guardian"):
+		guardian_entries = sys._reactions[&"guardian"].size()
+	_assert(guardian_entries == 1,
+		"SB-CF10: the guardian received exactly one registration (got %d)" % guardian_entries)
 	# And the legacy runtime must select it for the legacy trigger.
 	# The registered combatant is the Combatant created by
 	# start_battle(), not the RunUnit from the run state.
@@ -511,6 +549,144 @@ func _test_start_battle_registers_the_legacy_view() -> void:
 	ctrl.runner = null
 	ctrl.ctx = null
 	ctrl.free()
+
+
+func _test_dedup_keeps_distinct_reactions_on_one_class() -> void:
+	# MAJOR-2: two DIFFERENT reaction ids registered for the same
+	# class must stay two entries. The dedup keys on (id, trigger),
+	# not on the class alone.
+	var sys = ReactionSystemPureScript.new()
+	var c = _make_combatant(&"cf11_knight")
+	var shield = _make_legacy_view(1.0)
+	shield.id = &"cf11_shield"
+	var counter = _make_legacy_view(1.0)
+	counter.id = &"cf11_counter"
+	counter.trigger = &"unit_attacked"
+	sys.register_reaction(c, shield)
+	sys.register_reaction(c, counter)
+	var entries: int = sys._reactions[&"cf11_knight"].size()
+	_assert(entries == 2,
+		"CF11: two DIFFERENT reaction ids on one class stay two entries (got %d, want 2)" % entries)
+	# An exact duplicate of the FIRST one still collapses.
+	sys.register_reaction(c, shield)
+	var after: int = sys._reactions[&"cf11_knight"].size()
+	_assert(after == 2,
+		"CF11: an exact duplicate (same id AND trigger) still collapses (got %d, want 2)" % after)
+
+
+func _test_classes_keep_independent_registries() -> void:
+	# MAJOR-3: the registry is keyed by def_id. Two classes must keep
+	# INDEPENDENT lists, and neither may see the other's reaction.
+	var sys = ReactionSystemPureScript.new()
+	var a = _make_combatant(&"cf12_alpha")
+	var b = _make_combatant(&"cf12_beta")
+	var ra = _make_legacy_view(1.0)
+	ra.id = &"cf12_reaction_a"
+	var rb = _make_legacy_view(1.0)
+	rb.id = &"cf12_reaction_b"
+	sys.register_reaction(a, ra)
+	sys.register_reaction(b, rb)
+	_assert(sys._reactions.has(&"cf12_alpha"),
+		"CF12: class alpha has its own registry entry")
+	_assert(sys._reactions.has(&"cf12_beta"),
+		"CF12: class beta has its own registry entry")
+	var alpha_entries: int = sys._reactions[&"cf12_alpha"].size()
+	var beta_entries: int = sys._reactions[&"cf12_beta"].size()
+	_assert(alpha_entries == 1,
+		"CF12: class alpha holds exactly its own reaction (got %d, want 1)" % alpha_entries)
+	_assert(beta_entries == 1,
+		"CF12: class beta holds exactly its own reaction (got %d, want 1)" % beta_entries)
+	# Polling one class must not return the other class's reaction.
+	var hit = sys.poll_reaction(a, &"unit_attacked", {})
+	_assert(hit != null and StringName(hit.get("id")) == &"cf12_reaction_a",
+		"CF12: polling class alpha returns alpha's reaction, not beta's")
+
+
+func _test_rounding_is_observed_through_production() -> void:
+	# MINOR-2: the rounding contract must be read off the REAL
+	# DamageEffect, not off a copy of its expression.
+	_reset_reaction_system()
+	var sys = _reaction_system_node()
+	if sys == null:
+		_assert(false, "CF13: the ReactionSystem autoload is present")
+		return
+	var owner = _make_combatant(&"cf13_owner", 100)
+	var source = _make_combatant(&"cf13_source", 100)
+	# A guaranteed-hit legacy view, so the mitigation always applies.
+	var legacy_def = _make_legacy_view(1.0)
+	GameBusScript.emit_reaction_registered(owner, legacy_def)
+	var cases := [
+		[20, 10],
+		[21, 10],
+		[3, 1],
+		[1, 1],
+	]
+	for c in cases:
+		var dealt: int = int(c[0])
+		var expected_drop: int = int(c[1])
+		owner.health.current_hp = 100
+		# The legacy DamageEffect derives the damage from
+		# source.attack() - target.defense(), so the amount under
+		# test is set on the source.
+		source.attack_base = dealt
+		owner.defense_base = 0
+		var eff = _make_damage_effect(dealt)
+		var before = int(owner.health.current_hp)
+		eff.apply(null, source, [owner])
+		var actual_drop: int = before - int(owner.health.current_hp)
+		_assert(actual_drop == expected_drop,
+			"CF13: production DamageEffect on %d damage drops HP by %d (got %d)"
+				% [dealt, expected_drop, actual_drop])
+
+
+func _test_real_basic_attack_and_burn_paths_are_not_mitigated() -> void:
+	# MINOR-3: CF3/CF4 must drive the REAL legacy paths:
+	#   basic_attack() -> take_damage()
+	#   tick_statuses() -> _on_status_dot() -> take_damage()
+	# Neither goes through DamageEffect, so neither may be mitigated.
+	_reset_reaction_system()
+	var sys = _reaction_system_node()
+	if sys == null:
+		_assert(false, "CF14: the ReactionSystem autoload is present")
+		return
+	var owner = _make_combatant(&"cf14_owner", 100)
+	var source = _make_combatant(&"cf14_source", 100)
+	var legacy_def = _make_legacy_view(1.0)
+	GameBusScript.emit_reaction_registered(owner, legacy_def)
+
+	# --- the real basic attack path ---
+	owner.health.current_hp = 100
+	source.attack_base = 20
+	source.crit_chance = 0.0
+	owner.defense_base = 0
+	# The legacy basic attack applies a 5% damage variance, so the
+	# exact unmitigated number is a random draw. The reliable
+	# detector is the MITIGATED value: with Shield Block registered
+	# at chance 1.0, a basic attack routed through DamageEffect
+	# would drop exactly maxi(1, dealt / 2) - about half. The
+	# unmitigated drop is a draw around the full amount.
+	var atk_result: Dictionary = source.basic_attack(owner)
+	var basic_dealt: int = int(atk_result.get("dealt", 0))
+	var basic_drop: int = 100 - int(owner.health.current_hp)
+	_assert(basic_dealt > 0,
+		"CF14: the real basic attack dealt damage (got %d)" % basic_dealt)
+	# A mitigated basic attack drops about half of the attacker's
+	# attack power; an unmitigated one drops roughly the full
+	# amount. The two ranges never overlap, so the threshold is
+	# unambiguous even with the legacy 5% damage variance.
+	var half_attack: int = source.attack() / 2
+	_assert(basic_drop > half_attack,
+		"CF14: the real basic attack is NOT mitigated (drop %d, threshold %d)"
+			% [basic_drop, half_attack])
+
+	# --- the real status tick (Burn) path ---
+	owner.health.current_hp = 100
+	var burn = _make_burn_status_def(5)
+	owner.statuses.apply(burn, 10.0, 1, source)
+	owner.tick_statuses(1.0)
+	var burn_drop: int = 100 - int(owner.health.current_hp)
+	_assert(burn_drop == 5,
+		"CF14: the real Burn tick is NOT mitigated (hp drop %d, want 5)" % burn_drop)
 
 
 func _test_registration_dedup_keeps_distinct_triggers() -> void:
