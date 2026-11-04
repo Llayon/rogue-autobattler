@@ -73,7 +73,12 @@ func _test_A_red_6_resumed_reward_offer_matches_uninterrupted() -> void:
 	a_ctrl.reward.generate_offer(2)
 	a_ctrl.save_now()
 	await process_frame
-	var a_offer: Array = a_ctrl.reward.offered_ids()
+	# The NEXT offer of the SAME round: the round must not change,
+	# otherwise the tier (and therefore the offered units) differ for a
+	# reason that has nothing to do with the RNG continuation.
+	var a_next: RewardScreen = RewardScreenScript.new()
+	a_next.generate_offer(2)
+	var a_offer: Array = a_next.offered_ids()
 	var a_rng: Dictionary = RngServiceScript.snapshot()
 	a_ctrl.queue_free()
 	await process_frame
@@ -96,9 +101,10 @@ func _test_A_red_6_resumed_reward_offer_matches_uninterrupted() -> void:
 	await process_frame
 	_assert(resumed, "the run resumed")
 
-	# The SAME production consumer: the next reward offer.
+	# The SAME production consumer: the next reward offer of the SAME
+	# round.
 	var next_reward: RewardScreen = RewardScreenScript.new()
-	next_reward.generate_offer(3)
+	next_reward.generate_offer(2)
 	var b_offer: Array = next_reward.offered_ids()
 	var b_rng: Dictionary = RngServiceScript.snapshot()
 
@@ -129,6 +135,10 @@ func _test_B_red_6_resumed_shop_offer_matches_uninterrupted() -> void:
 	a_ctrl.reward.generate_offer(2)
 	a_ctrl.save_now()
 	await process_frame
+	# The NEXT shop refresh of the SAME pool: the refresh is the
+	# production consumer, and it must run AFTER the save, exactly
+	# like in the resumed path.
+	a_ctrl.shop.refresh(a_ctrl.profile.unlocked_units)
 	var a_offer: Array = a_ctrl.shop.offered_ids()
 	a_ctrl.queue_free()
 	await process_frame
@@ -143,7 +153,11 @@ func _test_B_red_6_resumed_shop_offer_matches_uninterrupted() -> void:
 	var c_ctrl: Node = RunControllerScript.new()
 	get_root().add_child(c_ctrl)
 	await process_frame
+	# The SAME pool as in the uninterrupted path: the shop offer is
+	# drawn FROM the pool, so a different pool would change the offer
+	# for a reason that has nothing to do with the RNG continuation.
 	c_ctrl.profile = MetaProfileScript.new()
+	c_ctrl.profile.unlocked_units = [&"warrior", &"archer"] as Array[StringName]
 	var resumed: bool = c_ctrl.resume_run(seed)
 	await process_frame
 	_assert(resumed, "the run resumed for the shop proof")
@@ -178,7 +192,9 @@ func _test_C_red_6_rng_continuation_across_several_seeds() -> void:
 		a_ctrl.reward.generate_offer(2)
 		a_ctrl.save_now()
 		await process_frame
-		var a_offer: Array = a_ctrl.reward.offered_ids()
+		var a_next: RewardScreen = RewardScreenScript.new()
+		a_next.generate_offer(2)
+		var a_offer: Array = a_next.offered_ids()
 		a_ctrl.queue_free()
 		await process_frame
 
@@ -197,7 +213,7 @@ func _test_C_red_6_rng_continuation_across_several_seeds() -> void:
 		c_ctrl.resume_run(seed)
 		await process_frame
 		var next_reward: RewardScreen = RewardScreenScript.new()
-		next_reward.generate_offer(3)
+		next_reward.generate_offer(2)
 		var b_offer: Array = next_reward.offered_ids()
 
 		var same: bool = a_offer.size() == b_offer.size()

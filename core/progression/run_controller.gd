@@ -34,6 +34,9 @@ const EncounterTypeScript = preload("res://core/encounter/encounter_type.gd")
 const ShopScreenScript = preload("res://core/progression/shop_screen.gd")
 const RunDomainStateScript = preload("res://core/progression/run_domain_state.gd")
 const RunStateV4MapperScript = preload("res://core/progression/run_state_v4_mapper.gd")
+const RunCheckpointV5MapperScript = preload("res://core/progression/run_checkpoint_v5_mapper.gd")
+const SaveSchemaV5Script = preload("res://core/save/save_schema_v5.gd")
+const RngServiceScript = preload("res://core/utils/rng_service.gd")
 const LegacyBattleParticipantMapScript = preload("res://core/battle/legacy_battle_participant_map.gd")
 const ReactionDefScript = preload("res://core/data/reaction_def.gd")
 
@@ -676,12 +679,42 @@ func _end_run(won: bool) -> void:
 ## SaveLoadResult. On failure: do not update profile.current_run_seed
 ## (the meta would otherwise lie about an active run that did not
 ## actually persist).
+## The stable wire name of the current checkpoint phase.
+##
+## The runtime has no MERCHANT phase: a merchant visit is the PREP
+## phase with the `just_visited_merchant` flag set. The wire contract
+## keeps the two apart.
+func checkpoint_phase_wire() -> String:
+	return SaveSchemaV5Script.wire_phase_for(phase, state.just_visited_merchant)
+
+
+## Builds the canonical v5 checkpoint DTO of the CURRENT runtime.
+##
+## Every subsystem publishes its own snapshot, so the mapper never
+## reaches into a private field.
+func build_checkpoint_dto() -> Dictionary:
+	var map_snapshot: Dictionary = {}
+	if encounter_map != null and encounter_map.has_method("snapshot"):
+		map_snapshot = encounter_map.snapshot()
+	return RunCheckpointV5MapperScript.to_v5_dto(
+		state,
+		checkpoint_phase_wire(),
+		shop.snapshot(),
+		merchant_shop.snapshot(),
+		map_snapshot,
+		reward.snapshot(),
+		RngServiceScript.snapshot())
+
+
 func save_now() -> bool:
 	if state == null or state.seed == 0:
 		GameLog.warn("run", "save_now: no active state")
 		return false
-	var dto: Dictionary = RunStateV4MapperScript.to_v4_dto(state)
-	var result: RefCounted = SaveService.save_run_v4(state.seed, dto)
+	var dto: Dictionary = build_checkpoint_dto()
+	if dto.is_empty():
+		GameLog.error("run", "save_now: the checkpoint DTO is empty")
+		return false
+	var result: RefCounted = SaveService.save_run_v5(state.seed, dto)
 	if result == null or not result.is_ok():
 		var err: String = "unknown"
 		var ctx_msg: String = ""
@@ -723,10 +756,11 @@ func resume_run(seed_value: int) -> bool:
 	if seed_value == 0:
 		GameLog.warn("run", "resume_run: seed == 0")
 		return false
-	# Save current state reference. If the load fails for any
-	# reason, we DO NOT touch self.state.
-	var previous: RunDomainState = state
-	var result: RefCounted = SaveService.load_run_v4(seed_value)
+	# The runtime is NOT touched until every piece of the checkpoint
+	# has been loaded AND validated. If any step fails, the live
+	# runtime stays exactly as it was, the save stays unchanged, and
+	# no replacement run is started.
+	var result: RefCounted = SaveService.load_run_v5(seed_value)
 	if result == null or not result.is_ok():
 		var err: String = "unknown"
 		if result != null:
@@ -737,37 +771,100 @@ func resume_run(seed_value: int) -> bool:
 		GameLog.warn("run", "resume_run: load failed", {"seed": seed_value, "status": err})
 		return false
 	var dto: Dictionary = result.data
-	var loaded: RunDomainState = RunStateV4MapperScript.from_v4_dto(dto)
-	if loaded == null:
-		GameLog.error("run", "resume_run: mapper returned null", {"seed": seed_value})
+
+	# A v4 file carries no checkpoint layers. It is migrated with the
+	# documented conservative fallback, and the migration is reported.
+	var migrated: bool = false
+	if int(dto.get("schema_version", 0)) != SaveSchemaV5Script.SCHEMA_VERSION:
+		var mig: Dictionary = RunCheckpointV5MapperScript.migrate_v4_to_v5(dto)
+		if not bool(mig.get("ok", false)):
+			GameLog.error("run", "resume_run: the v4 migration failed",
+				{"seed": seed_value})
+			return false
+		dto = mig.get("dto", {}) as Dictionary
+		migrated = true
+		for note in mig.get("diagnostics", []):
+			GameLog.warn("save", "resume_run migration", {"note": str(note)})
+
+	var decoded: Dictionary = RunCheckpointV5MapperScript.from_v5_dto(dto)
+	if not bool(decoded.get("ok", false)):
+		GameLog.error("run", "resume_run: the checkpoint could not be decoded",
+			{"seed": seed_value, "reason": str(decoded.get("reason", ""))})
 		return false
-	# All steps succeeded. Commit the new state.
-	state = loaded
-	# Rng восстанавливаем из seed для детерминизма (на случай если seed_run не звался).
-	Rng.seed_run(state.seed)
-	# Shop перегенерируем (transient — был утерян при restart).
-	_refresh_shop()
-	# S5.4: восстанавливаем encounter_map по seed. Карта детерминирована seed'ом,
-	# поэтому можно регенерировать её при resume. goto_node(id) устанавливает
-	# current_node_id на сохранённый (без проверки visited).
-	if state.current_encounter_id != -1:
-		encounter_map = EncounterMapScript.new()
-		encounter_map.generate(state.seed)
-		if not encounter_map.goto_node(state.current_encounter_id):
-			GameLog.warn("run", "resume_run: saved encounter_id not in map",
-				{"encounter_id": state.current_encounter_id})
-			# Fallback: start fresh.
-			encounter_map.start_run()
-		else:
+
+	# ---- construct the temporary runtime -------------------------------
+	var loaded_state = decoded.get("state")
+	if loaded_state == null:
+		GameLog.error("run", "resume_run: the domain state is missing")
+		return false
+
+	# The subsystems are restored into TEMPORARY objects first: a bad
+	# snapshot must not leave the live runtime half-restored.
+	var new_shop: Shop = Shop.new()
+	if not new_shop.restore_snapshot(decoded.get("unit_shop", {}) as Dictionary):
+		GameLog.error("run", "resume_run: the unit-shop snapshot is invalid")
+		return false
+	var new_merchant: ShopScreen = ShopScreenScript.new()
+	if not new_merchant.restore_snapshot(decoded.get("merchant", {}) as Dictionary):
+		GameLog.error("run", "resume_run: the merchant snapshot is invalid")
+		return false
+	var new_reward: RewardScreen = RewardScreen.new()
+	if not new_reward.restore_snapshot(decoded.get("reward", {}) as Dictionary):
+		GameLog.error("run", "resume_run: the reward snapshot is invalid")
+		return false
+
+	var map_snapshot: Dictionary = decoded.get("map", {}) as Dictionary
+	var new_map: EncounterMap = null
+	if not map_snapshot.is_empty():
+		new_map = EncounterMapScript.new()
+		if not new_map.restore_snapshot(map_snapshot):
+			GameLog.error("run", "resume_run: the encounter-map snapshot is invalid")
+			return false
+	elif loaded_state.current_encounter_id != -1:
+		# The checkpoint has no map snapshot but the domain state
+		# references a node. Fail closed: the runtime is not rebuilt
+		# from the seed, because that would silently change the map.
+		GameLog.error("run", "resume_run: the map snapshot is missing",
+			{"encounter_id": loaded_state.current_encounter_id})
+		return false
+
+	# ---- commit -------------------------------------------------------
+	# Every piece validated. Now the live runtime is replaced.
+	state = loaded_state
+	shop = new_shop
+	merchant_shop = new_merchant
+	reward = new_reward
+	encounter_map = new_map
+
+	# The RNG continuation is restored BEFORE any random consumer may
+	# run: no shop refresh, no merchant refresh, no reward generation
+	# and no map generation happen between the restore and the commit.
+	var rng_snapshot: Dictionary = decoded.get("rng", {}) as Dictionary
+	var rng_seed: int = int(rng_snapshot.get("seed", state.seed))
+	if rng_seed != 0:
+		RngServiceScript.seed_run(rng_seed)
+		RngServiceScript.restore(rng_snapshot)
+
+	# The phase is restored from the stable wire name.
+	var wire_phase: String = str(decoded.get("phase", SaveSchemaV5Script.PHASE_PREP))
+	match wire_phase:
+		SaveSchemaV5Script.PHASE_MAP:
 			_set_phase(Phase.MAP)
-	else:
-		_set_phase(Phase.PREP)
+		SaveSchemaV5Script.PHASE_REWARD:
+			_set_phase(Phase.REWARD)
+		SaveSchemaV5Script.PHASE_MERCHANT:
+			state.just_visited_merchant = true
+			_set_phase(Phase.PREP)
+		_:
+			_set_phase(Phase.PREP)
 
 	if profile != null:
 		profile.current_run_seed = state.seed
-		SaveService.save_meta(profile)
+	SaveService.save_meta(profile)
 	GameBus.emit_run_resumed(state.seed)
-	GameLog.info("run", "Run resumed", {"seed": state.seed, "round": state.round_index, "encounter": state.current_encounter_id})
+	GameLog.info("run", "Run resumed",
+		{"seed": state.seed, "round": state.round_index,
+			"phase": wire_phase, "migrated": migrated})
 	return true
 
 
