@@ -571,11 +571,23 @@ func start_battle() -> bool:
 		var c = CombatantScript.new(def)
 		var cell: Vector2i = Vector2i(i, 0)
 		ctx.register(c, cell)
-		# Зарегистрировать AoO для врагов с меле-рекцией.
-		if def.id in [&"orc_warrior", &"knight", &"paladin"]:
-			var aoo: Resource = ContentDB_static.get_by_id(&"attack_of_opportunity")
-			if aoo != null:
-				GameBus.emit_reaction_registered(c, aoo)
+		# Attack of Opportunity is NOT registered with the legacy
+		# reaction system.
+		#
+		# The shipping resource content/reactions/
+		# attack_of_opportunity.tres is the PHASE-3 view: trigger =
+		# &"", event_type = UNIT_MOVE_STARTED, effect_kind =
+		# PERFORM_ATTACK. The legacy chain polls reactions by an
+		# EXACT trigger name, and across the whole project history the
+		# only legacy poll was &"unit_attacked" in DamageEffect.
+		# &"unit_move_start" was emitted but never polled, so a legacy
+		# AoO was never executable.
+		#
+		# Registering it here therefore put a reaction in the legacy
+		# registry that no legacy code could ever consume — a zombie
+		# registration. The Phase-3 provider discovers AoO from the
+		# unit's own reaction_ids instead, which is the only path
+		# that actually executes it.
 	runner = BattleRunnerScript.new(ctx)
 	runner.start()
 	_set_phase(Phase.BATTLE)
