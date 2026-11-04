@@ -92,3 +92,42 @@ jobs:
           godot --headless --path . --script tests/progression/run_unit_test.gd 2>&1 | tee /tmp/save-run-unit.log
           ! grep -nE 'SCRIPT ERROR|Parse Error|ERROR:|\[FAIL\]' /tmp/save-run-unit.log
           grep -E 'run unit is_alive:' /tmp/save-run-unit.log | tail -1
+
+  # TD-08: the Phase-3 Battle ECS suites were never executed by CI.
+  # The job above runs the legacy suite, the characterization suite
+  # and the save suites, but nothing under tests/battle_ecs/. A
+  # separate job keeps the Phase-3 gate visually independent from the
+  # legacy/save pipeline.
+  battle-ecs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GODOT_VERSION: '4.7-stable'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Godot
+        run: |
+          set -euo pipefail
+          mkdir -p /opt/godot
+          wget -q "https://github.com/godotengine/godot-builds/releases/download/${GODOT_VERSION}/Godot_v${GODOT_VERSION}_linux.x86_64.zip" -O godot.zip
+          unzip -q godot.zip -d /opt/godot
+          chmod +x "/opt/godot/Godot_v${GODOT_VERSION}_linux.x86_64"
+          ln -s "/opt/godot/Godot_v${GODOT_VERSION}_linux.x86_64" /usr/local/bin/godot
+
+      - name: Import project cache
+        run: |
+          set -euo pipefail
+          godot --headless --path . --editor --quit || true
+
+      - name: Run Phase 3 Battle ECS suites
+        run: |
+          set -euo pipefail
+          python tools/run_battle_ecs_suites.py --godot godot --root . | tee /tmp/battle-ecs.log
+          grep -q 'RUNNER: GREEN' /tmp/battle-ecs.log
+
+      - name: Audit the standalone harness exit contract
+        run: python tools/audit_test_exit_contract.py
+
+      - name: Audit the legacy test reachability
+        run: python tools/audit_run_tests_reachability.py
