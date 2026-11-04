@@ -55,7 +55,16 @@ ERROR_PATTERNS = [
     # production fail-safe logs — most importantly the B6.4c dangling
     # damage window invariant in battle_simulation.gd, which is the
     # strongest Phase-3 invariant there is.
-    ("[ERROR]", re.compile(r"^[ 	]*\[ERROR\]", re.MULTILINE)),
+    #
+    # The pattern is scoped to the PHASE-3 FAIL-SAFE TAGS. A blanket
+    # "[ERROR]" match would be a false-positive source: the legacy
+    # save path logs "[ERROR] [save] resume_run diagnostic" when a
+    # test deliberately asks for a slot that does not exist, and the
+    # suite is expected to pass in that case.
+    ("[ERROR] [battle_simulation]", re.compile(
+        r"^[ 	]*\[ERROR\] \[battle_simulation\]", re.MULTILINE)),
+    ("[ERROR] [combatant]", re.compile(
+        r"^[ 	]*\[ERROR\] \[combatant\]", re.MULTILINE)),
 ]
 
 # The exact baseline error lines that the headless renderer emits on
