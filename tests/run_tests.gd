@@ -169,6 +169,10 @@ func _initialize() -> void:
 	_test_root_scene_is_full_rect_control()
 	_test_main_menu_routes_run_request_without_tree_replacement()
 	_test_reward_phase_populates_and_handles_actions_without_event_bus()
+	_test_reaction_def_loads()
+	_test_reaction_system_register_and_poll()
+	_test_reaction_system_register_multiple()
+	_test_reaction_system_null_safety()
 	_test_dos_classify()
 	_test_dos_natural_crit()
 	_test_dos_damage_multiplier()
@@ -1457,17 +1461,42 @@ func _test_ability_mana_cost() -> void:
 	_assert(caster.mana.current_mana == 0, "не хватило mana — каст не прошёл")
 
 
+## Builds a TEST-LOCAL reaction definition with a legacy trigger.
+##
+## The shipping reaction resources are the Phase-3 views (empty legacy
+## trigger), so the legacy registry mechanics can only be proven with
+## a local definition. Nothing here touches the shipping content.
+func _make_legacy_reaction_def(
+		p_id: StringName, p_trigger: StringName, p_chance: float) -> Resource:
+	var def: Resource = ReactionDefScript.new()
+	def.id = p_id
+	def.trigger = p_trigger
+	def.trigger_chance = p_chance
+	return def
+
+
 func _test_reaction_def_loads() -> void:
-	print("[test] ReactionDef загружается")
+	print("[test] ReactionDef загружается (Phase-3 форма shipping-ресурсов)")
+	# The shipping reaction resources are the PHASE-3 views: an empty
+	# legacy trigger plus a Phase-3 event_type/effect_kind. The legacy
+	# runtime selects a reaction by an EXACT trigger name, so a
+	# non-empty legacy trigger on a shipping resource would make the
+	# Phase-3 view selectable by the legacy path as well.
 	var aoo: Resource = ContentDB_static.get_by_id(&"attack_of_opportunity")
 	_assert(aoo != null, "attack_of_opportunity.tres loaded")
-	_assert(aoo.trigger == &"unit_move_start", "trigger = unit_move_start")
-	_assert(aoo.trigger_chance == 1.0, "trigger_chance = 1.0")
-	_assert(aoo.melee_only == true, "melee_only = true")
+	_assert(aoo.trigger == &"", "AoO: пустой legacy trigger")
+	_assert(aoo.trigger_chance == 1.0, "AoO: trigger_chance = 1.0")
+	_assert(aoo.event_type == 11, "AoO: event_type = UNIT_MOVE_STARTED")
+	_assert(aoo.effect_kind == 5, "AoO: effect_kind = PERFORM_ATTACK")
 	var sb: Resource = ContentDB_static.get_by_id(&"shield_block")
 	_assert(sb != null, "shield_block.tres loaded")
-	_assert(sb.trigger == &"unit_attacked", "trigger = unit_attacked")
-	_assert(sb.trigger_chance == 0.3, "trigger_chance = 0.3")
+	_assert(sb.trigger == &"", "Shield Block: пустой legacy trigger")
+	_assert(sb.trigger_chance == 0.3, "Shield Block: trigger_chance = 0.3")
+	_assert(sb.event_type == 12, "Shield Block: event_type = DAMAGE_STARTED")
+	_assert(sb.effect_kind == 6, "Shield Block: effect_kind = MODIFY_PENDING_DAMAGE")
+	_assert(sb.pending_damage_percent == 50, "Shield Block: 50% урона")
+	_assert(sb.pending_damage_minimum == 1, "Shield Block: минимум 1")
+	_assert(sb.pending_damage_origins == 2, "Shield Block: только DIRECT")
 
 
 func _test_reaction_system_register_and_poll() -> void:
@@ -1478,14 +1507,19 @@ func _test_reaction_system_register_and_poll() -> void:
 	# Без регистрации — нет реакции.
 	var r0: Resource = sys.poll_reaction(c, &"unit_attacked", {})
 	_assert(r0 == null, "no reaction before registration")
-	# Регистрация AoO.
-	var aoo: Resource = ContentDB_static.get_by_id(&"attack_of_opportunity")
-	sys.register_reaction(c, aoo)
+	# Test-local definition with a LEGACY trigger. The shipping AoO is
+	# the Phase-3 view (empty trigger) and can never be selected by
+	# the legacy poll, so the registry mechanics are proven with a
+	# local definition that carries a legacy trigger.
+	var local_reaction: Resource = _make_legacy_reaction_def(
+		&"legacy_probe", &"unit_move_start", 1.0)
+	sys.register_reaction(c, local_reaction)
 	# Проверяем только правильный trigger.
 	var r1: Resource = sys.poll_reaction(c, &"unit_attacked", {})
-	_assert(r1 == null, "AoO не сработал на unit_attacked")
+	_assert(r1 == null, "не тот trigger — реакции нет")
 	var r2: Resource = sys.poll_reaction(c, &"unit_move_start", {})
-	_assert(r2 != null and r2.id == &"attack_of_opportunity", "AoO сработал на unit_move_start")
+	_assert(r2 != null and r2.id == &"legacy_probe",
+		"реакция сработала на свой trigger")
 	# unregister_all.
 	sys.unregister_all(c)
 	var r3: Resource = sys.poll_reaction(c, &"unit_move_start", {})
@@ -1493,22 +1527,27 @@ func _test_reaction_system_register_and_poll() -> void:
 
 
 func _test_reaction_system_register_multiple() -> void:
-	print("[test] ReactionSystem: multiple reactions per unit")
+	print("[test] ReactionSystem: дедуп реакций по (id, trigger)")
 	var sys: ReactionSystemPure = ReactionSystemPureScript.new()
 	var c = CombatantScript.new(_make_unit_def(&"x", 100, 0, TeamScript.ENEMY))
-	sys.register_reaction(c, ContentDB_static.get_by_id(&"attack_of_opportunity"))
-	sys.register_reaction(c, ContentDB_static.get_by_id(&"shield_block"))
-	# AoO для unit_move_start.
+	# Две РАЗНЫЕ реакции одного класса остаются двумя записями.
+	var first: Resource = _make_legacy_reaction_def(&"first", &"unit_move_start", 1.0)
+	var second: Resource = _make_legacy_reaction_def(&"second", &"unit_attacked", 1.0)
+	sys.register_reaction(c, first)
+	sys.register_reaction(c, second)
+	_assert(sys._reactions[&"x"].size() == 2,
+		"две разные реакции — две записи (got %d)" % sys._reactions[&"x"].size())
+	# Каждая реакция доступна по СВОЕМУ trigger.
 	var r1: Resource = sys.poll_reaction(c, &"unit_move_start", {})
-	_assert(r1 != null and r1.id == &"attack_of_opportunity", "AoO вернулся для move_start")
-	# Shield Block для unit_attacked (с 30% chance — 100% в тесте, так как random).
-	# Дёрнем 100 раз — должна хоть раз сработать.
-	var sb_hits: int = 0
-	for i in 100:
-		var r2: Resource = sys.poll_reaction(c, &"unit_attacked", {})
-		if r2 != null and r2.id == &"shield_block":
-			sb_hits += 1
-	_assert(sb_hits >= 20, "shield_block ~30% (got %d/100, want ≥20)" % sb_hits)
+	_assert(r1 != null and r1.id == &"first", "первая реакция по своему trigger")
+	var r2: Resource = sys.poll_reaction(c, &"unit_attacked", {})
+	_assert(r2 != null and r2.id == &"second", "вторая реакция по своему trigger")
+	# Точный дубликат (тот же id И trigger) схлопывается — это то,
+	# что не даёт шансу реакции умножаться на число юнитов.
+	var duplicate: Resource = _make_legacy_reaction_def(&"first", &"unit_move_start", 1.0)
+	sys.register_reaction(c, duplicate)
+	_assert(sys._reactions[&"x"].size() == 2,
+		"точный дубликат схлопывается (got %d)" % sys._reactions[&"x"].size())
 
 
 func _test_reaction_system_null_safety() -> void:
@@ -1519,20 +1558,16 @@ func _test_reaction_system_null_safety() -> void:
 	_assert(r1 == null, "null combatant → null")
 	# null reaction.
 	sys.register_reaction(null, ContentDB_static.get_by_id(&"shield_block"))
-	_assert(true, "register_reaction(null, ...) не падает")
+	_assert(sys._reactions.is_empty(),
+		"register_reaction(null, ...) не регистрирует ничего")
 	sys.unregister_all(null)
-	_assert(true, "unregister_all(null) не падает")
-
-
-func _test_shield_block_reduces_damage() -> void:
-	print("[test] Shield Block уменьшает damage")
-	# Через прямой Combatant без DamageEffect — проверяем логику helper.
-	var defender = CombatantScript.new(_make_unit_def(&"def", 100, 0, TeamScript.ENEMY))
-	defender.health.take_damage(0)  # baseline
-	# Без регистрации — _check_shield_block возвращает false.
-	var reaction_system = get_root().get_node_or_null("ReactionSystem")
-	# Без ReactionSystem в headless — _check_shield_block вернёт false.
-	_assert(true, "shield_block не применяется без ReactionSystem (headless test)")
+	_assert(sys._reactions.is_empty(),
+		"unregister_all(null) не меняет реестр")
+	# null reaction with a valid combatant.
+	var c = CombatantScript.new(_make_unit_def(&"null_safe", 100, 0, TeamScript.ENEMY))
+	sys.register_reaction(c, null)
+	_assert(sys._reactions.is_empty(),
+		"register_reaction(combatant, null) не регистрирует ничего")
 
 
 func _test_dos_classify() -> void:
