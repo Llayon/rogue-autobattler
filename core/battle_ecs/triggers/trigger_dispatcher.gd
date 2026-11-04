@@ -250,7 +250,8 @@ func process_work(
 			_process_window_item(
 				item, p_world, p_rng, p_emitter, p_sink,
 				p_provider, result, executor,
-				eff_max_chain, eff_max_reactions_per_root, p_session)
+				eff_max_chain, eff_max_reactions_per_root, p_session,
+				eff_max_events)
 			# Drain pending_count: this work item is done.
 			_pending_count = maxi(0, int(_pending_count) - 1)
 			continue
@@ -411,12 +412,26 @@ func _process_window_item(
 		p_result: RefCounted,
 		p_executor,
 		p_max_chain_depth: int, p_max_reactions_per_root: int,
-		p_session) -> void:
+		p_session,
+		p_max_events: int = 0) -> void:
 	var using_session: bool = p_session != null
 	# B6.4c MAX_EVENTS policy at work-item level: if the
-	# session is already truncated, finalize the window with
+	# event budget is already spent, finalize the window with
 	# the current pending amount and skip discovery.
-	if using_session and bool(p_session.cap_reached()):
+	#
+	# The cap MUST be checked in BOTH paths. The session path uses
+	# the session's own counter; the no-session path uses the
+	# dispatcher's seen-set, exactly like the ordinary BattleEvent
+	# branch does. Checking only the session made a capped run
+	# behave differently depending on whether a session was passed:
+	# the no-session path kept discovering and executing reactions
+	# after the budget was spent.
+	var budget_spent: bool = false
+	if using_session:
+		budget_spent = bool(p_session.cap_reached())
+	else:
+		budget_spent = _seen.size() >= int(p_max_events)
+	if budget_spent:
 		# B6.4c: the bounded execution MUST be reported, not
 		# silent. The window is finalized with the current pending
 		# amount and discovery is skipped, but the caller has to
@@ -432,6 +447,10 @@ func _process_window_item(
 		if using_session and not bool(p_session.truncated):
 			p_session.record_truncation(int(
 				DispatchResultScript.REASON_MAX_EVENTS))
+		# The window MUST still finalize: the pending damage is
+		# committed as it stands and the window is closed, so no
+		# pending damage is leaked and no window dangles.
+		# Discovery, modifier execution and RNG draws are skipped.
 		var fr_pre = p_item.continuation.finalize(
 			p_world, p_sink, p_emitter)
 		if fr_pre != null:
