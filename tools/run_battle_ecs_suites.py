@@ -50,6 +50,12 @@ ERROR_PATTERNS = [
     # the match could start on the blank line before the error and the
     # extracted line would be empty.
     ("ERROR:", re.compile(r"^[ 	]*ERROR:", re.MULTILINE)),
+    # GameLog.error() prints "[ERROR] [tag] message" through
+    # printerr(). Without this pattern the runner would not see the
+    # production fail-safe logs — most importantly the B6.4c dangling
+    # damage window invariant in battle_simulation.gd, which is the
+    # strongest Phase-3 invariant there is.
+    ("[ERROR]", re.compile(r"^[ 	]*\[ERROR\]", re.MULTILINE)),
 ]
 
 # The exact baseline error lines that the headless renderer emits on

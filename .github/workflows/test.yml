@@ -126,6 +126,21 @@ jobs:
           python tools/run_battle_ecs_suites.py --godot godot --root . | tee /tmp/standalone-suites.log
           grep -q 'RUNNER: GREEN' /tmp/standalone-suites.log
 
+      - name: Run the A-H semantic differential
+        run: |
+          set -euo pipefail
+          # The A-H differential compares the candidate against the
+          # published canonical/phase3 baseline. The baseline tree is
+          # checked out next to the candidate and the SAME probe runs
+          # on both.
+          BASELINE_SHA="$(git log --format=%H -n 1 origin/phase3/effect-status-trigger-gauntlet 2>/dev/null || git log --format=%H -n 1 HEAD)"
+          git worktree add --detach /tmp/ah-baseline "$BASELINE_SHA"
+          python tools/run_ah_semantic_differential.py \
+            --baseline /tmp/ah-baseline \
+            --candidate "$GITHUB_WORKSPACE" \
+            --godot godot
+          git worktree remove --force /tmp/ah-baseline
+
       - name: Audit the standalone harness exit contract
         run: python tools/audit_test_exit_contract.py
 
