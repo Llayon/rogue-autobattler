@@ -66,6 +66,7 @@ func _initialize() -> void:
 	_test_classes_keep_independent_registries()
 	_test_rounding_is_observed_through_production()
 	_test_real_basic_attack_and_burn_paths_are_not_mitigated()
+	_test_wiring_does_not_accumulate_handlers()
 	_test_registration_dedup_keeps_distinct_triggers()
 	_test_no_double_activation()
 	_test_production_registration_path()
@@ -77,6 +78,7 @@ func _initialize() -> void:
 		% [_passed, _failed])
 	if _failed > 0:
 		quit(1)
+		return
 		return
 	quit(0)
 
@@ -125,10 +127,14 @@ func _reaction_system_node():
 		sys.set("_inner", inner_script.new())
 	var bus = tree.root.get_node_or_null("EventBus")
 	if bus != null and bus.has_signal("reaction_registered"):
-		if not bus.reaction_registered.is_connected(
-				func(c, r): sys._on_reaction_registered(c, r)):
-			bus.reaction_registered.connect(
-				func(c, r): sys._on_reaction_registered(c, r))
+		# A STABLE callable, not a fresh lambda: a lambda would be a
+		# new object on every call, so is_connected() would always be
+		# false and every helper call would add another handler.
+		# Five helper calls would then register the same reaction five
+		# times and multiply the effective chance.
+		var handler: Callable = Callable(sys, "_on_reaction_registered")
+		if not bus.reaction_registered.is_connected(handler):
+			bus.reaction_registered.connect(handler)
 	return sys
 
 
@@ -306,6 +312,64 @@ func _make_legacy_view(p_chance: float) -> Resource:
 	legacy.event_type = -1
 	legacy.effect_kind = -1
 	return legacy
+
+
+func _test_wiring_does_not_accumulate_handlers() -> void:
+	# TD-09: the helper used to connect a FRESH lambda to the
+	# GameBus signal on every call. A lambda is a new object each
+	# time, so is_connected() was always false and every helper call
+	# added another handler. Five helper calls then registered the
+	# same reaction five times and multiplied the effective chance.
+	#
+	# The wiring must therefore use a STABLE callable (the autoload's
+	# own method) and must connect at most once.
+	_reset_reaction_system()
+	var tree = Engine.get_main_loop()
+	if tree == null:
+		_assert(false, "CF15: the main loop is available")
+		return
+	var bus = tree.root.get_node_or_null("EventBus")
+	if bus == null or not bus.has_signal("reaction_registered"):
+		_assert(false, "CF15: the EventBus autoload is available")
+		return
+
+	# Five helper calls.
+	for i in range(5):
+		_reaction_system_node()
+
+	var sys = _reaction_system_node()
+	var handler: Callable = Callable(sys, "_on_reaction_registered")
+	var connections: int = 0
+	for connection in bus.reaction_registered.get_connections():
+		if connection.get("callable") == handler:
+			connections += 1
+	_assert(connections == 1,
+		"CF15: the GameBus handler is connected exactly once after five helper calls (got %d)"
+			% connections)
+
+	# One signal emission must reach register_reaction() exactly once.
+	var spy = _ReactionSpy.new()
+	var real_inner = sys.get("_inner")
+	sys.set("_inner", spy)
+	var owner = _make_combatant(&"cf15_owner")
+	var view = _make_legacy_view(1.0)
+	GameBusScript.emit_reaction_registered(owner, view)
+	_assert(spy.calls == 1,
+		"CF15: one signal emission calls register_reaction() exactly once (got %d)"
+			% spy.calls)
+	# Restore the real inner system for the remaining scenarios.
+	sys.set("_inner", real_inner)
+
+
+## Counts register_reaction() calls. Used to prove the GameBus wiring
+## does not accumulate handlers.
+class _ReactionSpy:
+	extends ReactionSystemPureScript
+
+	var calls: int = 0
+
+	func register_reaction(_combatant, _reaction: Resource) -> void:
+		calls += 1
 
 
 ## A minimal legacy Burn status definition.
