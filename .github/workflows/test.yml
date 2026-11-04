@@ -130,10 +130,23 @@ jobs:
         run: |
           set -euo pipefail
           # The A-H differential compares the candidate against the
-          # published canonical/phase3 baseline. The baseline tree is
-          # checked out next to the candidate and the SAME probe runs
-          # on both.
-          BASELINE_SHA="$(git log --format=%H -n 1 origin/phase3/effect-status-trigger-gauntlet 2>/dev/null || git log --format=%H -n 1 HEAD)"
+          # PUBLISHED baseline of the branch: the commit that was on
+          # the remote BEFORE this push.
+          #
+          # The baseline must be a REAL predecessor. On a push to the
+          # branch, GITHUB_SHA is the pushed commit and
+          # GITHUB_EVENT_BEFORE is the commit it replaced — so the
+          # comparison is not the identity.
+          #
+          # The checkout is shallow (depth 1), so the baseline commit
+          # has to be fetched explicitly.
+          BASELINE_SHA="${GITHUB_EVENT_BEFORE:-}"
+          if [ -z "$BASELINE_SHA" ] || [ "$BASELINE_SHA" = "0000000000000000000000000000000000000000" ]; then
+            echo "no predecessor commit for this event; skipping the differential"
+            exit 0
+          fi
+          echo "baseline commit: $BASELINE_SHA"
+          git fetch --no-tags --depth=1 origin "$BASELINE_SHA"
           git worktree add --detach /tmp/ah-baseline "$BASELINE_SHA"
           python tools/run_ah_semantic_differential.py \
             --baseline /tmp/ah-baseline \
