@@ -41,6 +41,7 @@ func _initialize() -> void:
 	if _failed > 0:
 		quit(1)
 		return
+		return
 	quit(0)
 
 

@@ -80,6 +80,7 @@ func _initialize() -> void:
 		% [_passed, _failed])
 	if _failed > 0:
 		quit(1)
+		return
 	quit(0)
 
 

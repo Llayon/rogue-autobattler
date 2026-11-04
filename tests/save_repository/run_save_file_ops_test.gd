@@ -29,6 +29,7 @@ func _initialize() -> void:
 	print("\n=== run save file ops: %d passed, %d failed ===\n" % [_passed, _failed])
 	if _failed > 0:
 		quit(1)
+		return
 	else:
 		quit(0)
 

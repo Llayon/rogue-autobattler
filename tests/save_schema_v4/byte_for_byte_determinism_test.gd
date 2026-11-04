@@ -28,6 +28,7 @@ func _initialize() -> void:
 	print("\n=== byte-for-byte determinism: %d passed, %d failed ===\n" % [_passed, _failed])
 	if _failed > 0:
 		quit(1)
+		return
 	else:
 		quit(0)
 

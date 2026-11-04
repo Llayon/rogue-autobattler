@@ -55,6 +55,7 @@ func _initialize() -> void:
 	print("\n=== B6.2b gauntlet A validator + provider: %d pass / %d fail ===\n" % [_passed, _failed])
 	if _failed > 0:
 		quit(1)
+		return
 	quit(0)
 
 

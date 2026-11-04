@@ -53,6 +53,7 @@ func _initialize() -> void:
 	print("\n=== effect core contracts: %d passed, %d failed ===\n" % [_passed, _failed])
 	if _failed > 0:
 		quit(1)
+		return
 	quit(0)
 
 

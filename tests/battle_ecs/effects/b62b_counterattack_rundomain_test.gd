@@ -39,6 +39,7 @@ func _initialize() -> void:
 	print("\n=== B6.2b shipping E2E: %d pass / %d fail ===\n" % [_passed, _failed])
 	if _failed > 0:
 		quit(1)
+		return
 	quit(0)
 
 

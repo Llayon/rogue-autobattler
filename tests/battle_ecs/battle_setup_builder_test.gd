@@ -32,6 +32,7 @@ func _initialize() -> void:
 	print("\n=== battle_ecs setup_builder: %d passed, %d failed ===\n" % [_passed, _failed])
 	if _failed > 0:
 		quit(1)
+		return
 	quit(0)
 
 

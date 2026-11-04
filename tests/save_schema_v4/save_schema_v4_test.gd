@@ -66,6 +66,7 @@ func _initialize() -> void:
 	print("\n=== save schema v4 + migrator: %d passed, %d failed ===\n" % [_passed, _failed])
 	if _failed > 0:
 		quit(1)
+		return
 	else:
 		quit(0)
 

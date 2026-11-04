@@ -32,6 +32,7 @@ func _initialize() -> void:
 	print("\n=== B6.1 attack math: %d pass / %d fail ===\n" % [_pass_count, _fail_count])
 	if _fail_count > 0:
 		quit(1)
+		return
 	quit(0)
 
 

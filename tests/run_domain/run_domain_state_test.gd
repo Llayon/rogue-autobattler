@@ -59,6 +59,7 @@ func _initialize() -> void:
 	print("\n=== run domain state: %d passed, %d failed ===\n" % [_passed, _failed])
 	if _failed > 0:
 		quit(1)
+		return
 
 
 

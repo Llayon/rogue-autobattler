@@ -42,6 +42,7 @@ func _initialize() -> void:
 	print("\n=== B6.1.1 sim characterization: %d pass / %d fail ===\n" % [_passed, _failed])
 	if _failed > 0:
 		quit(1)
+		return
 	quit(0)
 
 
