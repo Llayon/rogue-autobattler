@@ -21,6 +21,8 @@ extends SceneTree
 
 const SaveSchemaV5Script = preload("res://core/save/save_schema_v5.gd")
 const RunSaveRepositoryScript = preload("res://core/save/run_save_repository.gd")
+const RunCheckpointV5MapperScript = preload("res://core/progression/run_checkpoint_v5_mapper.gd")
+const RunDomainStateScript = preload("res://core/progression/run_domain_state.gd")
 const RngServiceScript = preload("res://core/utils/rng_service.gd")
 
 var _passed: int = 0
@@ -58,16 +60,23 @@ func _wire_round_trip(dto: Dictionary) -> Dictionary:
 	return RunSaveRepositoryScript._normalize_wire_v5(parsed as Dictionary)
 
 
-## Builds a minimal but structurally valid v5 DTO.
+## Builds a minimal but structurally valid v5 DTO THROUGH THE
+## PRODUCTION MAPPER.
+##
+## The DTO must not be assembled by the test: a mutation of the
+## mapper's encoding would be invisible if the test wrote the wire
+## form itself.
 func _make_dto(state_value: int) -> Dictionary:
-	var dto: Dictionary = SaveSchemaV5Script.empty_dto()
-	dto["seed"] = 123456
-	dto["run_id"] = "run_123456"
-	dto["rng"] = {
-		"seed": 123456,
-		"state": SaveSchemaV5Script.encode_int64(state_value),
-	}
-	return dto
+	var state = RunDomainStateScript.new()
+	state.seed = 123456
+	return RunCheckpointV5MapperScript.to_v5_dto(
+		state,
+		SaveSchemaV5Script.PHASE_PREP,
+		{"offered_ids": []},
+		{"offered_item_ids": [], "discount": 0.5},
+		{},
+		{"offered_ids": [], "round_index": 0},
+		{"seed": 123456, "state": state_value})
 
 
 # ---------------------------------------------------------------- A
