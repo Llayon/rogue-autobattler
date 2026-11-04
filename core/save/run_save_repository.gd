@@ -238,7 +238,7 @@ static func serialize_canonical_bytes(data: Dictionary) -> PackedByteArray:
 	# The NESTED dictionaries are emitted with sorted keys. The top
 	# level keeps the schema order, so the nested pass must not touch
 	# it.
-	var safe: Variant = _to_json_safe_nested(ordered, true)
+	var safe: Variant = _to_json_safe_nested(ordered, 0)
 	var body: String = JSON.stringify(safe, "", true)
 	return (schema_marker_for(data) + "\n" + body).to_utf8_buffer()
 
@@ -277,7 +277,7 @@ static func schema_marker_for(data: Dictionary) -> String:
 
 
 static func _to_json_safe(value: Variant) -> Variant:
-	return _to_json_safe_nested(value, false)
+	return _to_json_safe_nested(value, 1)
 
 
 ## Converts a value into its JSON-safe form.
@@ -285,19 +285,21 @@ static func _to_json_safe(value: Variant) -> Variant:
 ## A nested dictionary is emitted with SORTED keys, so its bytes never
 ## depend on its insertion order. The top level is exempt: it keeps the
 ## canonical schema order, which is emitted by the caller.
-static func _to_json_safe_nested(value: Variant, is_top_level: bool) -> Variant:
+static func _to_json_safe_nested(value: Variant, depth: int) -> Variant:
 	if value is Array:
 		var out: Array = []
 		for v in value:
-			out.append(_to_json_safe_nested(v, false))
+			out.append(_to_json_safe_nested(v, depth + 1))
 		return out
 	if value is Dictionary:
 		var d: Dictionary = {}
 		var keys: Array = value.keys()
-		if not is_top_level:
+		# The top level (depth 0) keeps the canonical schema order; every
+		# nested dictionary uses the sorted order.
+		if depth > 0:
 			keys.sort()
 		for k in keys:
-			d[String(k)] = _to_json_safe_nested(value[k], false)
+			d[String(k)] = _to_json_safe_nested(value[k], depth + 1)
 		return d
 	return value
 
