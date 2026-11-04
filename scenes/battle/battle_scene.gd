@@ -11,6 +11,8 @@ const PREP_SCENE_SCRIPT: GDScript = preload("res://scenes/prep/prep_scene.gd")
 const INVENTORY_SCENE_SCRIPT: GDScript = preload("res://scenes/inventory/inventory_scene.gd")
 const SHOP_SCENE_SCRIPT: GDScript = preload("res://scenes/shop/shop_scene.gd")
 const BalanceScript: GDScript = preload("res://core/balance.gd")
+const RunLaunchRequestScript: GDScript = preload("res://core/progression/run_launch_request.gd")
+const GameLog: GDScript = preload("res://core/utils/logger.gd")
 
 # S6.1: явный Unicode SystemFont для всех UI-лейблов (Cyrillic работает).
 var _ui_font: SystemFont = null
@@ -106,18 +108,12 @@ func _ready() -> void:
 	# Подписываемся на phase_changed ДО start_run.
 	if run_controller.has_signal("phase_changed"):
 		run_controller.phase_changed.connect(_on_run_phase_changed)
-	# Начинаем ран.
-	var initial_seed: int = 0
-	if has_meta("initial_seed"):
-		initial_seed = int(get_meta("initial_seed"))
-	if initial_seed == 0:
-		initial_seed = Rng.randi_range(1, 999999)
-	run_controller.start_run(initial_seed)
-	# Apply saved battle_speed from profile.
-	if run_controller.profile != null:
-		speed = run_controller.profile.battle_speed
-	_refresh_hud()
-	_refresh_status()
+	# The launch request carries the INTENT; the scene does not decide
+	# whether the run is new or resumed.
+	var launch_request: RunLaunchRequestScript = _read_launch_request()
+	if launch_request == null:
+		launch_request = RunLaunchRequestScript.new_run(Rng.randi_range(1, 999999))
+	apply_launch_request(launch_request)
 
 
 # === S4.2: HUD ===
@@ -225,6 +221,56 @@ func restart_with_seed(seed: int) -> void:
 		run_controller.start_run(seed)
 	if run_controller != null and run_controller.profile != null:
 		speed = run_controller.profile.battle_speed
+	_refresh_hud()
+	_refresh_status()
+
+
+## Reads the launch request the RootScene attached to this scene.
+## Returns null when the scene was created without one.
+func _read_launch_request() -> RunLaunchRequestScript:
+	if not has_meta("launch_request"):
+		return null
+	var request = get_meta("launch_request")
+	if request is RunLaunchRequestScript:
+		return request
+	return null
+
+
+## Applies an explicit launch request to the run controller.
+##
+## NEW RUN  -> start_run(seed): a fresh run, every subsystem is
+##             regenerated.
+## CONTINUE -> resume_run(seed): the persisted run is restored.
+##
+## A failed Continue is NOT retried as a new run: the controller
+## reports the failure and the live state stays untouched.
+func apply_launch_request(request: RunLaunchRequestScript) -> void:
+	if run_controller == null or request == null:
+		return
+	var started: bool = true
+	if request.is_continue():
+		started = run_controller.resume_run(request.seed)
+		if not started:
+			# The resume failed: do NOT create a replacement run and
+			# do NOT touch the existing save.
+			GameLog.error("battle_scene", "CONTINUE failed", {"seed": request.seed})
+	else:
+		run_controller.start_run(request.seed)
+	if run_controller != null and run_controller.profile != null:
+		speed = run_controller.profile.battle_speed
+	_refresh_hud()
+	_refresh_status()
+	if not started:
+		# The run did not start: go back to the menu so the player can
+		# pick another action.
+		if has_method("request_main_menu"):
+			request_main_menu()
+
+
+## Starts a brand new run with a fresh seed (the "R" shortcut).
+func start_new_run(seed: int) -> void:
+	if run_controller != null:
+		run_controller.start_run(seed)
 	_refresh_hud()
 	_refresh_status()
 

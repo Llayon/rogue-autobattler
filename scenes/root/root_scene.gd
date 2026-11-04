@@ -7,6 +7,7 @@ extends Control
 ## в Web build (event connections с старыми instances).
 
 const MainMenuScript = preload("res://scenes/main_menu/main_menu.gd")
+const RunLaunchRequestScript = preload("res://core/progression/run_launch_request.gd")
 
 var _main_menu: Control = null
 var _battle_scene: Control = null
@@ -26,14 +27,17 @@ func _build_main_menu() -> void:
     _main_menu.run_requested.connect(show_battle_scene)
 
 
-func _build_battle_scene(seed: int) -> void:
+func _build_battle_scene(request: RunLaunchRequestScript) -> void:
     var packed: PackedScene = load("res://scenes/battle/battle_scene.tscn") as PackedScene
     if packed == null:
         push_error("RootScene: failed to load battle_scene.tscn")
         return
     _battle_scene = packed.instantiate()
     _battle_scene.name = "BattleScene"
-    _battle_scene.set_meta("initial_seed", seed)
+    # The launch request travels to the scene as a meta. The scene
+    # does not decide whether the run is new or resumed: it hands the
+    # request to the RunController, which does.
+    _battle_scene.set_meta("launch_request", request)
     add_child(_battle_scene)
     _battle_scene.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 
@@ -46,16 +50,16 @@ func show_main_menu() -> void:
         _battle_scene.visible = false
 
 
-func show_battle_scene(seed: int) -> void:
+func show_battle_scene(request: RunLaunchRequestScript) -> void:
     _current_view = "battle"
     if _main_menu != null:
         _main_menu.visible = false
     if _battle_scene == null:
-        _build_battle_scene(seed)
+        _build_battle_scene(request)
     elif _battle_scene != null:
         _battle_scene.visible = true
-        if _battle_scene.has_method("restart_with_seed"):
-            _battle_scene.restart_with_seed(seed)
+        if _battle_scene.has_method("apply_launch_request"):
+            _battle_scene.apply_launch_request(request)
 
 
 func show_main_menu_after_battle() -> void:

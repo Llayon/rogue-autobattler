@@ -2,14 +2,21 @@ extends Control
 ## Главное меню: stats panel + start/continue buttons.
 ##
 ## Загружает MetaProfile через SaveService на _ready.
-## При нажатии "New Run" вызывает run_controller.start_run с новым seed.
-## При нажатии "Continue" вызывает run_controller.resume_run с сохранённым seed.
+##
+## "New Run" emits a RunLaunchRequest in the NEW_RUN mode; "Continue"
+## emits one in the CONTINUE mode. The intent travels with the
+## request, so the router can never mistake a Continue for a new
+## run. The seed alone is NOT the intent: a Continue also carries the
+## persisted run seed.
 
 const MetaProfileScript = preload("res://core/progression/meta_profile.gd")
 const SaveService = preload("res://core/save/save_service.gd")
 const RngScript = preload("res://core/utils/rng_service.gd")
+const RunLaunchRequestScript = preload("res://core/progression/run_launch_request.gd")
 
-signal run_requested(seed: int)
+## The launch request carries the explicit intent (NEW_RUN /
+## CONTINUE) and the seed.
+signal run_requested(request: RunLaunchRequestScript)
 
 var _profile: MetaProfileScript = null
 var _new_run_button: Button = null
@@ -101,13 +108,13 @@ func _refresh() -> void:
 
 func _on_new_run_pressed() -> void:
     var rng_seed: int = RngScript.randi_range(1, 999999)
-    _start_battle_scene(rng_seed)
+    _start_battle_scene(RunLaunchRequestScript.new_run(rng_seed))
 
 
 func _on_continue_pressed() -> void:
     if _profile == null or _profile.current_run_seed == 0:
         return
-    _start_battle_scene(_profile.current_run_seed)
+    _start_battle_scene(RunLaunchRequestScript.continue_run(_profile.current_run_seed))
 
 
 func _on_settings_pressed() -> void:
@@ -201,5 +208,5 @@ func _refresh_speed_buttons() -> void:
         btn.add_theme_stylebox_override("normal", sb)
 
 
-func _start_battle_scene(seed: int) -> void:
-    run_requested.emit(seed)
+func _start_battle_scene(request: RunLaunchRequestScript) -> void:
+    run_requested.emit(request)
