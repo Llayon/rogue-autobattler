@@ -209,16 +209,15 @@ static func _sequence_of(instance_id: String) -> int:
 
 
 static func _error(code: String, detail: String, context: String) -> RefCounted:
+	# MigrationDiagnostic is a class_name, so it is always available at
+	# the call site. The guard is kept as a safety net: if the class
+	# were ever unavailable, the diagnostic must still carry the code
+	# and the detail, so the caller can report it.
 	if ClassDB.class_exists("MigrationDiagnostic"):
 		return MigrationDiagnostic.error(code, detail, context)
-	# The fallback keeps the same shape, but it is a plain Dictionary
-	# rather than a RefCounted, so it is wrapped.
-	var fallback: Dictionary = {
-		"code": code,
-		"detail": detail,
-		"context": context,
-		"severity": "error",
-	}
-	var holder: RefCounted = RefCounted.new()
-	holder.set_meta("diagnostic", fallback)
+	var holder: MigrationDiagnostic = MigrationDiagnostic.new()
+	holder.severity = MigrationDiagnostic.Severity.ERROR
+	holder.code = code
+	holder.detail = detail
+	holder.context = context
 	return holder
