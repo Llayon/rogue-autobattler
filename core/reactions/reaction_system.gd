@@ -48,6 +48,27 @@ func register_reaction(combatant, reaction: Resource) -> void:
 	list.append(reaction)
 
 
+## Removes EVERY registration for every class.
+##
+## The registry is process-lifetime state, so a battle that starts
+## without clearing it inherits the reactions of the previous battle.
+## That is wrong for two reasons:
+##
+##   - a class that owned a reaction in battle A would keep that
+##     reaction in battle B even when the new battle has no such
+##     unit (stale ownership), and
+##   - the chance gate would be evaluated once per leftover entry,
+##     inflating the effective probability.
+##
+## The registry is keyed by def_id, so unregistering per combatant is
+## NOT a safe substitute: removing one Paladin's reaction would also
+## remove the reaction of every other living Paladin of that class.
+##
+## A battle boundary therefore clears the whole registry at once.
+func clear_all() -> void:
+	_reactions.clear()
+
+
 func unregister_all(combatant) -> void:
 	if combatant == null:
 		return

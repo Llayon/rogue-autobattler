@@ -12,18 +12,35 @@ var _inner: ReactionSystemPure = null
 func _ready() -> void:
 	_inner = ReactionSystemScript.new()
 	# Подключаемся к GameBus сигналам.
+	#
+	# The connect is guarded: in headless --script mode the autoload
+	# can be initialised more than once, and connecting the same
+	# method twice makes Godot write an error to stderr. The guard
+	# also keeps a test that wired the same handler from producing a
+	# duplicate handler.
 	if has_node("/root/EventBus"):
 		var bus: Node = get_node("/root/EventBus")
 		if bus.has_signal("reaction_registered"):
-			bus.reaction_registered.connect(_on_reaction_registered)
+			if not bus.reaction_registered.is_connected(_on_reaction_registered):
+				bus.reaction_registered.connect(_on_reaction_registered)
 		if bus.has_signal("reaction_unregistered"):
-			bus.reaction_unregistered.connect(_on_reaction_unregistered)
+			if not bus.reaction_unregistered.is_connected(_on_reaction_unregistered):
+				bus.reaction_unregistered.connect(_on_reaction_unregistered)
 
 
 ## Forward API к inner (для тестов и интеграции).
 func register_reaction(combatant, reaction: Resource) -> void:
 	if _inner != null:
 		_inner.register_reaction(combatant, reaction)
+
+
+## Removes every registration for every class.
+##
+## Called at the start of a battle so the registry never inherits
+## the previous battle's reactions.
+func clear_all() -> void:
+	if _inner != null:
+		_inner.clear_all()
 
 
 func unregister_all(combatant) -> void:

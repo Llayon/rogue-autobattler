@@ -394,7 +394,24 @@ func exit_shop_to_map() -> void:
 	_set_phase(Phase.MAP)
 
 
-## Запускает бой текущего раунда.
+## Empties the legacy reaction registry at a battle boundary.
+##
+## The registry lives in the ReactionSystem autoload (process-lifetime
+## state). Clearing it here means a new battle never inherits the
+## previous battle's registrations.
+##
+## It is static so the regression suite can drive the same path.
+static func _clear_legacy_reaction_registry() -> void:
+	var tree = Engine.get_main_loop()
+	if tree == null:
+		return
+	var sys = tree.root.get_node_or_null("ReactionSystem")
+	if sys == null:
+		return
+	if sys.has_method("clear_all"):
+		sys.call("clear_all")
+
+
 ## Registers the LEGACY Shield Block view for a combatant.
 ##
 ## This is the production registration path for the legacy combat
@@ -452,6 +469,7 @@ static func _make_legacy_shield_block_view() -> Resource:
 	return view
 
 
+## Запускает бой текущего раунда.
 func start_battle() -> bool:
 	if phase != Phase.PREP and phase != Phase.MAP:
 		return false
@@ -470,6 +488,21 @@ func start_battle() -> bool:
 	ctx = BattleContext.new()
 	# Fresh participant bridge for THIS battle.
 	_battle_participants = LegacyBattleParticipantMapScript.new()
+	# BATTLE BOUNDARY: the legacy reaction registry is process-lifetime
+	# state, so it must be emptied before THIS battle registers its
+	# own reactions.
+	#
+	# The clear happens at the START boundary rather than only at the
+	# end, because the previous battle may have ended abnormally (the
+	# runtime was interrupted, the scene was torn down) and a new
+	# battle must always begin from a clean registry.
+	#
+	# Clearing the WHOLE registry is required: it is keyed by def_id,
+	# so unregistering one combatant would also drop the reaction of
+	# every other living combatant of the same class, and a class
+	# that owned a reaction in the previous battle would otherwise
+	# inherit it here even when this battle has no such unit.
+	_clear_legacy_reaction_registry()
 	# Расставляем игроков.
 	for i in board_units.size():
 		var u: RunUnit = board_units[i]
@@ -538,7 +571,7 @@ func start_battle() -> bool:
 		var c = CombatantScript.new(def)
 		var cell: Vector2i = Vector2i(i, 0)
 		ctx.register(c, cell)
-		# Зарегистрировать AoO для врагов с меле-реакцией.
+		# Зарегистрировать AoO для врагов с меле-рекцией.
 		if def.id in [&"orc_warrior", &"knight", &"paladin"]:
 			var aoo: Resource = ContentDB_static.get_by_id(&"attack_of_opportunity")
 			if aoo != null:
