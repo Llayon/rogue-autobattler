@@ -85,7 +85,7 @@ SPECIAL_PROBES = {
 
 
 def discover(root):
-    base = os.path.join(root, "tests", "battle_ecs")
+    base = os.path.join(root, "tests")
     found = []
     for dirpath, _dirs, files in os.walk(base):
         for name in sorted(files):

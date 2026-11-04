@@ -120,11 +120,11 @@ jobs:
           set -euo pipefail
           godot --headless --path . --editor --quit || true
 
-      - name: Run Phase 3 Battle ECS suites
+      - name: Run every standalone suite
         run: |
           set -euo pipefail
-          python tools/run_battle_ecs_suites.py --godot godot --root . | tee /tmp/battle-ecs.log
-          grep -q 'RUNNER: GREEN' /tmp/battle-ecs.log
+          python tools/run_battle_ecs_suites.py --godot godot --root . | tee /tmp/standalone-suites.log
+          grep -q 'RUNNER: GREEN' /tmp/standalone-suites.log
 
       - name: Audit the standalone harness exit contract
         run: python tools/audit_test_exit_contract.py
