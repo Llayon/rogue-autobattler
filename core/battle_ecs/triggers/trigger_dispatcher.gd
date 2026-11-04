@@ -108,6 +108,10 @@ var _queue: Array = []                       # BattleEvent | DamageWindowWorkIte
 var _seen: Dictionary = {}                  # event_id -> true (per-call OR session-scoped)
 var _reaction_budget: Dictionary = {}        # root_action_id -> int (per-call OR session-scoped)
 var _pending_count: int = 0                 # B6.4c: window work items in flight + queued
+# The effective MAX_EVENTS budget of the CURRENT dispatch. It is
+# installed by process_work() and read by the window branch, which
+# is reached from several call sites.
+var _eff_max_events: int = 0
 
 
 ## Begin a fresh tick-scoped trigger session. The session
@@ -219,6 +223,9 @@ func process_work(
 	var eff_max_events: int = int(
 		p_session.max_events_per_tick if using_session \
 				else p_limits.max_events_per_tick)
+	# The window branch reads the budget from the member, so every
+	# call site of _process_window_item enforces the same cap.
+	_eff_max_events = eff_max_events
 	var eff_max_chain: int = int(
 		p_session.max_chain_depth if using_session \
 				else p_limits.max_chain_depth)
@@ -250,8 +257,7 @@ func process_work(
 			_process_window_item(
 				item, p_world, p_rng, p_emitter, p_sink,
 				p_provider, result, executor,
-				eff_max_chain, eff_max_reactions_per_root, p_session,
-				eff_max_events)
+				eff_max_chain, eff_max_reactions_per_root, p_session)
 			# Drain pending_count: this work item is done.
 			_pending_count = maxi(0, int(_pending_count) - 1)
 			continue
@@ -412,8 +418,7 @@ func _process_window_item(
 		p_result: RefCounted,
 		p_executor,
 		p_max_chain_depth: int, p_max_reactions_per_root: int,
-		p_session,
-		p_max_events: int = 0) -> void:
+		p_session) -> void:
 	var using_session: bool = p_session != null
 	# B6.4c MAX_EVENTS policy at work-item level: if the
 	# event budget is already spent, finalize the window with
@@ -430,7 +435,7 @@ func _process_window_item(
 	if using_session:
 		budget_spent = bool(p_session.cap_reached())
 	else:
-		budget_spent = _seen.size() >= int(p_max_events)
+		budget_spent = _seen.size() >= int(_eff_max_events)
 	if budget_spent:
 		# B6.4c: the bounded execution MUST be reported, not
 		# silent. The window is finalized with the current pending
