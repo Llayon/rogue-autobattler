@@ -218,13 +218,55 @@ func ensure_legacy_backup(legacy_path: String) -> int:
 ## The marker follows the schema version of the DTO, so a v5
 ## checkpoint is written with the v5 marker and is detected as v5.
 ##
-## The top-level keys are emitted in the canonical schema order, so two
-## semantically identical checkpoints serialize IDENTICALLY — the bytes
-## do not depend on Dictionary iteration order.
+## The serialization is BYTE-STABLE: the top-level keys are emitted in
+## the canonical schema order, and the nested keys are emitted in
+## sorted order. Two semantically identical checkpoints therefore
+## serialize identically — the bytes never depend on the Dictionary
+## iteration order, the filesystem listing order or an object
+## identity.
 static func serialize_canonical_bytes(data: Dictionary) -> PackedByteArray:
-	var safe: Variant = _to_json_safe(data)
+	# The top-level keys are emitted in the canonical schema order, so
+	# the bytes never depend on the Dictionary insertion order.
+	var ordered: Dictionary = {}
+	for key in canonical_top_level_keys(data):
+		ordered[key] = data[key]
+	# The map snapshot is canonicalized: the node list is emitted in
+	# ascending id order, so the bytes never depend on the insertion
+	# order of the nodes.
+	if ordered.has("map"):
+		ordered["map"] = _canonicalize_map_snapshot(ordered["map"])
+	# The NESTED dictionaries are emitted with sorted keys. The top
+	# level keeps the schema order, so the nested pass must not touch
+	# it.
+	var safe: Variant = _to_json_safe_nested(ordered, true)
 	var body: String = JSON.stringify(safe, "", true)
 	return (schema_marker_for(data) + "\n" + body).to_utf8_buffer()
+
+
+## The canonical key order of a top-level DTO.
+##
+## The schema order is used for a canonical DTO; for anything else the
+## keys are sorted, so the bytes stay deterministic.
+static func canonical_top_level_keys(data: Dictionary) -> Array:
+	var order: Array = []
+	if int(data.get("schema_version", 0)) == SCHEMA_V5:
+		order = SaveSchemaV5Script.TOP_LEVEL_KEYS
+	else:
+		order = SaveSchemaV4Script.TOP_LEVEL_KEYS
+	var out: Array = []
+	for key in order:
+		if data.has(key):
+			out.append(key)
+	# Any key the schema does not know about is appended in sorted
+	# order, so an extension cannot break the determinism.
+	var extra: Array = []
+	for key in data.keys():
+		if not (key in out):
+			extra.append(key)
+	extra.sort()
+	for key in extra:
+		out.append(key)
+	return out
 
 
 ## The file marker of a canonical DTO.
@@ -235,17 +277,82 @@ static func schema_marker_for(data: Dictionary) -> String:
 
 
 static func _to_json_safe(value: Variant) -> Variant:
+	return _to_json_safe_nested(value, false)
+
+
+## Converts a value into its JSON-safe form.
+##
+## A nested dictionary is emitted with SORTED keys, so its bytes never
+## depend on its insertion order. The top level is exempt: it keeps the
+## canonical schema order, which is emitted by the caller.
+static func _to_json_safe_nested(value: Variant, is_top_level: bool) -> Variant:
 	if value is Array:
 		var out: Array = []
 		for v in value:
-			out.append(_to_json_safe(v))
+			out.append(_to_json_safe_nested(v, false))
 		return out
 	if value is Dictionary:
 		var d: Dictionary = {}
-		for k in value.keys():
-			d[String(k)] = _to_json_safe(value[k])
+		var keys: Array = value.keys()
+		if not is_top_level:
+			keys.sort()
+		for k in keys:
+			d[String(k)] = _to_json_safe_nested(value[k], false)
 		return d
 	return value
+
+
+## Canonicalizes the map snapshot before it is serialized.
+##
+## The node list is emitted in ascending id order and every id list is
+## sorted, so two graphs that differ only in their insertion order
+## produce the same bytes.
+static func _canonicalize_map_snapshot(value: Variant) -> Variant:
+	if not (value is Dictionary):
+		return value
+	var source: Dictionary = value
+	# An EMPTY map snapshot means "no map was captured". It must stay
+	# empty: a partially filled snapshot would look like a map with a
+	# missing field and the restore would reject it.
+	if source.is_empty():
+		return {} as Dictionary
+	var out: Dictionary = {}
+	for key in source.keys():
+		if key != "nodes":
+			out[key] = source[key]
+	var raw_nodes: Variant = source.get("nodes", [])
+	if not (raw_nodes is Array):
+		out["nodes"] = []
+		return out
+	var nodes: Array = []
+	for entry in raw_nodes as Array:
+		if not (entry is Dictionary):
+			continue
+		var d: Dictionary = entry
+		nodes.append({
+			"id": int(d.get("id", -1)),
+			"type": int(d.get("type", 0)),
+			"depth": int(d.get("depth", 0)),
+			"parent_ids": _sorted_ints(d.get("parent_ids", [])),
+			"child_ids": _sorted_ints(d.get("child_ids", [])),
+			"visited": bool(d.get("visited", false)),
+			"available": bool(d.get("available", false)),
+		})
+	nodes.sort_custom(func(a, b) -> bool:
+		return int((a as Dictionary)["id"]) < int((b as Dictionary)["id"]))
+	out["nodes"] = nodes
+	return out
+
+
+## Returns a sorted Array of ints.
+static func _sorted_ints(source: Variant) -> Array:
+	var out: Array = []
+	if not (source is Array):
+		return out
+	for v in source as Array:
+		out.append(int(v))
+	out.sort()
+	return out
 
 
 # ---------------------------------------------------------------------------

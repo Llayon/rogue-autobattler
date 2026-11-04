@@ -92,6 +92,38 @@ func _test_A_red_map_snapshot_contract() -> void:
 			_assert(restored.get_all_nodes().size() == before_nodes,
 				"a bad snapshot does not partially modify the live map")
 
+			# A DANGLING reference must be rejected, and the live map
+			# must survive the rejected restore unchanged.
+			var dangling: Dictionary = data.duplicate(true)
+			var dangling_nodes: Array = (dangling["nodes"] as Array).duplicate(true)
+			if not dangling_nodes.is_empty():
+				var first_node: Dictionary = dangling_nodes[0] as Dictionary
+				var children: Array = first_node.get("child_ids", []) as Array
+				children.append(999999)
+				first_node["child_ids"] = children
+				dangling["nodes"] = dangling_nodes
+				var before_dangling: int = restored.get_all_nodes().size()
+				var ok_dangling: bool = restored.restore_snapshot(dangling)
+				_assert(not ok_dangling,
+					"a snapshot with a dangling reference is rejected")
+				_assert(restored.get_all_nodes().size() == before_dangling,
+					"a rejected snapshot does not partially modify the live map")
+
+			# A DUPLICATE node id must be rejected as well.
+			var duplicate: Dictionary = data.duplicate(true)
+			var duplicate_nodes: Array = (duplicate["nodes"] as Array).duplicate(true)
+			if duplicate_nodes.size() > 1:
+				var second: Dictionary = duplicate_nodes[1] as Dictionary
+				var first_id: int = int((duplicate_nodes[0] as Dictionary)["id"])
+				second["id"] = first_id
+				duplicate["nodes"] = duplicate_nodes
+				var before_duplicate: int = restored.get_all_nodes().size()
+				var ok_duplicate: bool = restored.restore_snapshot(duplicate)
+				_assert(not ok_duplicate,
+					"a snapshot with a duplicate node id is rejected")
+				_assert(restored.get_all_nodes().size() == before_duplicate,
+					"a rejected snapshot does not partially modify the live map")
+
 	map = null
 
 

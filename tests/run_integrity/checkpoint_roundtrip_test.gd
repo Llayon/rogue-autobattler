@@ -71,6 +71,25 @@ func _load_dto(seed_value: int) -> Dictionary:
 	return result.data
 
 
+## Resumes a run in a FRESH runtime and returns the controller.
+##
+## The runtime is recreated, so the resumed controller can only hold
+## the state that was actually persisted.
+func _resume(seed_value: int) -> Node:
+	var ctrl: Node = RunControllerScript.new()
+	get_root().add_child(ctrl)
+	await process_frame
+	ctrl.profile = MetaProfileScript.new()
+	ctrl.profile.unlocked_units = [&"warrior", &"archer"] as Array[StringName]
+	var ok: bool = ctrl.resume_run(seed_value)
+	await process_frame
+	if not ok:
+		ctrl.queue_free()
+		await process_frame
+		return null
+	return ctrl
+
+
 # ---------------------------------------------------------------- RED-1
 
 
@@ -135,6 +154,18 @@ func _test_B_red_2_unit_shop_offer_survives() -> void:
 		_assert(same,
 			"the persisted offer keeps the exact ids AND the ordering")
 
+	# The offer must also come BACK on a resume, not only be present
+	# in the file.
+	var resumed: Node = await _resume(seed)
+	_assert(resumed != null, "the PREP checkpoint resumed")
+	if resumed != null:
+		_assert(resumed.shop.offered_ids() == offered_before,
+			"the resumed unit shop keeps the exact offer")
+		ctrl.queue_free()
+		await process_frame
+		resumed.queue_free()
+		await process_frame
+		return
 	ctrl.queue_free()
 	await process_frame
 
@@ -192,6 +223,27 @@ func _test_C_red_3_map_graph_survives() -> void:
 				any_visited = true
 		_assert(any_visited, "the persisted map keeps the visited state")
 
+	# The map must come BACK on a resume: the graph, the current node,
+	# the visited state and the available next ids.
+	var resumed: Node = await _resume(seed)
+	_assert(resumed != null, "the MAP checkpoint resumed")
+	if resumed != null:
+		_assert(resumed.encounter_map != null,
+			"the resumed run has the encounter map")
+		if resumed.encounter_map != null:
+			_assert(resumed.encounter_map.get_current_node_id() == current_before,
+				"the resumed map keeps the current node")
+			_assert(resumed.encounter_map.get_available_next_ids()
+				== ctrl.encounter_map.get_available_next_ids(),
+				"the resumed map keeps the available-next ids")
+			_assert(resumed.encounter_map.get_layer_types()
+				== ctrl.encounter_map.get_layer_types(),
+				"the resumed map keeps the graph")
+		ctrl.queue_free()
+		await process_frame
+		resumed.queue_free()
+		await process_frame
+		return
 	ctrl.queue_free()
 	await process_frame
 
@@ -232,6 +284,19 @@ func _test_D_red_4_reward_offer_survives() -> void:
 		_assert(same,
 			"the persisted reward keeps the exact ids AND the ordering")
 
+	# The reward must come BACK on a resume: no reroll.
+	var resumed: Node = await _resume(seed)
+	_assert(resumed != null, "the REWARD checkpoint resumed")
+	if resumed != null:
+		_assert(resumed.reward.offered_ids() == reward_before,
+			"the resumed reward keeps the exact offer")
+		_assert(resumed.phase == resumed.Phase.REWARD,
+			"the resumed run is in the REWARD phase")
+		ctrl.queue_free()
+		await process_frame
+		resumed.queue_free()
+		await process_frame
+		return
 	ctrl.queue_free()
 	await process_frame
 
@@ -279,6 +344,21 @@ func _test_E_red_5_merchant_offer_survives() -> void:
 		_assert(absf(float(merchant_data.get("discount", -1.0)) - discount_before) < 0.0001,
 			"the persisted merchant offer keeps the discount")
 
+	# The merchant must come BACK on a resume.
+	var resumed: Node = await _resume(seed)
+	_assert(resumed != null, "the MERCHANT checkpoint resumed")
+	if resumed != null:
+		_assert(resumed.merchant_shop.get_offered_ids() == merchant_before,
+			"the resumed merchant keeps the exact offer")
+		_assert(absf(resumed.merchant_shop.get_discount() - discount_before) < 0.0001,
+			"the resumed merchant keeps the discount")
+		_assert(resumed.state.just_visited_merchant,
+			"the resumed run keeps the merchant flag")
+		ctrl.queue_free()
+		await process_frame
+		resumed.queue_free()
+		await process_frame
+		return
 	ctrl.queue_free()
 	await process_frame
 
