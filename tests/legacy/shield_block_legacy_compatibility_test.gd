@@ -852,7 +852,7 @@ func _test_start_battle_registers_the_legacy_view() -> void:
 	var hit = sys.poll_reaction(owner, &"unit_attacked", {})
 	_assert(hit != null,
 		"SB-CF10: the legacy runtime selects the reaction registered by start_battle()")
-	
+
 	# The controller owns a BattleContext and a BattleRunner. Release
 	# them so the suite does not leave resources dangling at exit.
 	ctrl.runner = null
