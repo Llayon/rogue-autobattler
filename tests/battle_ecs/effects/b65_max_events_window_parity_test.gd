@@ -60,6 +60,18 @@ var _passed: int = 0
 var _failed: int = 0
 
 
+## The first committed DAMAGE_APPLIED amount, or -1 when there is none.
+##
+## A missing damage must be an [FAIL], never a runtime error: a crash
+## aborts the test function, so the suite would report fewer
+## assertions and zero failures — a false green.
+func _applied_of(p_run: Dictionary) -> int:
+	var applied: Array = p_run.get("applied", [])
+	if applied.is_empty():
+		return -1
+	return int(applied[0])
+
+
 func _assert(cond: bool, label: String) -> void:
 	if cond:
 		_passed += 1
@@ -282,12 +294,12 @@ func _test_window_before_the_budget_is_spent() -> void:
 	_assert(int(without_session["discoveries"]) == 1,
 		"TD-05: the reaction of an uncapped window runs exactly once (no-session, got %d, want 1)"
 			% int(without_session["discoveries"]))
-	_assert(int(with_session["applied"][0]) == 5,
+	_assert(_applied_of(with_session) == 5,
 		"TD-05: the uncapped window applied the MODIFIED pending damage (got %d, want 5)"
-			% int(with_session["applied"][0]))
-	_assert(int(without_session["applied"][0]) == 5,
+			% _applied_of(with_session))
+	_assert(_applied_of(without_session) == 5,
 		"TD-05: the uncapped window applied the MODIFIED pending damage (no-session, got %d, want 5)"
-			% int(without_session["applied"][0]))
+			% _applied_of(without_session))
 	_assert(int(with_session["hp_after"]) == int(with_session["hp_before"]) - 5,
 		"TD-05: the uncapped window cost 5 HP (got %d)"
 			% (int(with_session["hp_before"]) - int(with_session["hp_after"])))
@@ -343,12 +355,12 @@ func _test_parity() -> void:
 	# window was NOT modified, the transaction committed the full 20,
 	# and exactly ONE reaction was discovered. Without them the parity
 	# suite would be satisfied by two equally wrong paths.
-	_assert(int(with_session["applied"][0]) == 20,
+	_assert(_applied_of(with_session) == 20,
 		"TD-05: the capped window committed the FULL pending damage (got %d, want 20)"
-			% int(with_session["applied"][0]))
-	_assert(int(without_session["applied"][0]) == 20,
+			% _applied_of(with_session))
+	_assert(_applied_of(without_session) == 20,
 		"TD-05: the capped no-session window committed the FULL pending damage (got %d, want 20)"
-			% int(without_session["applied"][0]))
+			% _applied_of(without_session))
 	_assert(int(with_session["discoveries"]) == 1,
 		"TD-05: exactly ONE reaction was discovered before the cap (got %d, want 1)"
 			% int(with_session["discoveries"]))
