@@ -66,9 +66,9 @@ func _initialize() -> void:
 	_test_classes_keep_independent_registries()
 	_test_rounding_is_observed_through_production()
 	_test_real_basic_attack_and_burn_paths_are_not_mitigated()
-	# STAGE3_PENDING _test_legacy_registry_never_receives_attack_of_opportunity()
-	# STAGE3_PENDING _test_shipping_attack_of_opportunity_stays_phase3_only()
-	# STAGE3_PENDING _test_phase3_provider_still_finds_attack_of_opportunity()
+	_test_legacy_registry_never_receives_attack_of_opportunity()
+	_test_shipping_attack_of_opportunity_stays_phase3_only()
+	_test_phase3_provider_still_finds_attack_of_opportunity()
 	_test_clear_all_empties_every_definition()
 	_test_dedup_still_works_after_clear_all()
 	_test_new_battle_starts_with_a_fresh_registry()
@@ -541,13 +541,21 @@ func _test_legacy_registry_never_receives_attack_of_opportunity() -> void:
 	# history the only legacy poll was &"unit_attacked", so a legacy
 	# AoO could never be consumed: registering it was a zombie.
 	_reset_reaction_system()
-	# A FIXED seed is required: the enemy wave is drawn from a random
-	# pool, so an unseeded battle might not contain any class that
-	# used to receive the zombie registration. The detector must be
-	# deterministic, otherwise a regression could hide behind an
-	# unlucky draw.
+	# A FIXED seed AND a tier that actually contains an AoO owner are
+	# required. The zombie registration applied to orc_warrior, knight
+	# and paladin, but the enemy pool is tiered:
+	#
+	#   tier 1 -> goblin, goblin_archer   (round 1..3)
+	#   tier 2 -> orc_warrior, skeleton_mage (round 4..7)
+	#   tier 3 -> troll_chief
+	#
+	# A tier-1 wave would never have received the zombie
+	# registration, so the detector would be vacuous there. The
+	# battle therefore runs at round 4, where the wave is drawn from
+	# the tier-2 pool that contains orc_warrior.
 	RngServiceScript.seed_run(20260903)
 	var ctrl = RunControllerScript.new()
+	ctrl.state.round_index = 4
 	ctrl.state.create_unit(&"paladin", 100, RunUnit.LOCATION_BOARD)
 	_assert(ctrl.start_battle(), "CF21: the battle started")
 	var node = _reaction_system_node()
@@ -561,9 +569,15 @@ func _test_legacy_registry_never_receives_attack_of_opportunity() -> void:
 				"CF21: the legacy registry holds no attack-of-opportunity entry (class %s)"
 					% String(def_id))
 	# The check above is only meaningful when the registry actually
-	# holds the classes that used to receive the zombie registration.
-	_assert(classes > 0,
-		"CF21: the legacy registry is not empty, so the scan was meaningful")
+	# holds a class that used to receive the zombie registration.
+	# orc_warrior is the tier-2 AoO owner, so its presence proves the
+	# scan was not vacuous.
+	var saw_aoo_owner: bool = false
+	for def_id in sys._reactions.keys():
+		if StringName(def_id) in [&"orc_warrior", &"knight", &"paladin"]:
+			saw_aoo_owner = true
+	_assert(saw_aoo_owner,
+		"CF21: the wave contained an AoO-owning class, so the scan was meaningful")
 	ctrl.runner = null
 	ctrl.ctx = null
 	ctrl.free()
