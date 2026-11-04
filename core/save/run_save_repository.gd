@@ -18,13 +18,16 @@ class_name RunSaveRepository extends RefCounted
 ##     rename. There is no previous generation to preserve.
 
 const SaveSchemaV4Script = preload("res://core/save/save_schema_v4.gd")
+const SaveSchemaV5Script = preload("res://core/save/save_schema_v5.gd")
 const MigratorScript = preload("res://core/save/legacy_save_v1_to_v4_migrator.gd")
 const SaveLoadResultScript = preload("res://core/save/save_load_result.gd")
 const MigrationDiagnosticScript = preload("res://core/save/migration_diagnostic.gd")
 const ProductionFileOps = preload("res://core/save/run_save_file_ops.gd")
 
 const SCHEMA_V4: int = SaveSchemaV4Script.SCHEMA_VERSION
+const SCHEMA_V5: int = SaveSchemaV5Script.SCHEMA_VERSION
 const SCHEMA_MARKER: String = "# v4 save"
+const SCHEMA_MARKER_V5: String = "# v5 save"
 const BACKUP_SUFFIX: String = ".legacy-v1.bak"
 const COMMIT_OLD_SUFFIX: String = ".commit-old"
 const TEMP_SUFFIX: String = ".tmp"
@@ -104,6 +107,16 @@ func load_run(seed_value: int) -> RefCounted:
 				return _error(SaveLoadResultScript.ERROR_CORRUPT_V4, "corrupt_v4",
 					"wire normalization failed: %s" % str(detect))
 			return _load_v4_canonical(normalized, target, seed_value)
+		"v5":
+			var parsed_v5: Dictionary = detect.parsed
+			var normalized_v5: Dictionary = _normalize_wire_v5(parsed_v5)
+			if normalized_v5.is_empty():
+				return _error(SaveLoadResultScript.ERROR_CORRUPT_V4, "corrupt_v5",
+					"wire normalization failed: %s" % str(detect))
+			return _load_v5_canonical(normalized_v5, target, seed_value)
+		"corrupt_v5":
+			return _error(SaveLoadResultScript.ERROR_CORRUPT_V4, "corrupt_v5",
+				"corrupt v5: %s" % str(detect))
 		"corrupt_v4":
 			return _error(SaveLoadResultScript.ERROR_CORRUPT_V4, "corrupt_v4",
 				"corrupt v4: %s" % str(detect))
@@ -122,37 +135,62 @@ func load_run(seed_value: int) -> RefCounted:
 ## The previous generation is preserved on disk under commit-old
 ## until the new generation has been post-validated.
 func save_run(seed_value: int, v4_data: Dictionary) -> RefCounted:
+	return _save_canonical(seed_value, v4_data, "v4")
+
+
+## Persists a canonical v5 checkpoint DTO atomically.
+##
+## The v5 path reuses the SAME hardened mechanism as the v4 path: the
+## temp write, the temp verification, the atomic commit swap and the
+## post-commit validation are the same code. Only the shape
+## validation and the file marker differ.
+func save_run_v5(seed_value: int, v5_data: Dictionary) -> RefCounted:
+	return _save_canonical(seed_value, v5_data, "v5")
+
+
+## The shared atomic save path for both schema versions.
+func _save_canonical(seed_value: int, data: Dictionary, format: String) -> RefCounted:
 	_save_count += 1
 	var target: String = _run_path(seed_value)
 	var rec: Dictionary = _recover_startup_state(target, seed_value)
 	if not rec.ok:
 		return _error(rec.error_code, "unknown", rec.detail)
-	var seed_pre: RefCounted = _validate_seed_consistency(seed_value, v4_data)
+	var seed_pre: RefCounted = _validate_seed_consistency(seed_value, data)
 	if seed_pre.is_error():
 		return seed_pre
-	var v: Dictionary = MigratorScript.validate(v4_data)
-	if not bool(v.get("success", false)):
-		var r: RefCounted = _error(SaveLoadResultScript.ERROR_V4_VALIDATION_FAILED, "v4",
-			"v4 DTO failed validation before write")
-		for d in v.get("diagnostics", []):
-			r.add_diagnostic(d)
-		return r
+	if format == "v5":
+		var shape_v5: Dictionary = SaveSchemaV5Script.validate_shape(data)
+		if not bool(shape_v5.get("success", false)):
+			var r5: RefCounted = _error(
+				SaveLoadResultScript.ERROR_V4_VALIDATION_FAILED, "v5",
+				"v5 DTO failed validation before write")
+			for d in shape_v5.get("diagnostics", []):
+				r5.add_diagnostic(d)
+			return r5
+	else:
+		var v: Dictionary = MigratorScript.validate(data)
+		if not bool(v.get("success", false)):
+			var r: RefCounted = _error(SaveLoadResultScript.ERROR_V4_VALIDATION_FAILED, "v4",
+				"v4 DTO failed validation before write")
+			for d in v.get("diagnostics", []):
+				r.add_diagnostic(d)
+			return r
 	var temp: String = target + TEMP_SUFFIX
-	var bytes: PackedByteArray = serialize_canonical_bytes(v4_data)
+	var bytes: PackedByteArray = serialize_canonical_bytes(data)
 	if not _ops.write_bytes_and_flush(temp, bytes):
-		return _error(SaveLoadResultScript.ERROR_TEMP_WRITE_FAILED, "v4",
-			"failed to write temp v4 file: %s" % temp)
+		return _error(SaveLoadResultScript.ERROR_TEMP_WRITE_FAILED, format,
+			"failed to write temp %s file: %s" % [format, temp])
 	if not _verify_temp(temp, bytes):
 		_safe_remove(temp)
-		return _error(SaveLoadResultScript.ERROR_TEMP_WRITE_FAILED, "v4",
-			"temp v4 file failed verification after write")
+		return _error(SaveLoadResultScript.ERROR_TEMP_WRITE_FAILED, format,
+			"temp %s file failed verification after write" % format)
 	if not _commit_verified_temp(temp, target, seed_value):
-		return _error(SaveLoadResultScript.ERROR_ATOMIC_REPLACE_FAILED, "v4",
+		return _error(SaveLoadResultScript.ERROR_ATOMIC_REPLACE_FAILED, format,
 			"commit swap failed: %s" % target)
 	var ok: RefCounted = SaveLoadResultScript.ok()
-	ok.source_format = "v4"
+	ok.source_format = format
 	ok.source_path = target
-	ok.data = v4_data.duplicate(true)
+	ok.data = data.duplicate(true)
 	return ok
 
 
@@ -175,10 +213,25 @@ func ensure_legacy_backup(legacy_path: String) -> int:
 # Wire format (single canonical helper)
 # ---------------------------------------------------------------------------
 
+## Serializes a canonical DTO to its on-disk byte form.
+##
+## The marker follows the schema version of the DTO, so a v5
+## checkpoint is written with the v5 marker and is detected as v5.
+##
+## The top-level keys are emitted in the canonical schema order, so two
+## semantically identical checkpoints serialize IDENTICALLY — the bytes
+## do not depend on Dictionary iteration order.
 static func serialize_canonical_bytes(data: Dictionary) -> PackedByteArray:
 	var safe: Variant = _to_json_safe(data)
 	var body: String = JSON.stringify(safe, "", true)
-	return ("# v4 save\n" + body).to_utf8_buffer()
+	return (schema_marker_for(data) + "\n" + body).to_utf8_buffer()
+
+
+## The file marker of a canonical DTO.
+static func schema_marker_for(data: Dictionary) -> String:
+	if int(data.get("schema_version", 0)) == SCHEMA_V5:
+		return SCHEMA_MARKER_V5
+	return SCHEMA_MARKER
 
 
 static func _to_json_safe(value: Variant) -> Variant:
@@ -198,6 +251,40 @@ static func _to_json_safe(value: Variant) -> Variant:
 # ---------------------------------------------------------------------------
 # Wire normalization
 # ---------------------------------------------------------------------------
+
+## Wire-normalises a JSON-parsed v5 checkpoint.
+##
+## The keys are emitted in the canonical schema order, so the
+## normalised Dictionary is byte-stable for the same checkpoint. The
+## integer fields are coerced back from the JSON floats.
+static func _normalize_wire_v5(parsed: Dictionary) -> Dictionary:
+	var out: Dictionary = {}
+	for key in SaveSchemaV5Script.TOP_LEVEL_KEYS:
+		if parsed.has(key):
+			out[key] = parsed[key]
+	for key in SaveSchemaV5Script.INTEGER_FIELDS:
+		if out.has(key):
+			var r: Dictionary = SaveSchemaV5Script._wire_int(out[key])
+			if not r.ok:
+				return {}
+			out[key] = r.value
+	# The PRNG machine state is a lossless decimal string, NOT a JSON
+	# number: a double cannot hold the low bits of a 64-bit state.
+	if out.has("rng"):
+		var rng_value: Variant = out["rng"]
+		if not (rng_value is Dictionary):
+			return {}
+		var rng_out: Dictionary = rng_value as Dictionary
+		if rng_out.has("state"):
+			var raw_state: Variant = rng_out["state"]
+			var decoded_state: Dictionary = SaveSchemaV5Script.decode_int64(raw_state)
+			if not bool(decoded_state.get("ok", false)):
+				return {}
+			rng_out["state"] = SaveSchemaV5Script.encode_int64(
+				int(decoded_state.get("value", 0)))
+		out["rng"] = rng_out
+	return out
+
 
 static func _normalize_wire_static(parsed: Dictionary) -> Dictionary:
 	# Wire-normalise a JSON-parsed Dictionary. JSON.parse_string
@@ -295,25 +382,37 @@ func _normalize_wire(parsed: Dictionary) -> Dictionary:
 
 func _detect_format(text: PackedByteArray) -> Dictionary:
 	var s: String = text.get_string_from_utf8()
+	if s.begins_with(SCHEMA_MARKER_V5):
+		return _detect_canonical(s, SCHEMA_MARKER_V5, "v5")
 	if not s.begins_with(SCHEMA_MARKER):
 		if s.begins_with("[gd_resource") and _has_legacy_v1_structural_keys(s):
 			return {"format": "legacy_v1_candidate"}
 		return {"format": "unknown"}
+	return _detect_canonical(s, SCHEMA_MARKER, "v4")
+
+
+## Parses the body of a canonical save file and identifies its schema.
+##
+## `format` is the expected schema family ("v4" or "v5"); a file
+## whose schema_version does not match the marker is reported as
+## unsupported, exactly like before.
+func _detect_canonical(s: String, marker: String, format: String) -> Dictionary:
 	var nl: int = s.find("\n")
 	var body: String = s.substr(nl + 1, s.length() - (nl + 1))
 	var parsed: Variant = JSON.parse_string(body)
 	if not (parsed is Dictionary):
-		return {"format": "corrupt_v4", "reason": "bad_json"}
+		return {"format": "corrupt_" + format, "reason": "bad_json"}
 	if not parsed.has("schema_version"):
-		return {"format": "corrupt_v4", "reason": "missing_schema_version"}
+		return {"format": "corrupt_" + format, "reason": "missing_schema_version"}
 	var raw_schema: Variant = parsed["schema_version"]
 	var schema_result: Dictionary = SaveSchemaV4Script._wire_int(raw_schema)
 	if not schema_result.ok:
-		return {"format": "corrupt_v4", "reason": "schema_version_invalid_wire_type"}
+		return {"format": "corrupt_" + format, "reason": "schema_version_invalid_wire_type"}
 	var schema: int = schema_result.value
-	if schema != SCHEMA_V4:
+	var expected: int = SCHEMA_V4 if format == "v4" else SCHEMA_V5
+	if schema != expected:
 		return {"format": "unsupported_schema", "schema_version": schema}
-	return {"format": "v4", "parsed": parsed}
+	return {"format": format, "parsed": parsed}
 
 
 ## Generic tres / legacy line parser. Splits the bytes by newline
@@ -391,6 +490,33 @@ func _load_v4_canonical(parsed: Dictionary, path: String, seed_value: int) -> Re
 		return r
 	var ok: RefCounted = SaveLoadResultScript.ok()
 	ok.source_format = "v4"
+	ok.source_path = path
+	ok.data = parsed.duplicate(true)
+	return ok
+
+
+## Loads and validates a canonical v5 checkpoint.
+##
+## The v5 path mirrors the v4 path exactly: the seed / run_id
+## consistency check and the shape validation happen BEFORE the data
+## is handed out, and a failure never returns partial data.
+func _load_v5_canonical(parsed: Dictionary, path: String, seed_value: int) -> RefCounted:
+	if int(parsed.get("seed", -2)) != seed_value:
+		return _error(SaveLoadResultScript.ERROR_V4_VALIDATION_FAILED, "v5",
+			"v5 file seed does not match expected seed: file=%s expected=%d" % [parsed.get("seed"), seed_value])
+	var expected_run_id: String = "run_%d" % seed_value
+	if String(parsed.get("run_id", "")) != expected_run_id:
+		return _error(SaveLoadResultScript.ERROR_V4_VALIDATION_FAILED, "v5",
+			"v5 file run_id does not match: file=%s expected=%s" % [parsed.get("run_id"), expected_run_id])
+	var shape: Dictionary = SaveSchemaV5Script.validate_shape(parsed)
+	if not bool(shape.get("success", false)):
+		var r: RefCounted = _error(SaveLoadResultScript.ERROR_V4_VALIDATION_FAILED, "v5",
+			"v5 file failed validation")
+		for d in shape.get("diagnostics", []):
+			r.add_diagnostic(d)
+		return r
+	var ok: RefCounted = SaveLoadResultScript.ok()
+	ok.source_format = "v5"
 	ok.source_path = path
 	ok.data = parsed.duplicate(true)
 	return ok
@@ -604,6 +730,15 @@ func _is_valid_recoverable_run(path: String, expected_seed: int) -> Dictionary:
 	var s: String = bytes.get_string_from_utf8()
 	# v4 path: run the strict gate. Recoverable means the file is
 	# genuinely usable for the slot, not just shape-recognisable.
+	if s.begins_with(SCHEMA_MARKER_V5):
+		var parsed_v5: Variant = JSON.parse_string(
+			s.substr(SCHEMA_MARKER_V5.length() + 1))
+		if not (parsed_v5 is Dictionary):
+			return {"valid": false, "reason": "corrupt_v5"}
+		var gate_v5: Dictionary = _strictly_valid_v5(parsed_v5, expected_seed)
+		if not bool(gate_v5.get("valid", false)):
+			return {"valid": false, "reason": "strict_validation_failed"}
+		return {"valid": true, "format": "v5"}
 	if s.begins_with(SCHEMA_MARKER):
 		var parsed_v: Variant = JSON.parse_string(
 			s.substr(SCHEMA_MARKER.length() + 1))
@@ -642,6 +777,35 @@ func _is_valid_recoverable_run(path: String, expected_seed: int) -> Dictionary:
 ##   - semantic validation passes (Migrator.validate)
 ##   - schema_version seed field == expected_seed
 ##   - run_id field == "run_<expected_seed>"
+## The strict gate for a canonical v5 checkpoint.
+##
+## Mirrors `_strictly_valid_v4`: shape validation, the seed match and
+## the canonical run_id. Used by both recovery and post-commit
+## validation, so they cannot disagree.
+static func _strictly_valid_v5(parsed: Dictionary, expected_seed: int) -> Dictionary:
+	var normalised: Dictionary = _normalize_wire_v5(parsed)
+	var shape: Dictionary = SaveSchemaV5Script.validate_shape(normalised)
+	if not bool(shape.get("success", false)):
+		return {"valid": false, "reason": "shape_validation_failed",
+			"diagnostics": shape.get("diagnostics", [])}
+	var sv: int = int(normalised.get("seed", -2))
+	if sv != expected_seed:
+		return {"valid": false, "reason": "seed_mismatch",
+			"diagnostics": [MigrationDiagnostic.error(
+				"seed_mismatch",
+				"v5 seed %d does not match slot seed %d" % [sv, expected_seed],
+				"seed")]}
+	var expected_run_id: String = "run_%d" % expected_seed
+	if String(normalised.get("run_id", "")) != expected_run_id:
+		return {"valid": false, "reason": "run_id_mismatch",
+			"diagnostics": [MigrationDiagnostic.error(
+				"run_id_mismatch",
+				"v5 run_id %s does not match %s"
+					% [normalised.get("run_id"), expected_run_id],
+				"run_id")]}
+	return {"valid": true, "dto": normalised}
+
+
 static func _strictly_valid_v4(parsed: Dictionary, expected_seed: int) -> Dictionary:
 	var normalised: Dictionary = _normalize_wire_static(parsed)
 	var shape: Dictionary = SaveSchemaV4Script.validate_shape(normalised)
@@ -724,15 +888,25 @@ func _commit_verified_temp(temp: String, target: String, seed_value: int) -> boo
 
 
 func _post_commit_validate(target: String, expected_seed: int) -> bool:
-	# Re-read target and verify it is a valid v4 file for the
+	# Re-read target and verify it is a valid canonical file for the
 	# specific slot. The slot-aware strict gate is used (wire
 	# normalisation + validate_shape + Migrator.validate + seed +
 	# run_id). Anything weaker would let a syntactically valid but
 	# semantically broken JSON destroy the previous generation.
+	#
+	# Both schema versions are accepted: the marker decides which
+	# strict gate runs.
 	var bytes: PackedByteArray = _ops.read_bytes(target)
 	if bytes.is_empty():
 		return false
 	var s: String = bytes.get_string_from_utf8()
+	if s.begins_with(SCHEMA_MARKER_V5):
+		var parsed_v5: Variant = JSON.parse_string(
+			s.substr(SCHEMA_MARKER_V5.length() + 1))
+		if not (parsed_v5 is Dictionary):
+			return false
+		var gate_v5: Dictionary = _strictly_valid_v5(parsed_v5, expected_seed)
+		return bool(gate_v5.get("valid", false))
 	if not s.begins_with(SCHEMA_MARKER):
 		return false
 	var parsed: Variant = JSON.parse_string(
@@ -749,9 +923,15 @@ func _verify_temp(temp: String, expected_bytes: PackedByteArray) -> bool:
 		return false
 	if bytes != expected_bytes:
 		return false
-	# Re-read also: parse as JSON header to confirm format.
+	# Re-read also: parse as JSON header to confirm format. Both
+	# canonical markers are accepted.
 	var s: String = bytes.get_string_from_utf8()
-	if not s.begins_with(SCHEMA_MARKER):
+	var marker: String = ""
+	if s.begins_with(SCHEMA_MARKER_V5):
+		marker = SCHEMA_MARKER_V5
+	elif s.begins_with(SCHEMA_MARKER):
+		marker = SCHEMA_MARKER
+	else:
 		return false
 	var nl: int = s.find("\n")
 	var body: String = s.substr(nl + 1, s.length() - (nl + 1))

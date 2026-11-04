@@ -87,6 +87,37 @@ static func load_run_v4(seed_value: int) -> RefCounted:
 	return _load_run_v4_with_repository(seed_value, _run_repository())
 
 
+## Saves a canonical v5 checkpoint DTO for `seed_value`.
+##
+## The repository handles the atomic write, the temp verification, the
+## commit swap and the post-commit validation — the v5 path reuses the
+## SAME hardened mechanism as the v4 path.
+static func save_run_v5(seed_value: int, dto: Dictionary) -> RefCounted:
+	return _save_run_v5_with_repository(seed_value, dto, _run_repository())
+
+
+## Loads a canonical v5 checkpoint DTO for `seed_value`.
+##
+## A file written as v4 is returned as its v4 DTO: the migration to v5
+## is a checkpoint-layer decision, made by the caller that knows the
+## runtime state. The repository never invents checkpoint data.
+static func load_run_v5(seed_value: int) -> RefCounted:
+	return _load_run_v5_with_repository(seed_value, _run_repository())
+
+
+## Test-only seam, mirroring the v4 ones.
+static func _save_run_v5_with_repository(
+		seed_value: int, dto: Dictionary,
+		repository: RefCounted) -> RefCounted:
+	return repository.save_run_v5(seed_value, dto)
+
+
+static func _load_run_v5_with_repository(
+		seed_value: int,
+		repository: RefCounted) -> RefCounted:
+	return repository.load_run(seed_value)
+
+
 ## Test-only seam. Production must use `save_run_v4` /
 ## `load_run_v4`. Tests pass a repository pointing at an isolated
 ## temp directory so they do not touch `user://saves/runs`.

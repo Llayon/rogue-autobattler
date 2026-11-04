@@ -1060,11 +1060,17 @@ func _test_schema_version_5_rejected_as_unsupported() -> void:
 	bad["run_id"] = "run_9001"
 	bad["next_unit_instance_seq"] = 1
 	bad["next_item_instance_seq"] = 1
-	var bytes: PackedByteArray = RunSaveRepositoryScript.serialize_canonical_bytes(bad)
+	# The file is written with the V4 marker but declares schema 5:
+	# the marker and the declared version disagree, so the file is
+	# rejected as an unsupported schema. (A file whose MARKER is v5
+	# must additionally carry the full v5 shape; that contract is
+	# covered by the v5 checkpoint suite.)
+	var body: String = JSON.stringify(bad)
+	var bytes: PackedByteArray = ("# v4 save\n" + body).to_utf8_buffer()
 	assert(ops.write_bytes_and_flush(runs_dir + "run_9001.tres", bytes), "write v4-with-schema-5 file")
 	var repo: RefCounted = RunSaveRepositoryScript.new(runs_dir)
 	var r: RefCounted = repo.load_run(9001)
-	_assert(r.is_error(), "schema 5 -> error")
+	_assert(r.is_error(), "schema 5 under the v4 marker -> error")
 	_assert(r.status == SaveLoadResultScript.ERROR_UNSUPPORTED_SCHEMA,
 		"status == ERROR_UNSUPPORTED_SCHEMA")
 	_assert(r.source_format == "unsupported_schema", "source_format == unsupported_schema")
