@@ -569,11 +569,26 @@ func _has_progressed(events: Array) -> bool:
 	# telemetry for a tick that may be no-op).
 	# HEAL_APPLIED changes HP and is caught by the state
 	# signature below.
+	#
+	# DAMAGE_APPLIED is progress IFF its amount is POSITIVE. A
+	# fully mitigated damage (amount == 0) leaves the target's HP
+	# untouched, so the world did not change: counting it as
+	# progress made a battle in which every hit was mitigated look
+	# like it was making progress forever, and the stalemate
+	# termination was never reached.
+	#
+	# The event itself is NOT removed: DAMAGE_APPLIED(0) stays a
+	# valid telemetry record of a successfully completed, fully
+	# mitigated damage transaction.
 	for e in events:
-		if int(e.type) == BattleEventTypeScript.DAMAGE_APPLIED \
-				or int(e.type) == BattleEventTypeScript.UNIT_DIED \
-				or int(e.type) == BattleEventTypeScript.UNIT_MOVED \
-				or int(e.type) == BattleEventTypeScript.STATUS_EXPIRED:
+		var event_type: int = int(e.type)
+		if event_type == BattleEventTypeScript.DAMAGE_APPLIED:
+			if int(e.amount) > 0:
+				return true
+			continue
+		if event_type == BattleEventTypeScript.UNIT_DIED \
+				or event_type == BattleEventTypeScript.UNIT_MOVED \
+				or event_type == BattleEventTypeScript.STATUS_EXPIRED:
 			return true
 	var current: String = _progress_signature()
 	return current != _last_progress_sig
