@@ -161,6 +161,161 @@ func get_layer_types() -> Array:
 	return result
 
 
+## Возвращает чистый снимок графа для сохранения.
+##
+## The snapshot is a plain Dictionary of primitives — no Godot object
+## graph is serialized. It carries everything needed to reproduce the
+## map EXACTLY:
+##
+##   nodes          : [{id, type, depth, parent_ids, child_ids, visited, available}]
+##   next_id        : the id allocator position
+##   current_node_id: where the player is (-1 = the run has not started)
+##
+## The node list is emitted in ascending id order, so two
+## semantically identical maps serialize identically.
+func snapshot() -> Dictionary:
+	var nodes: Array = []
+	var sorted_nodes: Array = _nodes.duplicate()
+	sorted_nodes.sort_custom(func(a, b) -> bool: return int(a.id) < int(b.id))
+	for n in sorted_nodes:
+		nodes.append({
+			"id": int(n.id),
+			"type": int(n.type),
+			"depth": int(n.depth),
+			"parent_ids": _sorted_ints(n.parent_ids),
+			"child_ids": _sorted_ints(n.child_ids),
+			"visited": bool(n.visited),
+			"available": bool(n.available),
+		})
+	return {
+		"nodes": nodes,
+		"next_id": int(_next_id),
+		"current_node_id": int(_current_node_id),
+	}
+
+
+## Восстанавливает граф из снимка.
+##
+## The restore is ATOMIC: the whole snapshot is validated first and the
+## live map is only replaced when every check passed. A bad snapshot
+## leaves the map untouched.
+##
+## Validation covers:
+##   - the shape of the snapshot
+##   - integer node ids, unique
+##   - integer type / depth, valid arrays
+##   - every parent / child reference resolves to a known node
+##   - the current node exists (or is -1)
+##
+## Returns true on success.
+func restore_snapshot(data: Dictionary) -> bool:
+	var validated: Dictionary = _validate_snapshot(data)
+	if not bool(validated.get("valid", false)):
+		return false
+
+	# Build the new graph in a temporary list first.
+	var new_nodes: Array = []
+	for entry in validated.get("nodes", []) as Array:
+		var node: EncounterNode = EncounterNodeScript.new(
+			int((entry as Dictionary)["id"]),
+			int((entry as Dictionary)["type"]),
+			int((entry as Dictionary)["depth"]))
+		node.parent_ids = _int_array((entry as Dictionary)["parent_ids"])
+		node.child_ids = _int_array((entry as Dictionary)["child_ids"])
+		node.visited = bool((entry as Dictionary)["visited"])
+		node.available = bool((entry as Dictionary)["available"])
+		new_nodes.append(node)
+
+	# Only now the live map is replaced.
+	_nodes = new_nodes
+	_next_id = int(validated.get("next_id", 0))
+	_current_node_id = int(validated.get("current_node_id", -1))
+	return true
+
+
+## Validates a snapshot without touching the live map.
+func _validate_snapshot(data: Dictionary) -> Dictionary:
+	if not data.has("nodes") or not data.has("next_id") 			or not data.has("current_node_id"):
+		return {"valid": false, "reason": "missing_field"}
+	var raw_nodes: Variant = data["nodes"]
+	if not (raw_nodes is Array):
+		return {"valid": false, "reason": "nodes_not_an_array"}
+	var raw_next: Variant = data["next_id"]
+	var raw_current: Variant = data["current_node_id"]
+	if not (raw_next is int) and not (raw_next is float):
+		return {"valid": false, "reason": "next_id_not_an_integer"}
+	if not (raw_current is int) and not (raw_current is float):
+		return {"valid": false, "reason": "current_node_id_not_an_integer"}
+	var nodes: Array = raw_nodes as Array
+	var seen_ids: Dictionary = {}
+	var ids: Array[int] = []
+	for entry in nodes:
+		if not (entry is Dictionary):
+			return {"valid": false, "reason": "node_not_a_dictionary"}
+		var d: Dictionary = entry
+		for key in ["id", "type", "depth"]:
+			if not d.has(key):
+				return {"valid": false, "reason": "node_missing_%s" % key}
+			var v: Variant = d[key]
+			if not (v is int) and not (v is float):
+				return {"valid": false, "reason": "node_%s_not_an_integer" % key}
+		var node_id: int = int(d["id"])
+		if seen_ids.has(node_id):
+			return {"valid": false, "reason": "duplicate_node_id"}
+		seen_ids[node_id] = true
+		ids.append(node_id)
+		for key in ["parent_ids", "child_ids"]:
+			if not d.has(key):
+				return {"valid": false, "reason": "node_missing_%s" % key}
+			var arr: Variant = d[key]
+			if not (arr is Array):
+				return {"valid": false, "reason": "node_%s_not_an_array" % key}
+			for v in arr as Array:
+				if not (v is int) and not (v is float):
+					return {"valid": false, "reason": "node_%s_not_an_integer" % key}
+		for key in ["visited", "available"]:
+			if not d.has(key):
+				return {"valid": false, "reason": "node_missing_%s" % key}
+			if not (d[key] is bool):
+				return {"valid": false, "reason": "node_%s_not_a_bool" % key}
+
+	# Every reference must resolve.
+	for entry in nodes:
+		var d: Dictionary = entry
+		for key in ["parent_ids", "child_ids"]:
+			for v in d[key] as Array:
+				if not seen_ids.has(int(v)):
+					return {"valid": false, "reason": "dangling_%s" % key}
+
+	var current: int = int(data["current_node_id"])
+	if current != -1 and not seen_ids.has(current):
+		return {"valid": false, "reason": "current_node_not_found"}
+
+	return {
+		"valid": true,
+		"nodes": nodes,
+		"next_id": int(data["next_id"]),
+		"current_node_id": current,
+	}
+
+
+## Returns a sorted copy of an int array, so the snapshot is stable.
+func _sorted_ints(source: Array) -> Array:
+	var copy: Array = []
+	for v in source:
+		copy.append(int(v))
+	copy.sort()
+	return copy
+
+
+## Returns an Array[int] from a wire array.
+func _int_array(source: Array) -> Array[int]:
+	var result: Array[int] = []
+	for v in source:
+		result.append(int(v))
+	return result
+
+
 ## Возвращает EncounterNode по id, или null.
 func get_node(node_id: int) -> EncounterNode:
 	return _get_node(node_id)

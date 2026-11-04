@@ -27,6 +27,47 @@ func refresh(_unlocked_units: Array = []) -> void:
 
 
 ## Кол-во items в текущем предложении.
+## Возвращает чистый снимок предложений торговца.
+##
+## The snapshot carries the offered item ids, their order and the
+## discount. It is a plain Dictionary of primitives.
+func snapshot() -> Dictionary:
+	var ids: Array = []
+	for id in _offered_item_ids:
+		ids.append(String(id))
+	return {
+		"offered_item_ids": ids,
+		"discount": float(_discount),
+	}
+
+
+## Восстанавливает предложения торговца из снимка.
+##
+## The restore is ATOMIC: the snapshot is validated first and the live
+## offer is only replaced when every check passed. Returns true on
+## success.
+func restore_snapshot(data: Dictionary) -> bool:
+	if not data.has("offered_item_ids") or not data.has("discount"):
+		return false
+	var raw: Variant = data["offered_item_ids"]
+	if not (raw is Array):
+		return false
+	var raw_discount: Variant = data["discount"]
+	if not (raw_discount is int) and not (raw_discount is float):
+		return false
+	var ids: Array[StringName] = []
+	for v in raw as Array:
+		if not (v is String) and not (v is StringName):
+			return false
+		ids.append(StringName(String(v)))
+	var discount: float = float(raw_discount)
+	if discount < 0.0 or discount > 1.0:
+		return false
+	_offered_item_ids = ids
+	_discount = discount
+	return true
+
+
 func get_offered_count() -> int:
 	return _offered_item_ids.size()
 

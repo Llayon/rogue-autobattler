@@ -39,6 +39,45 @@ func generate_offer(round_index: int) -> Array[StringName]:
 	return _offered_ids.duplicate()
 
 
+## Возвращает чистый снимок предложения награды.
+##
+## The snapshot carries the offered unit ids, their order and the
+## round the offer was generated for. It is a plain Dictionary of
+## primitives.
+func snapshot() -> Dictionary:
+	var ids: Array = []
+	for id in _offered_ids:
+		ids.append(String(id))
+	return {
+		"offered_ids": ids,
+		"round_index": int(_round_index),
+	}
+
+
+## Восстанавливает предложение награды из снимка.
+##
+## The restore is ATOMIC: the snapshot is validated first and the live
+## offer is only replaced when every check passed. Returns true on
+## success.
+func restore_snapshot(data: Dictionary) -> bool:
+	if not data.has("offered_ids") or not data.has("round_index"):
+		return false
+	var raw: Variant = data["offered_ids"]
+	if not (raw is Array):
+		return false
+	var raw_round: Variant = data["round_index"]
+	if not (raw_round is int) and not (raw_round is float):
+		return false
+	var ids: Array[StringName] = []
+	for v in raw as Array:
+		if not (v is String) and not (v is StringName):
+			return false
+		ids.append(StringName(String(v)))
+	_offered_ids = ids
+	_round_index = int(raw_round)
+	return true
+
+
 ## Возвращает текущий offer (read-only copy).
 func offered_ids() -> Array[StringName]:
 	return _offered_ids.duplicate()

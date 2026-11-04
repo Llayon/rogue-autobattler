@@ -27,6 +27,37 @@ func refresh(pool: Array[StringName]) -> void:
 		_offered_ids.append(StringName(String(id)))
 
 
+## Возвращает чистый снимок предложений магазина.
+##
+## The snapshot carries the offered unit ids AND their order. It is a
+## plain Dictionary of primitives — no Godot object graph.
+func snapshot() -> Dictionary:
+	var ids: Array = []
+	for id in _offered_ids:
+		ids.append(String(id))
+	return {"offered_ids": ids}
+
+
+## Восстанавливает предложения магазина из снимка.
+##
+## The restore is ATOMIC: the snapshot is validated first and the live
+## offer is only replaced when every check passed. Returns true on
+## success.
+func restore_snapshot(data: Dictionary) -> bool:
+	if not data.has("offered_ids"):
+		return false
+	var raw: Variant = data["offered_ids"]
+	if not (raw is Array):
+		return false
+	var ids: Array[StringName] = []
+	for v in raw as Array:
+		if not (v is String) and not (v is StringName):
+			return false
+		ids.append(StringName(String(v)))
+	_offered_ids = ids
+	return true
+
+
 ## Возвращает текущие предложения.
 func offered_ids() -> Array[StringName]:
 	return _offered_ids.duplicate()
