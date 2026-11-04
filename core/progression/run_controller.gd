@@ -822,11 +822,32 @@ func resume_run(seed_value: int) -> bool:
 			return false
 	elif loaded_state.current_encounter_id != -1:
 		# The checkpoint has no map snapshot but the domain state
-		# references a node. Fail closed: the runtime is not rebuilt
-		# from the seed, because that would silently change the map.
-		GameLog.error("run", "resume_run: the map snapshot is missing",
+		# references a node.
+		#
+		# A v5 checkpoint ALWAYS carries the map, so this can only be a
+		# v4 file that was migrated: v4 never persisted the map. The
+		# v4 map was generated from the run seed, so it is reproduced
+		# EXACTLY, not invented: the same seed produces the same graph.
+		# The generation happens on a scratch stream, and the run's
+		# persisted RNG continuation is restored afterwards.
+		if not migrated:
+			GameLog.error("run", "resume_run: the map snapshot is missing",
+				{"encounter_id": loaded_state.current_encounter_id})
+			return false
+		new_map = EncounterMapScript.new()
+		var saved_rng: Dictionary = RngServiceScript.snapshot()
+		RngServiceScript.seed_run(loaded_state.seed)
+		new_map.generate(loaded_state.seed)
+		new_map.start_run()
+		if loaded_state.current_encounter_id != -1:
+			new_map.goto_node(loaded_state.current_encounter_id)
+		# The scratch generation must not consume the run's stream.
+		var saved_seed: int = int(saved_rng.get("seed", 0))
+		if saved_seed != 0:
+			RngServiceScript.seed_run(saved_seed)
+			RngServiceScript.restore(saved_rng)
+		GameLog.warn("run", "resume_run: the map was reproduced from the seed",
 			{"encounter_id": loaded_state.current_encounter_id})
-		return false
 
 	# ---- commit -------------------------------------------------------
 	# Every piece validated. Now the live runtime is replaced.

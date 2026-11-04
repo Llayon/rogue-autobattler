@@ -24,9 +24,21 @@ func _ready() -> void:
 	_setup_map_view()
 	_setup_status_label()
 	if encounter_map == null:
+		# The preview map is a VIEW concern: it must not consume or
+		# reset the run's random stream. The run stream carries the
+		# persisted RNG continuation, and a preview that reseeded it
+		# would break the resume contract.
+		#
+		# The map generator draws from the global stream, so the stream
+		# is saved around the preview and restored afterwards.
+		var saved_stream: Dictionary = Rng.snapshot()
 		Rng.seed_run(preview_seed)
 		encounter_map = EncounterMapScript.new()
 		encounter_map.generate(preview_seed)
+		var saved_seed: int = int(saved_stream.get("seed", 0))
+		if saved_seed != 0:
+			Rng.seed_run(saved_seed)
+			Rng.restore(saved_stream)
 	map_view.set_map(encounter_map)
 	_update_status("Choose your first encounter")
 

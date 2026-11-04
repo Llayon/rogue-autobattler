@@ -79,6 +79,9 @@ func _test_H1_a_v4_map_save_can_still_be_continued() -> void:
 	var repo = SaveServiceScript._run_repository()
 	var written: RefCounted = repo.save_run(seed_value, v4_dto)
 	_assert(written != null and written.is_ok(), "the v4 save is written")
+	# The values are captured BEFORE the controller is freed.
+	var saved_gold: int = ctrl.state.gold
+	var saved_node: int = ctrl.state.current_encounter_id
 	ctrl.queue_free()
 	await process_frame
 
@@ -96,10 +99,9 @@ func _test_H1_a_v4_map_save_can_still_be_continued() -> void:
 		_assert(resumed_ctrl.encounter_map != null,
 			"the continued v4 run has the encounter map")
 		if resumed_ctrl.encounter_map != null:
-			_assert(resumed_ctrl.encounter_map.get_current_node_id()
-				== ctrl.state.current_encounter_id,
+			_assert(resumed_ctrl.encounter_map.get_current_node_id() == saved_node,
 				"the continued v4 run keeps the saved current node")
-		_assert(resumed_ctrl.state.gold == ctrl.state.gold,
+		_assert(resumed_ctrl.state.gold == saved_gold,
 			"the continued v4 run keeps the domain state")
 	resumed_ctrl.queue_free()
 	await process_frame

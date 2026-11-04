@@ -19,6 +19,7 @@ class_name RunSaveRepository extends RefCounted
 
 const SaveSchemaV4Script = preload("res://core/save/save_schema_v4.gd")
 const SaveSchemaV5Script = preload("res://core/save/save_schema_v5.gd")
+const RunDomainSemanticValidatorScript = preload("res://core/save/run_domain_semantic_validator.gd")
 const MigratorScript = preload("res://core/save/legacy_save_v1_to_v4_migrator.gd")
 const SaveLoadResultScript = preload("res://core/save/save_load_result.gd")
 const MigrationDiagnosticScript = preload("res://core/save/migration_diagnostic.gd")
@@ -897,6 +898,13 @@ static func _strictly_valid_v5(parsed: Dictionary, expected_seed: int) -> Dictio
 	if not bool(shape.get("success", false)):
 		return {"valid": false, "reason": "shape_validation_failed",
 			"diagnostics": shape.get("diagnostics", [])}
+	# The SEMANTIC gate: the unit and item collections must be
+	# consistent. The v4 path has always had it; the v5 path must not
+	# be weaker, or a malformed checkpoint would be accepted.
+	var semantic: Dictionary = RunDomainSemanticValidatorScript.validate(normalised)
+	if not bool(semantic.get("success", false)):
+		return {"valid": false, "reason": "semantic_validation_failed",
+			"diagnostics": semantic.get("diagnostics", [])}
 	var sv: int = int(normalised.get("seed", -2))
 	if sv != expected_seed:
 		return {"valid": false, "reason": "seed_mismatch",

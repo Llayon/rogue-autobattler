@@ -22,6 +22,7 @@ class_name RunCheckpointV5Mapper
 
 const RunStateV4MapperScript = preload("res://core/progression/run_state_v4_mapper.gd")
 const SaveSchemaV5Script = preload("res://core/save/save_schema_v5.gd")
+const RunDomainSemanticValidatorScript = preload("res://core/save/run_domain_semantic_validator.gd")
 
 const PHASE_PREP: String = SaveSchemaV5Script.PHASE_PREP
 const PHASE_MAP: String = SaveSchemaV5Script.PHASE_MAP
@@ -92,6 +93,14 @@ static func to_v5_dto(state, wire_phase: String, unit_shop: Dictionary,
 static func from_v5_dto(dto: Dictionary) -> Dictionary:
 	if dto.is_empty():
 		return {"ok": false, "reason": "empty_dto"}
+	# The SEMANTIC gate: the unit and item collections must be
+	# consistent. The v4 load path has always had it, and the v5 path
+	# must not be weaker: a malformed checkpoint would otherwise be
+	# accepted and decoded into an inconsistent domain state.
+	var semantic: Dictionary = RunDomainSemanticValidatorScript.validate(dto)
+	if not bool(semantic.get("success", false)):
+		return {"ok": false, "reason": "semantic_validation_failed",
+			"diagnostics": semantic.get("diagnostics", [])}
 	var state = RunStateV4MapperScript.from_v4_dto(dto)
 	if state == null:
 		return {"ok": false, "reason": "domain_state_failed"}
