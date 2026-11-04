@@ -1542,11 +1542,23 @@ func _test_reaction_system_register_multiple() -> void:
 	_assert(r1 != null and r1.id == &"first", "первая реакция по своему trigger")
 	var r2: Resource = sys.poll_reaction(c, &"unit_attacked", {})
 	_assert(r2 != null and r2.id == &"second", "вторая реакция по своему trigger")
+	# Один и тот же reaction id с РАЗНЫМИ trigger'ами — это отдельная
+	# регистрация. poll_reaction() сопоставляет trigger ТОЧНО, поэтому
+	# схлопывание по id сделало бы второй trigger недостижимым.
+	var same_id_other_trigger: Resource = _make_legacy_reaction_def(
+		&"first", &"unit_attacked", 1.0)
+	sys.register_reaction(c, same_id_other_trigger)
+	_assert(sys._reactions[&"x"].size() == 3,
+		"одинаковый id с другим trigger — отдельная запись (got %d)"
+			% sys._reactions[&"x"].size())
+	var r3: Resource = sys.poll_reaction(c, &"unit_attacked", {})
+	_assert(r3 != null,
+		"реакция доступна и по второму trigger (got null)")
 	# Точный дубликат (тот же id И trigger) схлопывается — это то,
 	# что не даёт шансу реакции умножаться на число юнитов.
 	var duplicate: Resource = _make_legacy_reaction_def(&"first", &"unit_move_start", 1.0)
 	sys.register_reaction(c, duplicate)
-	_assert(sys._reactions[&"x"].size() == 2,
+	_assert(sys._reactions[&"x"].size() == 3,
 		"точный дубликат схлопывается (got %d)" % sys._reactions[&"x"].size())
 
 
