@@ -39,8 +39,8 @@ func _initialize() -> void:
 	await _test_C_red_6_rng_continuation_across_several_seeds()
 	print("")
 	print("=== STAGE 3A: RNG CONTINUATION (RED) ===")
-	print("passed : %d" % _passed)
-	print("failed : %d" % _failed)
+	print("\n=== STAGE 3A: RNG CONTINUATION (RED): %d pass / %d fail ===\n"
+		% [_passed, _failed])
 	if _failed > 0:
 		quit(1)
 		return

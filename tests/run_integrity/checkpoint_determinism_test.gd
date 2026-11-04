@@ -30,8 +30,8 @@ func _initialize() -> void:
 	await _test_C_the_key_order_is_canonical()
 	print("")
 	print("=== STAGE 3B: V5 BYTE DETERMINISM ===")
-	print("passed : %d" % _passed)
-	print("failed : %d" % _failed)
+	print("\n=== STAGE 3B: V5 BYTE DETERMINISM: %d pass / %d fail ===\n"
+		% [_passed, _failed])
 	if _failed > 0:
 		quit(1)
 		return

@@ -37,8 +37,8 @@ func _initialize() -> void:
 	await _test_E_continue_does_not_overwrite_the_save()
 	print("")
 	print("=== RI-01: CONTINUE ROUTING ===")
-	print("passed : %d" % _passed)
-	print("failed : %d" % _failed)
+	print("\n=== RI-01: CONTINUE ROUTING: %d pass / %d fail ===\n"
+		% [_passed, _failed])
 	if _failed > 0:
 		quit(1)
 		return

@@ -41,8 +41,8 @@ func _initialize() -> void:
 	await _test_E_red_5_merchant_offer_survives()
 	print("")
 	print("=== STAGE 3A: CHECKPOINT PERSISTENCE (RED) ===")
-	print("passed : %d" % _passed)
-	print("failed : %d" % _failed)
+	print("\n=== STAGE 3A: CHECKPOINT PERSISTENCE (RED): %d pass / %d fail ===\n"
+		% [_passed, _failed])
 	if _failed > 0:
 		quit(1)
 		return
