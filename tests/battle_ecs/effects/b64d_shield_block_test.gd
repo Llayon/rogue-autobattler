@@ -1005,9 +1005,14 @@ func _s28_percentage_minimum_never_amplifies() -> void:
 	# minimum larger than the current pending must never make the
 	# target take MORE damage.
 	#
-	# This is driven through the REAL window path (an actual
-	# attack), not through a hand-built handle, so it proves the
-	# production behaviour end to end.
+	# This is a HANDLE/EFFECT-LEVEL proof: it opens a real attack
+	# window, but it sets the pending amount by hand and calls the
+	# modifier DIRECTLY, so the dispatcher and the continuation are
+	# not part of the path.
+	#
+	# The full end-to-end proof (dispatcher -> provider -> modifier
+	# -> continuation finalize -> DAMAGE_APPLIED) lives in
+	# tests/battle_ecs/effects/b65_s28_hostile_minimum_e2e_test.gd.
 	var info = _make_sim([&"shield_block"], [], 200, 20, 0)
 	var sim = info[0]
 	var world = info[1]
