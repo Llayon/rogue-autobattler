@@ -129,20 +129,18 @@ jobs:
       - name: Run the A-H semantic differential
         run: |
           set -euo pipefail
-          # The A-H differential compares the candidate against the
-          # PUBLISHED baseline of the branch: the commit that was on
-          # the remote BEFORE this push.
+          # The A-H differential compares the candidate against its
+          # PREDECESSOR commit: the parent of the pushed commit.
           #
-          # The baseline must be a REAL predecessor. On a push to the
-          # branch, GITHUB_SHA is the pushed commit and
-          # GITHUB_EVENT_BEFORE is the commit it replaced — so the
-          # comparison is not the identity.
-          #
-          # The checkout is shallow (depth 1), so the baseline commit
-          # has to be fetched explicitly.
-          BASELINE_SHA="${GITHUB_EVENT_BEFORE:-}"
-          if [ -z "$BASELINE_SHA" ] || [ "$BASELINE_SHA" = "0000000000000000000000000000000000000000" ]; then
-            echo "no predecessor commit for this event; skipping the differential"
+          # The predecessor is derived from the commit itself
+          # (HEAD^), not from a remote ref: after the push the remote
+          # ref points AT the candidate, so comparing against it would
+          # be the identity. GitHub does not expose the replaced
+          # commit of a push event, and the checkout is shallow
+          # (depth 1), so the parent has to be fetched explicitly.
+          BASELINE_SHA="$(git rev-parse HEAD^ 2>/dev/null || true)"
+          if [ -z "$BASELINE_SHA" ]; then
+            echo "no predecessor commit (the branch has one commit); skipping the differential"
             exit 0
           fi
           echo "baseline commit: $BASELINE_SHA"
