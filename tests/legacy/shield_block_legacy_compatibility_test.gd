@@ -66,6 +66,14 @@ func _initialize() -> void:
 	_test_classes_keep_independent_registries()
 	_test_rounding_is_observed_through_production()
 	_test_real_basic_attack_and_burn_paths_are_not_mitigated()
+	# STAGE3_PENDING _test_legacy_registry_never_receives_attack_of_opportunity()
+	# STAGE3_PENDING _test_shipping_attack_of_opportunity_stays_phase3_only()
+	# STAGE3_PENDING _test_phase3_provider_still_finds_attack_of_opportunity()
+	_test_clear_all_empties_every_definition()
+	_test_dedup_still_works_after_clear_all()
+	_test_new_battle_starts_with_a_fresh_registry()
+	_test_new_battle_does_not_inherit_stale_ownership()
+	_test_same_def_combatants_do_not_multiply_the_chance()
 	_test_wiring_does_not_accumulate_handlers()
 	_test_registration_dedup_keeps_distinct_triggers()
 	_test_no_double_activation()
@@ -132,7 +140,12 @@ func _reaction_system_node():
 		# false and every helper call would add another handler.
 		# Five helper calls would then register the same reaction five
 		# times and multiply the effective chance.
-		var handler: Callable = Callable(sys, "_on_reaction_registered")
+		# The SAME callable construction the autoload uses in its own
+		# _ready(): a bound method reference, not Callable(obj, "name").
+		# The two forms are not equal, so mixing them would make
+		# is_connected() miss an existing connection and connect a
+		# SECOND handler for the same method.
+		var handler: Callable = sys._on_reaction_registered
 		if not bus.reaction_registered.is_connected(handler):
 			bus.reaction_registered.connect(handler)
 	return sys
@@ -338,7 +351,7 @@ func _test_wiring_does_not_accumulate_handlers() -> void:
 		_reaction_system_node()
 
 	var sys = _reaction_system_node()
-	var handler: Callable = Callable(sys, "_on_reaction_registered")
+	var handler: Callable = sys._on_reaction_registered
 	var connections: int = 0
 	for connection in bus.reaction_registered.get_connections():
 		if connection.get("callable") == handler:
@@ -370,6 +383,224 @@ class _ReactionSpy:
 
 	func register_reaction(_combatant, _reaction: Resource) -> void:
 		calls += 1
+
+
+## Measures the effective Shield Block hit rate for the registered
+## paladin of the given battle.
+##
+## The rate is measured over the REAL registry, so it reflects every
+## chance attempt the legacy runtime would make.
+func _measure_hit_rate(p_ctrl, p_sys, p_total: int) -> float:
+	var combatants: Array = p_ctrl.ctx.all_combatants()
+	if combatants.is_empty():
+		return 0.0
+	var owner = null
+	for c in combatants:
+		if StringName(c.def_id) == &"paladin":
+			owner = c
+			break
+	if owner == null:
+		return 0.0
+	var hits: int = 0
+	for seed_value in range(1, p_total + 1):
+		RngServiceScript.seed_run(seed_value)
+		if p_sys.poll_reaction(owner, &"unit_attacked", {}) != null:
+			hits += 1
+	return float(hits) / float(p_total)
+
+
+func _test_clear_all_empties_every_definition() -> void:
+	# TD-03: clear_all() must empty the registry for EVERY class,
+	# not just one combatant.
+	var sys = ReactionSystemPureScript.new()
+	var a = _make_combatant(&"cf16_alpha")
+	var b = _make_combatant(&"cf16_beta")
+	var ra = _make_legacy_view(1.0)
+	ra.id = &"cf16_reaction_a"
+	var rb = _make_legacy_view(1.0)
+	rb.id = &"cf16_reaction_b"
+	sys.register_reaction(a, ra)
+	sys.register_reaction(b, rb)
+	_assert(sys._reactions.size() == 2,
+		"CF16: two classes are registered (got %d)" % sys._reactions.size())
+	sys.clear_all()
+	_assert(sys._reactions.size() == 0,
+		"CF16: clear_all() empties every definition (got %d)" % sys._reactions.size())
+
+
+func _test_dedup_still_works_after_clear_all() -> void:
+	# TD-03: clearing the registry must not disable the dedup.
+	var sys = ReactionSystemPureScript.new()
+	var c = _make_combatant(&"cf17_owner")
+	var view = _make_legacy_view(1.0)
+	sys.register_reaction(c, view)
+	sys.register_reaction(c, view)
+	_assert(sys._reactions[&"cf17_owner"].size() == 1,
+		"CF17: the dedup still collapses an exact duplicate (got %d)"
+			% sys._reactions[&"cf17_owner"].size())
+	sys.clear_all()
+	sys.register_reaction(c, view)
+	sys.register_reaction(c, view)
+	_assert(sys._reactions[&"cf17_owner"].size() == 1,
+		"CF17: the dedup still works after clear_all (got %d)"
+			% sys._reactions[&"cf17_owner"].size())
+
+
+func _test_new_battle_starts_with_a_fresh_registry() -> void:
+	# TD-03 R1/R3: a second start_battle() must not accumulate.
+	# The probability must stay at the single-registration rate.
+	_reset_reaction_system()
+	var rates: Array = []
+	for battle in range(4):
+		var ctrl = RunControllerScript.new()
+		ctrl.state.create_unit(&"paladin", 100, RunUnit.LOCATION_BOARD)
+		var ok: bool = ctrl.start_battle()
+		_assert(ok, "CF18: start_battle() succeeded for battle %d" % battle)
+		var node = _reaction_system_node()
+		var sys = node.get("_inner")
+		var entries: int = 0
+		if sys._reactions.has(&"paladin"):
+			entries = sys._reactions[&"paladin"].size()
+		_assert(entries == 1,
+			"CF18: battle %d registered exactly one paladin reaction (got %d)"
+				% [battle, entries])
+		rates.append(_measure_hit_rate(ctrl, sys, 200))
+		ctrl.runner = null
+		ctrl.ctx = null
+		ctrl.free()
+	# Every battle must show the SAME effective rate: no accumulation.
+	for i in range(1, rates.size()):
+		_assert(absf(float(rates[i]) - float(rates[0])) < 0.10,
+			"CF18: battle %d keeps the same effective rate (got %.3f, first %.3f)"
+				% [i, float(rates[i]), float(rates[0])])
+	# And the rate must be near the single-registration rate (~0.30),
+	# never the inflated multi-registration rate.
+	var last: float = float(rates[rates.size() - 1])
+	_assert(last < 0.45,
+		"CF18: the effective rate stays near 30%% after four battles (got %.3f)" % last)
+
+
+func _test_new_battle_does_not_inherit_stale_ownership() -> void:
+	# TD-03 R4: a class that owned a reaction in battle A must NOT
+	# own it in battle B when battle B has no such unit.
+	_reset_reaction_system()
+	var first = RunControllerScript.new()
+	first.state.create_unit(&"paladin", 100, RunUnit.LOCATION_BOARD)
+	_assert(first.start_battle(), "CF19: the first battle started")
+	var node = _reaction_system_node()
+	var sys = node.get("_inner")
+	_assert(sys._reactions.has(&"paladin"),
+		"CF19: the first battle registered the paladin")
+	first.runner = null
+	first.ctx = null
+	first.free()
+
+	# Second battle: a knight only. The paladin reaction must be gone.
+	var second = RunControllerScript.new()
+	second.state.create_unit(&"knight", 100, RunUnit.LOCATION_BOARD)
+	_assert(second.start_battle(), "CF19: the second battle started")
+	_assert(not sys._reactions.has(&"paladin"),
+		"CF19: the second battle does not inherit the paladin reaction")
+	_assert(not sys._reactions.has(&"knight"),
+		"CF19: the knight owns no reaction")
+	second.runner = null
+	second.ctx = null
+	second.free()
+
+
+func _test_same_def_combatants_do_not_multiply_the_chance() -> void:
+	# TD-03 R2: several combatants of the SAME class must not create
+	# additional independent chance attempts.
+	_reset_reaction_system()
+	var ctrl = RunControllerScript.new()
+	ctrl.state.create_unit(&"paladin", 100, RunUnit.LOCATION_BOARD)
+	ctrl.state.create_unit(&"paladin", 100, RunUnit.LOCATION_BOARD)
+	ctrl.state.create_unit(&"paladin", 100, RunUnit.LOCATION_BOARD)
+	_assert(ctrl.start_battle(), "CF20: the battle started")
+	var node = _reaction_system_node()
+	var sys = node.get("_inner")
+	var entries: int = 0
+	if sys._reactions.has(&"paladin"):
+		entries = sys._reactions[&"paladin"].size()
+	_assert(entries == 1,
+		"CF20: three paladins share ONE registration (got %d)" % entries)
+	var rate: float = _measure_hit_rate(ctrl, sys, 200)
+	_assert(rate < 0.45,
+		"CF20: the effective rate stays near 30%% with three paladins (got %.3f)" % rate)
+	ctrl.runner = null
+	ctrl.ctx = null
+	ctrl.free()
+
+
+func _test_legacy_registry_never_receives_attack_of_opportunity() -> void:
+	# TD-04: the legacy registry must not receive the shipping
+	# Attack of Opportunity resource.
+	#
+	# The shipping resource is the PHASE-3 view (trigger = &"",
+	# event_type = UNIT_MOVE_STARTED). Across the whole project
+	# history the only legacy poll was &"unit_attacked", so a legacy
+	# AoO could never be consumed: registering it was a zombie.
+	_reset_reaction_system()
+	# A FIXED seed is required: the enemy wave is drawn from a random
+	# pool, so an unseeded battle might not contain any class that
+	# used to receive the zombie registration. The detector must be
+	# deterministic, otherwise a regression could hide behind an
+	# unlucky draw.
+	RngServiceScript.seed_run(20260903)
+	var ctrl = RunControllerScript.new()
+	ctrl.state.create_unit(&"paladin", 100, RunUnit.LOCATION_BOARD)
+	_assert(ctrl.start_battle(), "CF21: the battle started")
+	var node = _reaction_system_node()
+	var sys = node.get("_inner")
+	var classes: int = 0
+	for def_id in sys._reactions.keys():
+		classes += 1
+		var entries: Array = sys._reactions[def_id]
+		for entry in entries:
+			_assert(StringName(entry.get("id")) != &"attack_of_opportunity",
+				"CF21: the legacy registry holds no attack-of-opportunity entry (class %s)"
+					% String(def_id))
+	# The check above is only meaningful when the registry actually
+	# holds the classes that used to receive the zombie registration.
+	_assert(classes > 0,
+		"CF21: the legacy registry is not empty, so the scan was meaningful")
+	ctrl.runner = null
+	ctrl.ctx = null
+	ctrl.free()
+
+
+func _test_shipping_attack_of_opportunity_stays_phase3_only() -> void:
+	# TD-04: the shipping AoO resource must keep the Phase-3 shape.
+	# Rolling it back to a legacy trigger would re-introduce a
+	# legacy reaction that no legacy code can consume.
+	var aoo: Resource = ContentDB_static.get_by_id(&"attack_of_opportunity")
+	_assert(aoo != null, "CF22: the shipping AoO resource exists")
+	if aoo == null:
+		return
+	_assert(StringName(aoo.get("trigger")) == &"",
+		"CF22: the shipping AoO keeps the empty Phase-3 trigger (got '%s')"
+			% String(aoo.get("trigger")))
+	_assert(int(aoo.get("event_type")) == 11,
+		"CF22: the shipping AoO keeps event_type UNIT_MOVE_STARTED (got %d)"
+			% int(aoo.get("event_type")))
+	_assert(int(aoo.get("effect_kind")) == 5,
+		"CF22: the shipping AoO keeps effect_kind PERFORM_ATTACK (got %d)"
+			% int(aoo.get("effect_kind")))
+
+
+func _test_phase3_provider_still_finds_attack_of_opportunity() -> void:
+	# TD-04: removing the zombie legacy registration must NOT disable
+	# the real Phase-3 AoO. The Phase-3 provider discovers the
+	# reaction from the unit's own reaction_ids.
+	var knight: Resource = ContentDB_static.get_by_id(&"knight")
+	_assert(knight != null, "CF23: the knight unit definition exists")
+	if knight == null:
+		return
+	var ids: Array = knight.get("reaction_ids")
+	_assert(ids.has(&"attack_of_opportunity"),
+		"CF23: the knight still owns the attack-of-opportunity reaction id")
+	var aoo: Resource = ContentDB_static.get_by_id(&"attack_of_opportunity")
+	_assert(aoo != null, "CF23: the shipping AoO resource is still resolvable")
 
 
 ## A minimal legacy Burn status definition.
