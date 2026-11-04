@@ -69,6 +69,20 @@ def main(argv):
     if os.path.isfile(probe_src):
         shutil.copyfile(probe_src, probe_dst)
 
+    # A freshly checked-out worktree has NO .godot cache, so Godot
+    # cannot resolve the class_name registry and the probe fails with
+    # "Parse Error: Could not resolve external class member". The
+    # editor import builds that registry.
+    #
+    # The candidate tree normally already has the cache (the CI job
+    # imports it), but the baseline worktree never does.
+    for root in (baseline, candidate):
+        if not os.path.isdir(os.path.join(root, ".godot")):
+            print("importing the project cache in %s ..." % root)
+            subprocess.run([args.godot, "--headless", "--path", root,
+                            "--editor", "--quit"],
+                           capture_output=True, text=True, timeout=1800)
+
     out_dir = os.path.join(os.environ.get("TEMP", "/tmp"), "ah_semantic_differential")
     os.makedirs(out_dir, exist_ok=True)
     base_jsonl = os.path.join(out_dir, "baseline.jsonl")
