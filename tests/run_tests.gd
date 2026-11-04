@@ -63,6 +63,7 @@ const RunDomainStateScript = preload("res://core/progression/run_domain_state.gd
 const RunStateV4MapperScript = preload("res://core/progression/run_state_v4_mapper.gd")
 const MetaProfileScript = preload("res://core/progression/meta_profile.gd")
 const MainMenuScript = preload("res://scenes/main_menu/main_menu.gd")
+const RunLaunchRequestScript = preload("res://core/progression/run_launch_request.gd")
 const RootSceneScript = preload("res://scenes/root/root_scene.gd")
 const RewardModalScript = preload("res://scenes/reward/reward_modal.gd")
 const SaveSvcScript = preload("res://core/utils/save_manager.gd")
@@ -4400,19 +4401,24 @@ func _test_root_scene_is_full_rect_control() -> void:
 func _test_main_menu_routes_run_request_without_tree_replacement() -> void:
 	print("[test] Web UI: MainMenu emits run_requested without replacing /root")
 	var menu: Control = MainMenuScript.new()
-	_assert(menu.has_signal("run_requested"), "MainMenu exposes run_requested(seed)")
+	_assert(menu.has_signal("run_requested"), "MainMenu exposes run_requested(request)")
 	if not menu.has_signal("run_requested"):
 		menu.free()
 		return
-	var received_seed: Array[int] = [0]
-	menu.connect("run_requested", func(seed: int) -> void: received_seed[0] = seed)
-	menu._start_battle_scene(24680)
-	_assert(received_seed[0] == 24680, "MainMenu routes seed through RootScene signal")
+	# The launch request carries the explicit intent and the seed.
+	var received: Array = [null]
+	menu.connect("run_requested", func(request: RunLaunchRequestScript) -> void: received[0] = request)
+	menu._start_battle_scene(RunLaunchRequestScript.new_run(24680))
+	var req = received[0]
+	_assert(req != null, "MainMenu routes the launch request through RootScene signal")
+	if req != null:
+		_assert(req.seed == 24680, "MainMenu routes the seed through the launch request")
+		_assert(req.is_new_run(), "the request carries the NEW_RUN intent")
 	menu.free()
 	var root_scene: Control = RootSceneScript.new()
 	root_scene._ready()
 	var routed_menu: Control = root_scene.get_main_menu()
-	routed_menu._start_battle_scene(86420)
+	routed_menu._start_battle_scene(RunLaunchRequestScript.new_run(86420))
 	_assert(root_scene.get_current_view() == "battle", "RootScene switches to battle view")
 	_assert(root_scene.get_battle_scene() != null, "RootScene lazily creates BattleScene")
 	_assert(not routed_menu.visible, "RootScene hides MainMenu without replacing /root")

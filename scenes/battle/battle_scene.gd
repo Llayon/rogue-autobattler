@@ -261,10 +261,10 @@ func apply_launch_request(request: RunLaunchRequestScript) -> void:
 	_refresh_hud()
 	_refresh_status()
 	if not started:
-		# The run did not start: go back to the menu so the player can
-		# pick another action.
-		if has_method("request_main_menu"):
-			request_main_menu()
+		# The run did not start. The live state and the save are
+		# untouched; the router decides what to show next.
+		GameLog.warn("battle_scene", "the launch request did not start a run",
+			{"seed": request.seed})
 
 
 ## Starts a brand new run with a fresh seed (the "R" shortcut).
