@@ -79,6 +79,15 @@ func restore_snapshot(data: Dictionary) -> bool:
 
 
 ## Возвращает текущий offer (read-only copy).
+## Clears the offer.
+##
+## RI-07: the offer belongs to the run. A new run must not show an
+## offer that was generated for the previous one.
+func reset_offer() -> void:
+	_offered_ids.clear()
+	_round_index = 0
+
+
 func offered_ids() -> Array[StringName]:
 	return _offered_ids.duplicate()
 

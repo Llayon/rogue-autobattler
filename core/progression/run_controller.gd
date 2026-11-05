@@ -88,6 +88,11 @@ func start_run(seed_value: int = 0) -> void:
 	if seed_value == 0:
 		seed_value = Rng.randi_range(1, 999999)
 	Rng.seed_run(seed_value)
+	# RI-07: the transient runtime belongs to the run, so a new run
+	# starts from a clean one. The map is the important case: it is
+	# created LAZILY in `_enter_map`, so a map that survived here
+	# would make the new run continue in the middle of the old one.
+	_reset_transient_runtime()
 	# Fresh canonical live state. Sequence counters start at 1.
 	state = RunDomainStateScript.new()
 	state.seed = seed_value
@@ -983,6 +988,22 @@ func _write_outcome() -> bool:
 		GameLog.error("run", "the outcome checkpoint failed to write",
 			{"seed": state.seed})
 	return written
+
+## Resets the transient runtime of a finished or abandoned run.
+##
+## RI-07: the map, the reward offer, the battle runtime and the
+## participant bridge belong to the RUN, not to the controller. A new
+## run must start from a clean runtime: the map is created lazily, so
+## a map that survived would make the new run continue in the middle
+## of the old one, and the reward offer would be the one that was
+## generated for the previous run.
+func _reset_transient_runtime() -> void:
+	encounter_map = null
+	reward.reset_offer()
+	runner = null
+	ctx = null
+	_battle_participants = null
+	_battle_outcome_applied = false
 
 ## S3.3: загружает RunDomainState из диска по seed и продолжает ран.
 ## Phase 1 / T3F.7: live state is RunDomainState. We load the
