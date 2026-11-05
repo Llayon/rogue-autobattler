@@ -1,0 +1,145 @@
+{
+  "gauntlet": "RUN INTEGRITY & PERSISTENCE",
+  "baseline": {
+    "head": "dcab44ea4cab83471eb53c3c49cd5c606264badb",
+    "canonical_phase3": "dcab44ea4cab83471eb53c3c49cd5c606264badb",
+    "canonical_master": "02fe83ef378d13965184c6224a512a91ae6263a1",
+    "origin_master": "ba0fd818f552b47ca7e9db61d2d793ce0a85230d",
+    "phase3_ci": "success (run 41820309414, A-H EXECUTED against bc504ac, PASS)",
+    "ahead_behind": "0/0",
+    "worktree": "clean (0 tracked)"
+  },
+  "findings": [
+    {
+      "id": "RI-01",
+      "title": "Continue starts a new run",
+      "status": "CLOSED",
+      "evidence": "CLOSED in 8dd3469/7f7162f/5ea09eb: explicit RunLaunchRequest (NEW_RUN/CONTINUE), the Continue path calls resume_run(), a failed Continue creates no replacement run and never overwrites the save. Suite: tests/run_integrity/continue_routing_test.gd (16/0).",
+      "closed": true
+    },
+    {
+      "id": "RI-02",
+      "title": "save DTO does not represent the actual checkpoint",
+      "status": "CLOSED",
+      "evidence": "CLOSED in 952b0e5: core/save/save_schema_v5.gd is the canonical checkpoint schema. The v4 hardcodes (phase=prep, shop/map/rewards={}) are gone; the wire phase is prep/map/reward/merchant. Suite: tests/run_integrity/checkpoint_roundtrip_test.gd (41/0).",
+      "closed": true
+    },
+    {
+      "id": "RI-03",
+      "title": "resume reconstructs random state instead of restoring it",
+      "status": "CLOSED",
+      "evidence": "CLOSED in bf2a157 + 03e7992: the subsystems have exact snapshot/restore (EncounterMap, Shop, ShopScreen merchant, RewardScreen), the resume restores instead of regenerating, and the v5 load path applies the semantic gate. Suite: tests/run_integrity/subsystem_snapshot_test.gd (37/0), checkpoint_roundtrip_test.gd (41/0).",
+      "closed": true
+    },
+    {
+      "id": "RI-04",
+      "title": "RNG continuation is not persisted",
+      "status": "CLOSED",
+      "evidence": "CLOSED in 952b0e5 + 3752907 + 48a08d8: rng.state is persisted as a lossless decimal string (the machine state is NOT an IEEE-754 safe integer) and the machine state is ALWAYS restored, before the live commit. Suite: tests/run_integrity/rng_wire_precision_test.gd (64/0), rng_resume_continuity_test.gd (10/0).",
+      "closed": true
+    },
+    {
+      "id": "RI-05",
+      "title": "battle result is saved before it is applied",
+      "status": "CONFIRMED",
+      "evidence": "core/progression/run_controller.gd:616 save_now() is called BEFORE state.wins += 1 (:621), state.gold += ... (:622), state.round_index += 1 (:629). The loss branch (:636-644) applies losses/lives/round and NEVER calls save_now() - the on-disk state stays pre-battle.",
+      "closed": false
+    },
+    {
+      "id": "RI-06",
+      "title": "pending reward is not actually persisted",
+      "status": "CLOSED",
+      "evidence": "CLOSED in 952b0e5: the reward offer is part of the v5 checkpoint (offered ids + order + round index) and is restored, not regenerated. Suite: tests/run_integrity/checkpoint_roundtrip_test.gd (41/0).",
+      "closed": true
+    },
+    {
+      "id": "RI-07",
+      "title": "new run may retain old runtime objects",
+      "status": "CONFIRMED",
+      "evidence": "core/progression/run_controller.gd:76-105 start_run() creates a fresh state and calls _refresh_shop(), but never resets encounter_map, reward, runner, ctx, _battle_participants or the phase-dependent flags. The only battle entry point in core/ is start_battle() (run_controller.gd:473).",
+      "closed": false
+    },
+    {
+      "id": "RI-08",
+      "title": "final boss termination depends only on battle count",
+      "status": "CONFIRMED",
+      "evidence": "core/progression/run_controller.gd:628 and :909 terminate the run only on state.round_index > BalanceScript.MAX_ROUND. core/encounter/encounter_map.gd:45-46 and :99-106 build an explicit BOSS node on depth 10, but the boss node does not drive the run completion.",
+      "closed": false
+    },
+    {
+      "id": "RI-09",
+      "title": "command/domain guards are incomplete",
+      "status": "CONFIRMED",
+      "evidence": "Only 7 phase guards exist (run_controller.gd:110, 391, 474, 802, 828, 849, 885). board_to_bench (:128), bench_to_board (:141), swap_board_units (:154), swap_units_by_id (:175), board_to_bench_by_id (:183), bench_to_board_by_id (:198), equip_item_by_id (:216), unequip_item_by_id (:225), move_to_board (:233), grant_item (:243), remove_item_at (:261), equip_item_at (:289), unequip_item_at (:301) have NO phase guard.",
+      "closed": false
+    },
+    {
+      "id": "RI-10",
+      "title": "bench capacity / purchase atomicity",
+      "status": "CONFIRMED",
+      "evidence": "core/progression/run_controller.gd:109-126 buy_unit() checks phase, offer and gold, then mutates gold (:119), creates the unit (:121) and takes the offer (:122) - it never checks the bench capacity. core/balance.gd:83 MAX_BENCH_UNITS = 4 exists but is not consulted here.",
+      "closed": false
+    },
+    {
+      "id": "RI-11",
+      "title": "no run-integrity test suite exists",
+      "status": "CONFIRMED",
+      "evidence": "tests/ has no run_integrity/ directory. The existing suites cover the v4 mapper and the save repository, but none of them asserts a checkpoint round trip, RNG continuation, battle outcome transaction or phase guard.",
+      "closed": false
+    },
+    {
+      "id": "RI-12",
+      "title": "schema v5 does not exist",
+      "status": "CLOSED",
+      "evidence": "CLOSED in 952b0e5: core/save/save_schema_v5.gd is the canonical checkpoint-capable schema, with a pure mapper (core/progression/run_checkpoint_v5_mapper.gd) and the v4->v5 migration path. Suite: tests/run_integrity/v4_migration_test.gd (9/0), checkpoint_determinism_test.gd (9/0).",
+      "closed": true
+    }
+  ],
+  "out_of_scope": [
+    "RunSession extraction",
+    "RunFlow class extraction",
+    "BattleResultApplier architectural extraction",
+    "BattleBackend interface",
+    "Legacy/ECS backend switch",
+    "Ability Execution Bridge",
+    "Battle Presenter",
+    "legacy battle removal",
+    "large GameBus rewrite"
+  ],
+  "verdict": "IN PROGRESS",
+  "notes": "All twelve source-confirmed findings were re-audited on the actual HEAD dcab44e. Every one of them is still present. The battle backend, the save repository hardening and the battle content are NOT touched by this gauntlet.",
+  "critic_rounds": [
+    {
+      "round": 1,
+      "findings": "H-1 (a v4 save taken after the map was entered could never be continued), m-1 (the encounter-map overlay reseeded the global run RNG), m-2 (the v5 load path had no semantic validation)",
+      "fixes": "ad9d46b, 326c6a9, 7f6fdbc"
+    },
+    {
+      "round": 2,
+      "findings": "HIGH-1 (the extracted validator was weaker than the original v4 gate: the bidirectional equipment consistency was missing), HIGH-2 (the v5 load path CRASHED on a shape-invalid file: a Dictionary was passed to add_diagnostic), MINOR-1 (the seed-0 guard skipped the stream restore), MINOR-2 (the v4 migration did not state the map fallback consequence)",
+      "fixes": "17a5a7d, f7f727b, 48a08d8, 7420885, 0abb48c"
+    },
+    {
+      "round": 3,
+      "findings": "M-1 (the v5 canonical LOAD path did not run the semantic gate), M-2 (the v5 SAVE path applied only validate_shape, so the real gate fired after the commit and a fresh slot kept the invalid file), MINOR-1 (the sequence cursor rule rejected a legal live state after a removal), MINOR-2 (the RNG restore happened after the live commit), MINOR-3 (the mapper accepted a lossy numeric rng state)",
+      "fixes": "03e7992, e0f1e6f, 272292b, d6df480, c2db5d9"
+    }
+  ],
+  "cursor_contract": {
+    "decision": "the project owner chose the monotonic-cursor rule",
+    "rule": "next_seq > max_live_id AND next_seq >= 1",
+    "reason": "the allocator never reuses or wraps a consumed id and a removal does not roll the cursor back, so a gap is normal and valid; tombstones are NOT introduced",
+    "gates_changed": "core/save/legacy_save_v1_to_v4_migrator.gd and core/save/run_domain_semantic_validator.gd (both, so they keep agreeing)",
+    "suite": "tests/run_integrity/sequence_cursor_contract_test.gd"
+  },
+  "final_state": {
+    "head": "c2db5d9",
+    "ahead_behind": "23/0",
+    "push": "NOT performed (no explicit permission)",
+    "runner": "89 suites / 8378 assertions / 0 fail / 0 unparsed",
+    "ci_gates": "10/10 clean",
+    "a_h": "PASS (8 fixtures per side)",
+    "error_scan": "89 suites, 0 markers",
+    "lint": "0 errors, 5 warnings (baseline)"
+  }
+}
