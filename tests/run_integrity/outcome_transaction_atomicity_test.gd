@@ -29,6 +29,7 @@ const RunSaveRepositoryScript = preload("res://core/save/run_save_repository.gd"
 const MetaProfileScript = preload("res://core/progression/meta_profile.gd")
 const SaveServiceScript = preload("res://core/save/save_service.gd")
 const BalanceScript = preload("res://core/balance.gd")
+const EncounterTypeScript = preload("res://core/encounter/encounter_type.gd")
 const SaveLoadResultScript = preload("res://core/save/save_load_result.gd")
 
 const ISOLATED_DIR: String = "user://run_integrity_ri05_tx/"
@@ -53,12 +54,17 @@ func _initialize() -> void:
 	quit(0)
 
 
-## The MAX_ROUND win must NOT write a checkpoint: the run is over, so
-## there is nothing to write. Writing it and removing it afterwards
-## leaves a window in which a finished run is resumable.
+## The boss win must NOT write a checkpoint: the run is over, so there
+## is nothing to write. Writing it and removing it afterwards leaves a
+## window in which a finished run is resumable.
+##
+## RI-08: the completion is the BOSS, so the case models a fight on
+## the boss node -- the bare round counter is not the terminator.
 func _test_A_the_max_round_win_writes_nothing() -> void:
 	var ctrl: Node = await _make_controller(560001)
 	ctrl.state.round_index = BalanceScript.MAX_ROUND
+	ctrl._enter_map()
+	ctrl.state.current_encounter_id = _boss_node_id(ctrl)
 	var writes_before: int = ctrl.save_repository.get_save_count()
 	await _finish_battle(ctrl, 0)
 	var writes_after: int = ctrl.save_repository.get_save_count()
@@ -155,6 +161,17 @@ func _finish_battle(ctrl: Node, winner: int) -> void:
 	ctrl.runner._end_battle()
 	ctrl.tick_battle(0.016)
 	await process_frame
+
+
+## The id of the boss node of the map.
+func _boss_node_id(ctrl: Node) -> int:
+	if ctrl.encounter_map == null:
+		ctrl._enter_map()
+	for depth in range(1, BalanceScript.MAP_MAX_DEPTH + 1):
+		for node in ctrl.encounter_map.get_layer_nodes(depth):
+			if node.type == EncounterTypeScript.Kind.BOSS:
+				return int(node.id)
+	return -1
 
 
 func _live_state(ctrl: Node) -> Dictionary:

@@ -793,14 +793,20 @@ func _on_battle_ended() -> void:
 		# counters. Writing it later left a window in which the disk
 		# held the outcome but no offer, and the resumed run could not
 		# reach the reward at all.
-		# S3.1: победа на MAX_ROUND завершает ран.
+		# S3.1: победа над боссом завершает ран.
+		#
+		# RI-08: the completion is the BOSS, not the count of the won
+		# battles. The round grows by one per won battle, while the map
+		# has 10 layers with 2..4 nodes each, so the count could run
+		# out on the EARLY layers: the run ended on round 11 with the
+		# boss never fought.
 		#
 		# The end of the run is decided BEFORE the write: a finished
 		# run must NOT write a checkpoint, not even to delete it right
 		# afterwards. Writing it first left a window in which a
 		# finished run was resumable, and the window was not tight: it
 		# spanned the reward emission and the meta-unlock draws.
-		if state.round_index > BalanceScript.MAX_ROUND:
+		if _is_boss_encounter(state.current_encounter_id):
 			_end_run(true)
 			return
 		_enter_reward_offer()
@@ -1033,6 +1039,18 @@ func _grant_reward_item(item_id: StringName) -> bool:
 	GameLog.info("inventory", "item granted",
 		{"id": item_id, "size": state.items.size()})
 	return true
+
+## Whether the given encounter node was the boss.
+##
+## RI-08: the run is terminated by the BOSS, so the completion must
+## know whether the fight it just won was the final one.
+func _is_boss_encounter(node_id: int) -> bool:
+	if encounter_map == null:
+		return false
+	var node = encounter_map.get_node(node_id)
+	if node == null:
+		return false
+	return node.type == EncounterTypeScript.Kind.BOSS
 
 ## S3.3: загружает RunDomainState из диска по seed и продолжает ран.
 ## Phase 1 / T3F.7: live state is RunDomainState. We load the
@@ -1344,14 +1362,12 @@ func _apply_service_effect(node) -> void:
 	# После service-эффекта — обратно в MAP (если эффект не оставил нас в другой фазе).
 	if stay_in_current_phase:
 		return
-	if state.round_index > BalanceScript.MAX_ROUND:
-		_end_run(true)
-		return
 	if encounter_map == null:
 		return
 	var available: Array[int] = encounter_map.get_available_next_ids()
 	if available.is_empty():
-		# Нет следующих ходов (boss-only path) — завершаем.
+		# Нет следующих ходов: это конец карты, то есть победа над
+		# боссом. Завершаем.
 		_end_run(true)
 		return
 	_set_phase(Phase.MAP)

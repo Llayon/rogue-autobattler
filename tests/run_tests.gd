@@ -1712,9 +1712,25 @@ func _test_run_controller_win_at_max_round() -> void:
 	get_root().add_child.call_deferred(ctrl)
 	await process_frame
 	ctrl.start_run(42)
-	# Сымитируем 10-ю победу: round_index=10, wins=9; после _on_battle_ended → round_index=11, GAMEOVER, won=true.
+	# The run is on the map, and the current encounter is the BOSS:
+	# RI-08 made the boss the terminator of the run, so the final
+	# fight is what ends it. The old version of this test modelled ten
+	# wins WITHOUT a map, which the game cannot reach -- every battle
+	# after the first one is fought on a map node.
 	ctrl.state.round_index = BalanceScript.MAX_ROUND
 	ctrl.state.wins = BalanceScript.MAX_ROUND - 1
+	ctrl._enter_map()
+	# The boss node of the map.
+	var boss_id: int = -1
+	for depth in range(1, BalanceScript.MAP_MAX_DEPTH + 1):
+		for node in ctrl.encounter_map.get_layer_nodes(depth):
+			if node.type == EncounterTypeScript.Kind.BOSS:
+				boss_id = int(node.id)
+				break
+		if boss_id >= 0:
+			break
+	_assert(boss_id >= 0, "the map has a boss node")
+	ctrl.state.current_encounter_id = boss_id
 	# Ловим сигнал run_ended.
 	var won_flag: Array = [null]  # boxed, чтобы lambda видела
 	ctrl.run_ended.connect(func(w: bool) -> void: won_flag[0] = w)
@@ -1726,7 +1742,7 @@ func _test_run_controller_win_at_max_round() -> void:
 	# Проверяем: round_index 11, phase GAMEOVER, wins=10, run_ended(true).
 	_assert(ctrl.state.round_index == BalanceScript.MAX_ROUND + 1, "round_index 10→11 (got %d)" % ctrl.state.round_index)
 	_assert(ctrl.state.wins == BalanceScript.MAX_ROUND, "wins 9→10 (got %d)" % ctrl.state.wins)
-	_assert(ctrl.phase == RunControllerScript.Phase.GAMEOVER, "phase = GAMEOVER после 10-й победы (got %d)" % ctrl.phase)
+	_assert(ctrl.phase == RunControllerScript.Phase.GAMEOVER, "phase = GAMEOVER после победы над боссом (got %d)" % ctrl.phase)
 	_assert(won_flag[0] == true, "run_ended(true) emitted (got %s)" % str(won_flag[0]))
 	_cleanup_ctrl(ctrl)
 
@@ -1929,6 +1945,21 @@ func _test_run_controller_max_round_no_reward() -> void:
 	# Round 10 → wins 9 → после win: round_index=11, GAMEOVER (skip reward).
 	ctrl.state.round_index = BalanceScript.MAX_ROUND
 	ctrl.state.wins = BalanceScript.MAX_ROUND - 1
+	# RI-08: the run is terminated by the BOSS. The old version of
+	# this test modelled ten wins WITHOUT a map, which the game cannot
+	# reach -- every battle after the first one is fought on a map
+	# node. The run is on the map, and the encounter is the boss.
+	ctrl._enter_map()
+	var boss_id: int = -1
+	for depth in range(1, BalanceScript.MAP_MAX_DEPTH + 1):
+		for node in ctrl.encounter_map.get_layer_nodes(depth):
+			if node.type == EncounterTypeScript.Kind.BOSS:
+				boss_id = int(node.id)
+				break
+		if boss_id >= 0:
+			break
+	_assert(boss_id >= 0, "the map has a boss node")
+	ctrl.state.current_encounter_id = boss_id
 	ctrl.start_battle()
 	ctrl.runner.state.phase = BattleStateScriptForCtrl.Phase.ENDED
 	ctrl.runner.state.winner_team = 0
