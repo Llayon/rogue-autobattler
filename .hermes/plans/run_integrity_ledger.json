@@ -55,9 +55,9 @@
     {
       "id": "RI-07",
       "title": "new run may retain old runtime objects",
-      "status": "CONFIRMED",
-      "evidence": "core/progression/run_controller.gd:76-105 start_run() creates a fresh state and calls _refresh_shop(), but never resets encounter_map, reward, runner, ctx, _battle_participants or the phase-dependent flags. The only battle entry point in core/ is start_battle() (run_controller.gd:473).",
-      "closed": false
+      "status": "CLOSED",
+      "evidence": "CLOSED in 314ef75. start_run created a fresh state and refreshed the shop, but it never reset the transient runtime: encounter_map, reward, runner, ctx and _battle_participants. The map is created LAZILY in _enter_map, so the new run inherited the PREVIOUS run's map -- the visited nodes and the current node -- and continued in the middle of the old map instead of at its start. The reward offer survived as well. The transient runtime now belongs to the run: _reset_transient_runtime clears it before the new state is built, and RewardScreen.reset_offer was added for it. Suite: tests/run_integrity/new_run_isolation_test.gd (4 cases).",
+      "closed": true
     },
     {
       "id": "RI-08",
@@ -252,6 +252,12 @@
       "ci_gates": "10/10 clean",
       "lint": "0 errors, 5 warnings (baseline)"
     },
+    "push": "NOT performed (no explicit permission)"
+  },
+  "ri07": {
+    "baseline": "e7135d3",
+    "head": "314ef75",
+    "suite": "tests/run_integrity/new_run_isolation_test.gd (4 cases)",
     "push": "NOT performed (no explicit permission)"
   }
 }
