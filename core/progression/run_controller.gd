@@ -151,10 +151,21 @@ const COMMAND_PHASES: Dictionary = {
 	# The inventory, apart from the equipment: only between the
 	# battles. Granting and removing an item changes what the next
 	# battle starts with.
+	#
+	# The game's OWN reward delivery (the TREASURE node and the
+	# combat drop) does NOT go through this command: it uses the
+	# internal `_grant_reward_item`, which is not a command and has no
+	# phase guard. The delivery happens in the MAP and the BATTLE
+	# phase, where a command would be refused.
 	"grant_item": [Phase.PREP],
 	"remove_item_at": [Phase.PREP],
-	"equip_item_at": [Phase.PREP],
-	"unequip_item_at": [Phase.PREP],
+	# The index pair of the equipment commands carries the same rule
+	# as the by-id pair: two commands that mean the same thing must
+	# not have different phase sets.
+	"equip_item_at": [Phase.PREP, Phase.BATTLE, Phase.REWARD,
+		Phase.MAP, Phase.SERVICE],
+	"unequip_item_at": [Phase.PREP, Phase.BATTLE, Phase.REWARD,
+		Phase.MAP, Phase.SERVICE],
 	# The equipment: in every live phase.
 	"equip_item_by_id": [Phase.PREP, Phase.BATTLE, Phase.REWARD,
 		Phase.MAP, Phase.SERVICE],
@@ -353,14 +364,7 @@ func grant_item(item_id: StringName) -> bool:
 	if item_id == &"":
 		GameLog.warn("inventory", "grant_item: empty id")
 		return false
-	if state.items.size() >= BalanceScript.MAX_INVENTORY:
-		GameLog.warn("inventory", "grant_item: inventory full",
-			{"size": state.items.size(), "max": BalanceScript.MAX_INVENTORY})
-		return false
-	state.create_item(item_id)
-	GameLog.info("inventory", "item granted",
-		{"id": item_id, "size": state.items.size()})
-	return true
+	return _grant_reward_item(item_id)
 
 
 ## Удаляет предмет по индексу (compatibility coordinate).
@@ -1005,6 +1009,31 @@ func _reset_transient_runtime() -> void:
 	_battle_participants = null
 	_battle_outcome_applied = false
 
+## Grants an item to the run.
+##
+## This is the INTERNAL grant: the game's own reward delivery (the
+## TREASURE node and the post-victory combat drop) goes through it, and
+## it is not a player command, so it has no phase guard.
+##
+## The player-facing `grant_item` is a COMMAND: it is PREP-only, so a
+## caller cannot hand out items from anywhere else. The two are kept
+## apart deliberately: the reward delivery happens in MAP and in
+## BATTLE, where the command would be refused.
+##
+## The check of the inventory capacity is shared, so both paths obey
+## it.
+func _grant_reward_item(item_id: StringName) -> bool:
+	if item_id == &"":
+		return false
+	if state.items.size() >= BalanceScript.MAX_INVENTORY:
+		GameLog.warn("inventory", "grant_item: inventory full",
+			{"size": state.items.size(), "max": BalanceScript.MAX_INVENTORY})
+		return false
+	state.create_item(item_id)
+	GameLog.info("inventory", "item granted",
+		{"id": item_id, "size": state.items.size()})
+	return true
+
 ## S3.3: загружает RunDomainState из диска по seed и продолжает ран.
 ## Phase 1 / T3F.7: live state is RunDomainState. We load the
 ## canonical v4 DTO through SaveService.load_run_v4 (which goes
@@ -1363,7 +1392,9 @@ func _apply_treasure_effect() -> void:
 	var item_id: StringName = _pick_random_item_id()
 	var item_granted: bool = false
 	if item_id != &"":
-		item_granted = grant_item(item_id)
+		# The internal grant: the reward delivery happens in the MAP
+		# phase, where the player-facing command is refused.
+		item_granted = _grant_reward_item(item_id)
 	GameLog.info("run", "TREASURE",
 		{
 			"gold": state.gold - gold_before,
@@ -1381,7 +1412,10 @@ func _grant_combat_drop() -> bool:
 	var item_id: StringName = _pick_random_item_id()
 	if item_id == &"":
 		return false
-	var ok: bool = grant_item(item_id)
+	# The internal grant: the combat drop happens in the BATTLE phase
+	# (the outcome is applied before the phase changes), where the
+	# player-facing command is refused.
+	var ok: bool = _grant_reward_item(item_id)
 	if ok:
 		GameLog.info("run", "Combat drop", {"id": item_id, "wins": state.wins})
 	return ok

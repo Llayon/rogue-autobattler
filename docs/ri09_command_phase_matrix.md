@@ -27,30 +27,57 @@ PREP=0  BATTLE=1  REWARD=2  GAMEOVER=3  MAP=4  SERVICE=5
 
 ## The commands
 
-| command | mutates | allowed phases | existing guard |
+| command | mutates | allowed phases | guard |
 |---|---|---|---|
-| `start_run` | the whole run | any (the entry point) | none, by design |
-| `buy_unit` | gold, bench units, the shop offer | PREP | PREP ✓ |
-| `buy_item` | gold, the inventory | PREP | PREP ✓ |
-| `board_to_bench` | the unit location | PREP | **none** ✗ |
-| `bench_to_board` | the unit location | PREP | **none** ✗ |
-| `swap_board_units` | the unit order | PREP | **none** ✗ |
-| `swap_units_by_id` | the unit order | PREP | **none** ✗ |
-| `board_to_bench_by_id` | the unit location | PREP | **none** ✗ |
-| `bench_to_board_by_id` | the unit location | PREP | **none** ✗ |
-| `equip_item_by_id` | the inventory, the equipment | PREP, BATTLE, REWARD, MAP, SERVICE | **none** ✗ |
-| `unequip_item_by_id` | the inventory, the equipment | PREP, BATTLE, REWARD, MAP, SERVICE | **none** ✗ |
-| `move_to_board` | the unit location | PREP | **none** ✗ |
-| `grant_item` | the inventory | PREP | **none** ✗ |
-| `remove_item_at` | the inventory | PREP | **none** ✗ |
-| `equip_item_at` | the inventory, the equipment | PREP | **none** ✗ |
-| `unequip_item_at` | the inventory, the equipment | PREP | **none** ✗ |
-| `exit_shop_to_map` | the phase | PREP | PREP ✓ |
-| `start_battle` | the phase, the battle | PREP, MAP | PREP+MAP ✓ |
-| `tick_battle` | the battle | BATTLE | the scene gates it ✓ |
-| `choose_reward` | the board, the reward | REWARD | REWARD ✓ |
-| `skip_reward` | the phase, the reward | REWARD | REWARD ✓ |
-| `_on_node_selected` | the map, the phase | MAP | MAP ✓ |
+| `start_run` | the whole run | any (the entry point) | unguarded, by design |
+| `buy_unit` | gold, bench units, the shop offer | PREP | the matrix |
+| `buy_item` | gold, the inventory | PREP | the matrix |
+| `board_to_bench` | the unit location | PREP | the matrix |
+| `bench_to_board` | the unit location | PREP | the matrix |
+| `swap_board_units` | the unit order | PREP | the matrix |
+| `swap_units_by_id` | the unit order | PREP | the matrix |
+| `board_to_bench_by_id` | the unit location | PREP | the matrix |
+| `bench_to_board_by_id` | the unit location | PREP | the matrix |
+| `equip_item_by_id` | the inventory, the equipment | PREP, BATTLE, REWARD, MAP, SERVICE | the matrix |
+| `unequip_item_by_id` | the inventory, the equipment | PREP, BATTLE, REWARD, MAP, SERVICE | the matrix |
+| `move_to_board` | the unit location | PREP | the matrix |
+| `grant_item` | the inventory | PREP | the matrix |
+| `remove_item_at` | the inventory | PREP | the matrix |
+| `equip_item_at` | the inventory, the equipment | PREP, BATTLE, REWARD, MAP, SERVICE | the matrix |
+| `unequip_item_at` | the inventory, the equipment | PREP, BATTLE, REWARD, MAP, SERVICE | the matrix |
+| `exit_shop_to_map` | the phase | PREP | its own check |
+| `start_battle` | the phase, the battle | PREP, MAP | its own check |
+| `tick_battle` | the battle | BATTLE | the scene gates it |
+| `choose_reward` | the board, the reward | REWARD | its own check |
+| `skip_reward` | the phase, the reward | REWARD | its own check |
+| `_on_node_selected` | the map, the phase | MAP | its own check |
+
+Every row of the matrix is enforced by `COMMAND_PHASES` in
+`core/progression/run_controller.gd`, which is the machine-readable
+form of this table. The commands with "its own check" are not in the
+matrix: they are the phase transitions themselves.
+
+## The reward delivery is NOT a command
+
+The game's own item rewards do NOT go through the `grant_item`
+command, because they are delivered in phases where a command is
+refused:
+
+| reward | phase | path |
+|---|---|---|
+| the TREASURE node's random item | MAP | `_apply_treasure_effect` → `_grant_reward_item` |
+| the post-victory combat drop (35%) | BATTLE | `_grant_combat_drop` → `_grant_reward_item` |
+
+`_grant_reward_item` is an INTERNAL grant: it is not a player command,
+so it has no phase guard, and it is the only path the rewards use.
+
+This separation is what keeps both properties: the player-facing
+`grant_item` stays PREP-only, and the rewards land.
+
+The first version of the matrix made `grant_item` the single path, and
+that silently killed both rewards: the TREASURE item and the combat
+drop were refused in every run (measured: 0/20 drops through the real
+battle path).
 
 ## Why the equipment commands are allowed in every live phase
 
@@ -85,8 +112,10 @@ The GOLD commands (`buy_unit`, `buy_item`) are only editable between
 the battles: they spend gold, and the merchant offer exists only in
 PREP (the MERCHANT effect enters PREP, `run_controller.gd:1283`).
 
-GAMEOVER and SERVICE admit no mutation at all: the run is over, and
-the service effect is applied by the map flow itself.
+GAMEOVER admits no mutation at all: the run is over. SERVICE is a
+phase that is never entered in the current code, and the equipment
+commands are allowed there for the future, so the phase is not a
+restriction that anything depends on today.
 
 ## The exploitable case
 
