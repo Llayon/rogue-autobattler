@@ -45,6 +45,7 @@ func _initialize() -> void:
 	await _test_C_the_inventory_commands_fail_closed_in_battle()
 	await _test_D_the_commands_still_work_in_the_allowed_phase()
 	await _test_E_a_refusal_mutates_nothing()
+	await _test_G_the_equipment_index_pair_matches_the_by_id_pair()
 	print("")
 	print("=== STAGE 4C: COMMAND PHASE GUARDS: %d pass / %d fail ==="
 		% [_passed, _failed])
@@ -97,9 +98,42 @@ func _test_C_the_inventory_commands_fail_closed_in_battle() -> void:
 	var before: Dictionary = _snapshot(ctrl)
 	_assert(not ctrl.grant_item(&"potion_strength"), "grant_item fails in a battle")
 	_assert(not ctrl.remove_item_at(0), "remove_item_at fails in a battle")
-	_assert(not ctrl.equip_item_at(0, 0), "equip_item_at fails in a battle")
-	_assert(not ctrl.unequip_item_at(0), "unequip_item_at fails in a battle")
 	_assert(_unchanged(ctrl, before), "the inventory commands mutated nothing")
+
+
+## The equipment commands are allowed in every live phase, so the index
+## pair must behave exactly like the by-id pair.
+##
+## The index pair was PREP-only while the by-id pair was allowed
+## everywhere: two commands that mean the same thing had different
+## phase sets, which is the incoherence the matrix set out to remove.
+func _test_G_the_equipment_index_pair_matches_the_by_id_pair() -> void:
+	var ctrl: Node = await _make_controller(570010)
+	ctrl.grant_item(&"potion_strength")
+	var item_id: String = _first_item_id(ctrl)
+	var unit_id: String = _unit_id(ctrl, 0)
+	_assert(item_id != "", "the granted item has an instance id")
+	_assert(ctrl.equip_item_at(0, 0), "equip_item_at works in PREP")
+	_assert(ctrl.unequip_item_at(0), "unequip_item_at works in PREP")
+
+	# The by-id pair in a battle.
+	var ctrl2: Node = await _make_controller(570011)
+	ctrl2.grant_item(&"potion_strength")
+	await _start_battle(ctrl2)
+	var item_id2: String = _first_item_id(ctrl2)
+	_assert(ctrl2.equip_item_by_id(item_id2, _unit_id(ctrl2, 0)),
+		"equip_item_by_id works in a battle")
+	_assert(ctrl2.unequip_item_by_id(item_id2),
+		"unequip_item_by_id works in a battle")
+
+	# The index pair in a battle: the SAME rule.
+	var ctrl3: Node = await _make_controller(570012)
+	ctrl3.grant_item(&"potion_strength")
+	await _start_battle(ctrl3)
+	_assert(ctrl3.equip_item_at(0, 0),
+		"equip_item_at works in a battle, like the by-id pair")
+	_assert(ctrl3.unequip_item_at(0),
+		"unequip_item_at works in a battle, like the by-id pair")
 
 
 ## The guards must not break the legal flows: the board commands work
