@@ -27,6 +27,7 @@ enum Phase { PREP, BATTLE, REWARD, GAMEOVER, MAP, SERVICE }
 
 const CombatantScript = preload("res://core/battle/combatant.gd")
 const BattleRunnerScript = preload("res://core/battle/battle_runner.gd")
+const BattleStateScript = preload("res://core/battle/battle_state.gd")
 const GridScript = preload("res://core/battle/grid.gd")
 const BalanceScript = preload("res://core/balance.gd")
 const EncounterMapScript = preload("res://core/encounter/encounter_map.gd")
@@ -608,19 +609,46 @@ func tick_battle(dt: float) -> void:
 	if runner == null:
 		return
 	runner.step(dt)
-	if runner.state.phase == 2:  # BattleState.Phase.ENDED
+	if runner.state.phase == BattleStateScript.Phase.ENDED:
 		_on_battle_ended()
 
 
+## Applies the outcome of the finished battle and writes the
+## checkpoint.
+##
+## RI-05: the outcome is a TRANSACTION.
+##
+## The outcome used to be applied AFTER `save_now()`, so the checkpoint
+## on the disk was the PRE-outcome state of a battle that had already
+## been fought: a crash between the write and the apply lost the win
+## bonus, the round advance, the combat drop and the reward offer, and
+## the battle would be replayed. The loss branch never wrote at all,
+## so the on-disk state stayed pre-battle.
+##
+## The transaction is now: apply the outcome, then write it. The disk
+## therefore holds the POST-outcome state of a completed battle.
+##
+## The application is IDEMPOTENT. The scene ticks the battle every
+## frame and calls this whenever the runner reports ENDED; nothing
+## consumed that state, so the outcome could be applied twice: a
+## second win bonus, a second combat drop, a second reward offer and a
+## second round advance. The guard consumes the ENDED state, so the
+## second call is a no-op.
 func _on_battle_ended() -> void:
 	# Phase 1 / T3F.5: do NOT introduce new post-battle HP writeback.
 	# Legacy semantics did not persist combat runtime HP back into
 	# run state, and that contract is preserved.
+	if runner == null:
+		return
+	# IDEMPOTENCE: the ENDED state is consumed here. The scene ticks
+	# every frame, so without this the outcome would be applied again
+	# on the very next frame.
+	if runner.state.phase != BattleStateScript.Phase.ENDED:
+		return
+	runner.state.phase = BattleStateScript.Phase.APPLIED
 	var winner: int = runner.state.winner_team
-	# S3.3: auto-save ПОСЛЕ боя, ДО перехода в PREP/REWARD/GAMEOVER.
-	# Это гарантирует, что state на диске = последний завершённый бой.
-	save_now()
-	# Clear battle lifetime bridge AFTER save.
+	# Clear battle lifetime bridge BEFORE the outcome is applied: the
+	# participants belong to the finished battle.
 	if _battle_participants != null:
 		_battle_participants.clear()
 		_battle_participants = null
@@ -632,6 +660,10 @@ func _on_battle_ended() -> void:
 		# обрабатывается silently в _grant_combat_drop.
 		_grant_combat_drop()
 		state.round_index += 1
+		# The TRANSACTION: the outcome is on the disk before the flow
+		# moves on. The write below is the post-outcome checkpoint of
+		# the finished battle.
+		save_now()
 		# S3.1: победа на MAX_ROUND завершает ран.
 		if state.round_index > BalanceScript.MAX_ROUND:
 			_end_run(true)
@@ -645,12 +677,17 @@ func _on_battle_ended() -> void:
 		state.losses += 1
 		state.lives -= 1
 		if state.lives <= 0:
+			# The TRANSACTION: the loss is on the disk too.
+			save_now()
 			_end_run(false)
 		else:
 			state.round_index += 1
+			# The TRANSACTION: the loss is on the disk too.
+			save_now()
 			_set_phase(Phase.PREP)
 			_refresh_shop()
 	else:
+		save_now()
 		_end_run(false)
 
 

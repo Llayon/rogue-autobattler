@@ -2,11 +2,15 @@ class_name BattleState extends Resource
 ## Состояние боя. Ресурс — чтобы можно было сохранять/инспектировать.
 ##
 ## Хранит:
-##   - фазу (PREP / BATTLE / ENDED),
+##   - фазу (PREP / BATTLE / ENDED / APPLIED),
+##
+## APPLIED means the outcome of the finished battle was applied to the
+## run state and written: the battle is over AND its outcome is
+## settled, so it must not be applied a second time.
 ##   - время боя,
 ##   - ссылку на активный BattleRunner (опционально).
 
-enum Phase { PREP, BATTLE, ENDED }
+enum Phase { PREP, BATTLE, ENDED, APPLIED }
 
 const SAVE_VERSION: int = 1
 
