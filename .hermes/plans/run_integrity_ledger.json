@@ -41,9 +41,9 @@
     {
       "id": "RI-05",
       "title": "battle result is saved before it is applied",
-      "status": "CONFIRMED",
-      "evidence": "core/progression/run_controller.gd:616 save_now() is called BEFORE state.wins += 1 (:621), state.gold += ... (:622), state.round_index += 1 (:629). The loss branch (:636-644) applies losses/lives/round and NEVER calls save_now() - the on-disk state stays pre-battle.",
-      "closed": false
+      "status": "CLOSED",
+      "evidence": "CLOSED in f525693 + dfa26d6 + 1b4c58a + 5a804ac. The outcome of a finished battle is now ONE transaction: the outcome is applied first and written after it, in a single write that carries the reward offer, the shop offer and the stream position. The loss branch writes too, after the shop refresh. A finished run removes its file, so it can never be resumed past MAX_ROUND. The idempotence is a one-shot latch in the controller, so even a reset of the runner phase cannot re-apply the outcome. Suite: tests/run_integrity/battle_outcome_transaction_test.gd (9 cases). Negative controls NC-18..NC-24 are honest REDs.",
+      "closed": true
     },
     {
       "id": "RI-06",
@@ -123,6 +123,13 @@
       "round": 3,
       "findings": "M-1 (the v5 canonical LOAD path did not run the semantic gate), M-2 (the v5 SAVE path applied only validate_shape, so the real gate fired after the commit and a fresh slot kept the invalid file), MINOR-1 (the sequence cursor rule rejected a legal live state after a removal), MINOR-2 (the RNG restore happened after the live commit), MINOR-3 (the mapper accepted a lossy numeric rng state)",
       "fixes": "03e7992, e0f1e6f, 272292b, d6df480, c2db5d9"
+    },
+    {
+      "round": 4,
+      "scope": "RI-05 battle outcome transaction + idempotence",
+      "findings": "M1 (the win path was two writes, so the reward offer was lost on a crash between them), M2 (the continuing-loss checkpoint was written before the shop refresh, so it carried a stale shop offer and a stale RNG position), M3 (the game-over path left a resumable 'prep' checkpoint at a finished round), m1..m7 (the magic phase numbers in the runner, the APPLIED doc comment, the state-based idempotence guard, the participant-bridge rationale, the test coverage, the write-failure behaviour)",
+      "fixes": "dfa26d6, 1b4c58a, 5a804ac",
+      "all_reproduced": true
     }
   ],
   "cursor_contract": {
@@ -161,5 +168,30 @@
   "stage_status": {
     "run_checkpoint_rng_continuity": "CLOSED",
     "next": "RI-05 battle outcome transaction + idempotence (a separate package, without the inventory integration mixed in)"
+  },
+  "ri05": {
+    "baseline": "bdaffc8",
+    "head": "5a804ac",
+    "commits": [
+      "c199f65 test(run): characterize the battle outcome transaction gap",
+      "7f74dc8 test(run): characterize the battle outcome transaction",
+      "e8200f3 test(run): drop the duplicate battle transaction suite",
+      "f525693 fix(run): make the battle outcome a transaction and idempotent",
+      "2ee17ea test(run): cover the continuing loss branch of the outcome",
+      "dfa26d6 fix(run): close the three findings of the independent critic",
+      "1b4c58a fix(run): make the outcome idempotence a one-shot latch",
+      "5a804ac fix(run): restore the one-shot latch of the battle outcome"
+    ],
+    "suite": "tests/run_integrity/battle_outcome_transaction_test.gd (9 cases)",
+    "negative_controls": "NC-18..NC-24, all honest RED",
+    "verification": {
+      "runner": "91 suites / 8420 assertions / 0 fail / 0 unparsed",
+      "ci_gates": "10/10 clean",
+      "a_h": "PASS (8 fixtures per side)",
+      "lint": "0 errors, 5 warnings (baseline)",
+      "editor_parse": "0 errors"
+    },
+    "push": "NOT performed (no explicit permission)",
+    "lesson": "a mutation run must not share the working tree with a commit: the commit 1b4c58a captured a mutated file, and the suite caught it immediately"
   }
 }
