@@ -47,6 +47,7 @@ func _initialize() -> void:
 		ProjectSettings.globalize_path(ISOLATED_DIR))
 	await _test_A_a_win_is_persisted_with_its_outcome()
 	await _test_B_a_loss_is_persisted_with_its_outcome()
+	await _test_B2_a_loss_that_continues_is_persisted()
 	await _test_C_the_outcome_is_applied_only_once()
 	await _test_D_the_checkpoint_is_written_after_the_outcome()
 	print("")
@@ -87,6 +88,30 @@ func _test_B_a_loss_is_persisted_with_its_outcome() -> void:
 		"the loss is on the disk (got %d)" % int(on_disk.get("losses", 0)))
 	_assert(int(on_disk.get("lives", 0)) == int(before.get("lives", 0)),
 		"the lives on the disk are the post-outcome lives")
+
+
+## A loss that does NOT end the run must be on the disk too: the run
+## continues in the PREP phase with the life spent and the round
+## advanced.
+func _test_B2_a_loss_that_continues_is_persisted() -> void:
+	var ctrl: Node = await _make_controller(510005)
+	# Two lives, so the first loss does not end the run.
+	ctrl.state.lives = 2
+	await _finish_battle(ctrl, 1)
+	var live: Dictionary = _live_state(ctrl)
+	_assert(int(live.get("losses", 0)) == 1,
+		"the loss was applied to the live state")
+	_assert(int(live.get("lives", 0)) == 1,
+		"the life was spent")
+	var on_disk: Dictionary = _disk_state(ctrl, 510005)
+	_assert(int(on_disk.get("losses", 0)) == 1,
+		"the continuing loss is on the disk (got %d)"
+			% int(on_disk.get("losses", 0)))
+	_assert(int(on_disk.get("lives", 0)) == 1,
+		"the spent life is on the disk (got %d)"
+			% int(on_disk.get("lives", 0)))
+	_assert(int(on_disk.get("round_index", 0)) == int(live.get("round_index", 0)),
+		"the advanced round is on the disk")
 
 
 ## The outcome must be applied ONCE. The scene ticks every frame and
