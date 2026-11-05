@@ -64,6 +64,8 @@ var profile: MetaProfile = null
 ## and never touch the developer's meta profile.
 var save_repository: Object = null
 var meta_writer: Object = null
+## The one-shot latch of the battle outcome. See `_on_battle_ended`.
+var _battle_outcome_applied: bool = false
 # S5.3: encounter map owned by RunController после первого перехода в MAP phase.
 # Scene получает его через get_encounter_map() и передаёт в EncounterMapScene.set_encounter_map().
 var encounter_map: EncounterMap = null
@@ -599,6 +601,8 @@ func start_battle() -> bool:
 		# that actually executes it.
 	runner = BattleRunnerScript.new(ctx)
 	runner.start()
+	# A new battle may produce a new outcome.
+	_battle_outcome_applied = false
 	_set_phase(Phase.BATTLE)
 	GameBus.emit_round_started(state.round_index)
 	return true
@@ -640,9 +644,19 @@ func _on_battle_ended() -> void:
 	# run state, and that contract is preserved.
 	if runner == null:
 		return
-	# IDEMPOTENCE: the ENDED state is consumed here. The scene ticks
-	# every frame, so without this the outcome would be applied again
-	# on the very next frame.
+	# IDEMPOTENCE: the outcome is applied exactly once.
+	#
+	# The scene ticks the battle every frame and calls this whenever
+	# the runner reports ENDED, so without the guard the outcome would
+	# be applied again on the very next frame: a second win bonus, a
+	# second combat drop, a second reward offer and a second round
+	# advance.
+	#
+	# The latch is a one-shot, not a state check. A state check would
+	# only hold as long as nothing set the phase back to ENDED; the
+	# latch removes the whole class of the defect. It lives in the
+	# controller because the runner is replaced by every new battle.
+	# MUTATED: a state check instead of the one-shot latch.
 	if runner.state.phase != BattleStateScript.Phase.ENDED:
 		return
 	runner.state.phase = BattleStateScript.Phase.APPLIED

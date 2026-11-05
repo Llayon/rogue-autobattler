@@ -3,13 +3,15 @@ class_name BattleState extends Resource
 ##
 ## Хранит:
 ##   - фазу (PREP / BATTLE / ENDED / APPLIED),
-##
-## APPLIED means the outcome of the finished battle was applied to the
-## run state and written: the battle is over AND its outcome is
-## settled, so it must not be applied a second time.
 ##   - время боя,
 ##   - ссылку на активный BattleRunner (опционально).
 
+## The phase of the battle.
+##
+## APPLIED means the outcome of the finished battle was applied to the
+## run state, so it must not be applied a second time. The phase is
+## set BEFORE the checkpoint write is attempted: it marks that the
+## outcome was taken over, not that the checkpoint landed.
 enum Phase { PREP, BATTLE, ENDED, APPLIED }
 
 const SAVE_VERSION: int = 1

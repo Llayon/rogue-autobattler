@@ -52,6 +52,7 @@ func _initialize() -> void:
 	await _test_C_the_outcome_is_applied_only_once()
 	await _test_D_the_checkpoint_is_written_after_the_outcome()
 	await _test_E_the_checkpoint_carries_the_current_stream_and_shop()
+	await _test_F_the_outcome_survives_a_phase_reset()
 	print("")
 	print("=== STAGE 4: BATTLE OUTCOME TRANSACTION: %d pass / %d fail ==="
 		% [_passed, _failed])
@@ -175,6 +176,32 @@ func _test_E_the_checkpoint_carries_the_current_stream_and_shop() -> void:
 		"the checkpoint carries the current shop offer")
 	for id in live_ids:
 		_assert(id in disk_ids, "the shop offer on the disk contains %s" % str(id))
+
+
+## The idempotence must be a one-shot, not a state check.
+##
+## The guard used to be `if runner.state.phase != ENDED: return`, so
+## anything that set the phase back to ENDED would let the outcome be
+## applied AGAIN: a second win bonus, a second combat drop, a second
+## reward offer and a second round advance.
+func _test_F_the_outcome_survives_a_phase_reset() -> void:
+	var ctrl: Node = await _make_controller(510009)
+	await _finish_battle(ctrl, 0)
+	var after_first: Dictionary = _live_state(ctrl)
+	var gold_first: int = int(after_first.get("gold", 0))
+	var round_first: int = int(after_first.get("round_index", 0))
+
+	# Something resets the phase to ENDED.
+	ctrl.runner.state.phase = 2
+	ctrl._on_battle_ended()
+	await process_frame
+	var after_second: Dictionary = _live_state(ctrl)
+	_assert(int(after_second.get("wins", 0)) == int(after_first.get("wins", 0)),
+		"a phase reset does not apply the outcome again")
+	_assert(int(after_second.get("gold", 0)) == gold_first,
+		"a phase reset does not grant a second win bonus")
+	_assert(int(after_second.get("round_index", 0)) == round_first,
+		"a phase reset does not advance the round again")
 
 
 ## The outcome must be applied ONCE. The scene ticks every frame and

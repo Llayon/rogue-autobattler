@@ -32,7 +32,7 @@ func _init(battle_ctx, battle_state = null) -> void:
 
 
 func step(dt: float) -> void:
-	if state.phase != 1:  # BATTLE
+	if state.phase != BattleStateScript.Phase.BATTLE:
 		return
 	state.battle_time += dt
 	# S4.3: тикаем visual_state (flash/fade/pos_lerp) ПЕРЕД основной логикой.
@@ -54,7 +54,7 @@ func step(dt: float) -> void:
 
 
 func start() -> void:
-	state.phase = 1
+	state.phase = BattleStateScript.Phase.BATTLE
 	state.battle_time = 0.0
 	state.winner_team = -1
 	GameBus.emit_battle_started()
@@ -79,7 +79,7 @@ func _is_battle_over() -> bool:
 
 
 func _end_battle() -> void:
-	state.phase = 2
+	state.phase = BattleStateScript.Phase.ENDED
 	if ctx.combatants_of_team(0).is_empty() and ctx.combatants_of_team(1).is_empty():
 		state.winner_team = -1
 	elif ctx.combatants_of_team(0).is_empty():
