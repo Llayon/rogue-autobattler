@@ -80,6 +80,12 @@ func _test_B_the_gold_commands_fail_closed_in_battle() -> void:
 	await _start_battle(ctrl)
 	var before: Dictionary = _snapshot(ctrl)
 	_assert(ctrl.buy_unit(0) == null, "buy_unit fails in a battle")
+	# The merchant offer must be non-empty: otherwise `buy_item`
+	# refuses for an ordinary reason and the phase refusal is not
+	# observable.
+	ctrl.merchant_shop.refresh()
+	_assert(ctrl.merchant_shop.get_offered_count() > 0,
+		"the merchant offer is filled")
 	_assert(not ctrl.buy_item(0), "buy_item fails in a battle")
 	_assert(_unchanged(ctrl, before), "the gold commands mutated nothing")
 
