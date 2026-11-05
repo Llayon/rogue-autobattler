@@ -41,11 +41,19 @@ func _test_A_the_v5_diagnostics_are_refcounted() -> void:
 	var diagnostics: Array = result.get("diagnostics", []) as Array
 	_assert(not diagnostics.is_empty(), "the rejection carries diagnostics")
 	var all_objects: bool = true
+	var all_carry_the_code: bool = true
 	for d in diagnostics:
 		if not (d is Object):
 			all_objects = false
+		elif not (d.get("code") != null or d.get("code") == ""):
+			# A typed diagnostic carries the code as a field. A plain
+			# Dictionary carries it too, but a diagnostic that lost the
+			# field would report an empty code.
+			all_carry_the_code = false
 	_assert(all_objects,
 		"every v5 diagnostic is an Object, so add_diagnostic() accepts it")
+	_assert(all_carry_the_code,
+		"every v5 diagnostic carries its code, so the caller can report it")
 
 
 func _test_B_the_v4_diagnostics_are_refcounted() -> void:
@@ -55,11 +63,16 @@ func _test_B_the_v4_diagnostics_are_refcounted() -> void:
 	var diagnostics: Array = result.get("diagnostics", []) as Array
 	_assert(not diagnostics.is_empty(), "the rejection carries diagnostics")
 	var all_objects: bool = true
+	var all_carry_the_code: bool = true
 	for d in diagnostics:
 		if not (d is Object):
 			all_objects = false
+		elif not (d.get("code") != null or d.get("code") == ""):
+			all_carry_the_code = false
 	_assert(all_objects,
 		"every v4 diagnostic is an Object, so add_diagnostic() accepts it")
+	_assert(all_carry_the_code,
+		"every v4 diagnostic carries its code, so the caller can report it")
 
 
 ## The load path must REPORT the failure, not crash.
