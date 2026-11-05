@@ -1035,7 +1035,9 @@ func resume_run(seed_value: int) -> bool:
 
 	if profile != null:
 		profile.current_run_seed = state.seed
-	SaveService.save_meta(profile)
+	# The meta seam, like everywhere else: a test that installs a
+	# meta writer must not have the production profile written.
+	_save_meta(profile)
 	GameBus.emit_run_resumed(state.seed)
 	GameLog.info("run", "Run resumed",
 		{"seed": state.seed, "round": state.round_index,
