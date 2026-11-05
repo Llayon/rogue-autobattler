@@ -110,7 +110,8 @@ were already captured.
 
 The GOLD commands (`buy_unit`, `buy_item`) are only editable between
 the battles: they spend gold, and the merchant offer exists only in
-PREP (the MERCHANT effect enters PREP, `run_controller.gd:1283`).
+PREP (the MERCHANT effect enters PREP -- see
+`_apply_merchant_effect` in `core/progression/run_controller.gd`).
 
 GAMEOVER admits no mutation at all: the run is over. SERVICE is a
 phase that is never entered in the current code, and the equipment

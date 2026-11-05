@@ -14,6 +14,18 @@ var _discount: float = BalanceScript.MAP_MERCHANT_DISCOUNT
 
 ## Заполняет _offered_item_ids случайными ItemDef id из ContentDB.
 ## Optional unlocked_units параметр (для compat с reward_screen.refresh сигнатурой).
+## Clears the offer.
+##
+## RI-07: the offer belongs to the run. A new run must not carry the
+## merchant offer of the previous one: it leaked into the new run and
+## into its checkpoint, and it broke the determinism of the checkpoint
+## for a fixed seed.
+func reset_offer() -> void:
+	# Only the offer is run-scoped. The discount is the balance
+	# constant, so it stays.
+	_offered_item_ids.clear()
+
+
 func refresh(_unlocked_units: Array = []) -> void:
 	_offered_item_ids.clear()
 	var item_ids: Array = ContentDB_static.get_all_ids_for_type("items")

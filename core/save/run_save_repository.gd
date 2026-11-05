@@ -151,7 +151,6 @@ func save_run_v5(seed_value: int, v5_data: Dictionary) -> RefCounted:
 
 ## The shared atomic save path for both schema versions.
 func _save_canonical(seed_value: int, data: Dictionary, format: String) -> RefCounted:
-	_save_count += 1
 	var target: String = _run_path(seed_value)
 	var rec: Dictionary = _recover_startup_state(target, seed_value)
 	if not rec.ok:
@@ -189,6 +188,10 @@ func _save_canonical(seed_value: int, data: Dictionary, format: String) -> RefCo
 			for d in v.get("diagnostics", []):
 				r.add_diagnostic(d)
 			return r
+	# The counter moves where the checkpoint actually lands, so a
+	# REJECTED write is not counted: the RI-09 and RI-10 suites use it
+	# as the "no checkpoint was written" observable.
+	_save_count += 1
 	var temp: String = target + TEMP_SUFFIX
 	var bytes: PackedByteArray = serialize_canonical_bytes(data)
 	if not _ops.write_bytes_and_flush(temp, bytes):
@@ -1129,7 +1132,8 @@ func _run_path(seed_value: int) -> String:
 ## The number of successful writes this repository performed.
 ##
 ## It is the observable of the write COUNT: the outcome transaction
-## must be ONE write, not two.
+## must be ONE write, not two. A REJECTED write is not counted: the
+## counter moves only where the checkpoint actually lands.
 func get_save_count() -> int:
 	return _save_count
 
