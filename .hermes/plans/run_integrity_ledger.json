@@ -133,13 +133,33 @@
     "suite": "tests/run_integrity/sequence_cursor_contract_test.gd"
   },
   "final_state": {
-    "head": "c2db5d9",
-    "ahead_behind": "23/0",
-    "push": "NOT performed (no explicit permission)",
-    "runner": "89 suites / 8378 assertions / 0 fail / 0 unparsed",
+    "head": "d0026b880aa278ba15b004cc644ba240c8a35dfb",
+    "published": "canonical/phase3/effect-status-trigger-gauntlet == d0026b8",
+    "pushes": [
+      "dcab44e..f9cf076 (the package; CI FAILED on battle-ecs)",
+      "f9cf076..d0026b8 (the CI fix; CI GREEN)"
+    ],
+    "ahead_behind": "0/0",
+    "worktree": "clean (0 tracked)",
+    "canonical_master": "02fe83ef378d13965184c6224a512a91ae6263a1 (untouched)",
+    "origin_master": "ba0fd818f552b47ca7e9db61d2d793ce0a85230d (untouched)",
+    "ci_run": "42000985398 (success: battle-ecs + save-battle-migration)",
+    "a_h_in_ci": "EXECUTED and PASS (8 fixtures per side, both rc=0)",
+    "runner": "90 suites / 8389 assertions / 0 fail / 0 unparsed",
     "ci_gates": "10/10 clean",
-    "a_h": "PASS (8 fixtures per side)",
-    "error_scan": "89 suites, 0 markers",
-    "lint": "0 errors, 5 warnings (baseline)"
+    "error_scan": "90 suites, 0 markers",
+    "inventory_worktree": "kept, untouched (4986157, feat/inventory-integrity)",
+    "temp_worktrees": "ri35-final and ri35-ah removed after the green CI"
+  },
+  "ci_defect_found_after_the_first_push": {
+    "summary": "the isolation seam broke the READ path: the suites wrote through the injected repository but read through the production SaveService, so the read found nothing",
+    "why_the_local_gate_missed_it": "the local box kept the files of the earlier runs in user://, so the production read found a stale file; the CI box is always clean",
+    "fix": "the read uses the same repository as the write, through the SaveService._load_run_v4_with_repository seam; every suite now has its OWN isolated directory",
+    "lesson": "a gate that runs against a dirty state is weaker than the CI. The clean-state run is the honest one, and it must be the default: the suites now clean their own directory.",
+    "commit": "d0026b8"
+  },
+  "stage_status": {
+    "run_checkpoint_rng_continuity": "CLOSED",
+    "next": "RI-05 battle outcome transaction + idempotence (a separate package, without the inventory integration mixed in)"
   }
 }
