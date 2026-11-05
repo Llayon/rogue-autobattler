@@ -855,17 +855,15 @@ func resume_run(seed_value: int) -> bool:
 
 	# ---- commit -------------------------------------------------------
 	# Every piece validated. Now the live runtime is replaced.
-	state = loaded_state
-	shop = new_shop
-	merchant_shop = new_merchant
-	reward = new_reward
-	encounter_map = new_map
-
-	# The RNG continuation is restored BEFORE any random consumer may
-	# run: no shop refresh, no merchant refresh, no reward generation
-	# and no map generation happen between the restore and the commit.
+	#
+	# The RNG continuation is restored BEFORE the live runtime is
+	# replaced, not after. The restore must not be observable: a
+	# half-committed runtime that is observed with the OLD stream
+	# would let a consumer draw from the wrong position. No shop
+	# refresh, no merchant refresh, no reward generation and no map
+	# generation happen between the restore and the commit either.
 	var rng_snapshot: Dictionary = decoded.get("rng", {}) as Dictionary
-	var rng_seed: int = int(rng_snapshot.get("seed", state.seed))
+	var rng_seed: int = int(rng_snapshot.get("seed", loaded_state.seed))
 	if rng_seed != 0:
 		# The bookkeeping only: current_seed and _is_seeded.
 		RngServiceScript.seed_run(rng_seed)
@@ -873,6 +871,12 @@ func resume_run(seed_value: int) -> bool:
 	# captured PRNG position, and it is exact for every seed,
 	# including 0.
 	RngServiceScript.restore(rng_snapshot)
+
+	state = loaded_state
+	shop = new_shop
+	merchant_shop = new_merchant
+	reward = new_reward
+	encounter_map = new_map
 
 	# The phase is restored from the stable wire name.
 	var wire_phase: String = str(decoded.get("phase", SaveSchemaV5Script.PHASE_PREP))

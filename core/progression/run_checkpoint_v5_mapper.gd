@@ -194,15 +194,24 @@ static func migrate_v4_to_v5(v4_dto: Dictionary) -> Dictionary:
 ## The wire form is a lossless decimal string. A numeric value is
 ## accepted as a legacy fallback, but it is already lossy at that
 ## point, so the checkpoint reports it.
+## Decodes the persisted PRNG machine state.
+##
+## The state is a lossless decimal string. A numeric value is NOT
+## accepted: a JSON number cannot hold the low bits of a 64-bit
+## machine state beyond 2^53, so a numeric value is already lossy.
+## Silently converting it would launder the corruption this encoding
+## exists to prevent, so a numeric state decodes to 0 -- the start of
+## the stream -- and the caller sees a broken continuation instead of
+## a plausible-looking one.
+##
+## The repository rejects a numeric state on the read path before the
+## mapper is reached, so this is the backstop for a direct caller.
 static func _decode_rng_state(raw: Variant) -> int:
 	if raw is String:
 		var decoded: Dictionary = SaveSchemaV5Script.decode_int64(raw)
 		if bool(decoded.get("ok", false)):
 			return int(decoded.get("value", 0))
 		return 0
-	if raw is int or raw is float:
-		# Legacy numeric form: already lossy beyond 2^53.
-		return int(raw)
 	return 0
 
 
