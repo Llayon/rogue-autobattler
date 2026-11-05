@@ -1126,6 +1126,32 @@ func _run_path(seed_value: int) -> String:
 	return runs_dir + "run_%d.tres" % seed_value
 
 
+## The number of successful writes this repository performed.
+##
+## It is the observable of the write COUNT: the outcome transaction
+## must be ONE write, not two.
+func get_save_count() -> int:
+	return _save_count
+
+
+## Removes the run file of a finished run.
+##
+## The repository owns the run files, so the removal belongs here: the
+## service façade reaches the production directory, and a test that
+## injects a repository over a temporary directory must be able to
+## remove the file the same way.
+##
+## Returns true when the file is gone (including when it was not
+## there).
+func delete_run(seed_value: int) -> bool:
+	if seed_value == 0:
+		return false
+	var path: String = _run_path(seed_value)
+	if not _ops.exists(path):
+		return true
+	return _ops.remove(path)
+
+
 func _read_dict_text(path: String) -> Dictionary:
 	# Bytes-only read. ResourceLoader is not invoked here because
 	# it caches ext-resources and can mutate unrelated loads later

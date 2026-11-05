@@ -143,6 +143,16 @@ static func has_run(seed_value: int) -> bool:
 
 
 ## Удаляет файл сохранения. Возвращает true если файл был удалён.
+## Removes the run file of a finished run through a repository.
+##
+## The production call goes through the production repository; a test
+## injects one over a temporary directory.
+static func _delete_run_with_repository(seed_value: int, repository: Object) -> bool:
+	if repository == null:
+		return false
+	return bool(repository.delete_run(seed_value))
+
+
 static func delete_run(seed_value: int) -> bool:
 	if seed_value == 0:
 		return false

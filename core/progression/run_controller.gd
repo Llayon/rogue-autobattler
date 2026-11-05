@@ -660,34 +660,46 @@ func _on_battle_ended() -> void:
 		# обрабатывается silently в _grant_combat_drop.
 		_grant_combat_drop()
 		state.round_index += 1
-		# The TRANSACTION: the outcome is on the disk before the flow
-		# moves on. The write below is the post-outcome checkpoint of
-		# the finished battle.
-		save_now()
-		# S3.1: победа на MAX_ROUND завершает ран.
-		if state.round_index > BalanceScript.MAX_ROUND:
-			_end_run(true)
-			return
 		# S6.1: после каждой победы (включая round 1) показываем REWARD.
 		# Затем _enter_prep_or_map_after_reward() маршрутизирует:
 		# round 1 → PREP (стартовый набор уже на доске).
 		# round 2..MAX_ROUND-1 → MAP (игрок выбирает следующий нод).
-		_enter_reward()
+		#
+		# The offer is generated BEFORE the write: the offer IS part of
+		# the outcome, so it must be in the SAME checkpoint as the
+		# counters. Writing it later left a window in which the disk
+		# held the outcome but no offer, and the resumed run could not
+		# reach the reward at all.
+		_enter_reward_offer()
+		_set_phase(Phase.REWARD)
+		# The TRANSACTION: the outcome, the offer and the stream
+		# position are on the disk in ONE write.
+		save_now()
+		GameBus.emit_reward_offered(reward.offered_ids())
+		# S3.1: победа на MAX_ROUND завершает ран.
+		if state.round_index > BalanceScript.MAX_ROUND:
+			_end_run(true)
+			return
 	elif winner == 1:
 		state.losses += 1
 		state.lives -= 1
 		if state.lives <= 0:
-			# The TRANSACTION: the loss is on the disk too.
-			save_now()
+			# The run is over: the checkpoint of a finished run must not
+			# stay resumable, so it is removed instead of written.
 			_end_run(false)
-		else:
-			state.round_index += 1
-			# The TRANSACTION: the loss is on the disk too.
-			save_now()
-			_set_phase(Phase.PREP)
-			_refresh_shop()
-	else:
+			return
+		state.round_index += 1
+		_set_phase(Phase.PREP)
+		# The shop refresh draws from the run stream, so it happens
+		# BEFORE the write: the checkpoint then carries the CURRENT
+		# offer and the CURRENT stream position, and the resumed run
+		# continues the same stream.
+		_refresh_shop()
+		# The TRANSACTION: the outcome is on the disk in ONE write.
 		save_now()
+	else:
+		# A neutral outcome ends the run too, and it is not counted as
+		# a loss. The run file is removed with the run.
 		_end_run(false)
 
 
@@ -707,6 +719,10 @@ func _end_run(won: bool) -> void:
 
 	# S3.3: ран завершён — current_run_seed = 0 (нечего продолжать).
 	_clear_active_run()
+	# The run file is removed: the run is over, and a resumable
+	# checkpoint at a finished round would let it be continued past
+	# MAX_ROUND.
+	_delete_run_file()
 	_save_meta(profile)
 	run_ended.emit(won)
 	GameLog.info("run", "Run ended", {"round": state.round_index, "won": won})
@@ -812,6 +828,19 @@ func _clear_active_run() -> void:
 		profile.current_run_seed = 0
 		# meta save уже вызывается в _end_run — здесь не дублируем.
 
+
+## Removes the run file of the finished run.
+##
+## The run is over: there is nothing to continue. A checkpoint that
+## stayed on the disk would be resumable, and the run could be
+## continued past MAX_ROUND.
+func _delete_run_file() -> void:
+	if state == null:
+		return
+	if save_repository != null:
+		SaveService._delete_run_with_repository(state.seed, save_repository)
+		return
+	SaveService.delete_run(state.seed)
 
 ## S3.3: загружает RunDomainState из диска по seed и продолжает ран.
 ## Phase 1 / T3F.7: live state is RunDomainState. We load the
@@ -974,13 +1003,26 @@ func resume_run(seed_value: int) -> bool:
 
 
 ## S5.1.5: переход в фазу REWARD после победы (кроме round 1).
-func _enter_reward() -> void:
+## Generates the reward offer for the finished round.
+##
+## The offer is generated WITHOUT a write: the caller writes it as
+## part of the outcome transaction, so the offer and the counters are
+## in ONE checkpoint. A second write here would leave a window in
+## which the disk held the outcome but no offer.
+func _enter_reward_offer() -> void:
 	reward.generate_offer(state.round_index)
+	GameLog.info("run", "Reward offered", {"round": state.round_index, "ids": reward.offered_ids()})
+
+
+## Enters the reward phase and writes the checkpoint.
+##
+## Used by the flows that are NOT the battle outcome transaction.
+func _enter_reward() -> void:
+	_enter_reward_offer()
 	_set_phase(Phase.REWARD)
 	GameBus.emit_reward_offered(reward.offered_ids())
 	# S3.3: auto-save после генерации offer.
 	save_now()
-	GameLog.info("run", "Reward offered", {"round": state.round_index, "ids": reward.offered_ids()})
 
 
 ## S5.3: возвращает куда переходить после REWARD (round 1 → PREP, иначе → MAP).

@@ -46,10 +46,12 @@ func _initialize() -> void:
 	DirAccess.make_dir_recursive_absolute(
 		ProjectSettings.globalize_path(ISOLATED_DIR))
 	await _test_A_a_win_is_persisted_with_its_outcome()
-	await _test_B_a_loss_is_persisted_with_its_outcome()
-	await _test_B2_a_loss_that_continues_is_persisted()
+	await _test_A2_the_reward_offer_is_in_the_same_write()
+	await _test_B_a_loss_that_continues_is_persisted()
+	await _test_B2_a_finished_run_leaves_no_resumable_file()
 	await _test_C_the_outcome_is_applied_only_once()
 	await _test_D_the_checkpoint_is_written_after_the_outcome()
+	await _test_E_the_checkpoint_carries_the_current_stream_and_shop()
 	print("")
 	print("=== STAGE 4: BATTLE OUTCOME TRANSACTION: %d pass / %d fail ==="
 		% [_passed, _failed])
@@ -76,42 +78,103 @@ func _test_A_a_win_is_persisted_with_its_outcome() -> void:
 		"the round on the disk is the post-outcome round")
 
 
-## A loss must be on disk too. The loss branch never saved at all.
-func _test_B_a_loss_is_persisted_with_its_outcome() -> void:
+## A loss that does NOT end the run must be on disk too: the run
+## continues in the PREP phase with the life spent and the round
+## advanced.
+func _test_B_a_loss_that_continues_is_persisted() -> void:
 	var ctrl: Node = await _make_controller(510002)
+	# Two lives, so the first loss does not end the run.
+	ctrl.state.lives = 2
 	await _finish_battle(ctrl, 1)
 	var before: Dictionary = _live_state(ctrl)
 	_assert(int(before.get("losses", 0)) == 1,
 		"the loss was applied to the live state")
+	_assert(int(before.get("lives", 0)) == 1,
+		"the life was spent")
 	var on_disk: Dictionary = _disk_state(ctrl, 510002)
 	_assert(int(on_disk.get("losses", 0)) == 1,
 		"the loss is on the disk (got %d)" % int(on_disk.get("losses", 0)))
 	_assert(int(on_disk.get("lives", 0)) == int(before.get("lives", 0)),
 		"the lives on the disk are the post-outcome lives")
+	_assert(int(on_disk.get("round_index", 0)) == int(before.get("round_index", 0)),
+		"the advanced round is on the disk")
 
 
-## A loss that does NOT end the run must be on the disk too: the run
-## continues in the PREP phase with the life spent and the round
-## advanced.
-func _test_B2_a_loss_that_continues_is_persisted() -> void:
+## A FINISHED run must leave NO resumable file.
+##
+## The run file of a finished run used to stay on the disk as a legal
+## "prep" checkpoint at a round the run had already finished, so the
+## run could be resumed past MAX_ROUND by its seed.
+func _test_B2_a_finished_run_leaves_no_resumable_file() -> void:
 	var ctrl: Node = await _make_controller(510005)
-	# Two lives, so the first loss does not end the run.
-	ctrl.state.lives = 2
+	# The last life: the loss ends the run.
+	ctrl.state.lives = 1
 	await _finish_battle(ctrl, 1)
 	var live: Dictionary = _live_state(ctrl)
 	_assert(int(live.get("losses", 0)) == 1,
 		"the loss was applied to the live state")
-	_assert(int(live.get("lives", 0)) == 1,
-		"the life was spent")
 	var on_disk: Dictionary = _disk_state(ctrl, 510005)
-	_assert(int(on_disk.get("losses", 0)) == 1,
-		"the continuing loss is on the disk (got %d)"
-			% int(on_disk.get("losses", 0)))
-	_assert(int(on_disk.get("lives", 0)) == 1,
-		"the spent life is on the disk (got %d)"
-			% int(on_disk.get("lives", 0)))
-	_assert(int(on_disk.get("round_index", 0)) == int(live.get("round_index", 0)),
-		"the advanced round is on the disk")
+	_assert(on_disk.is_empty(),
+		"the finished run leaves no checkpoint on the disk")
+
+
+## The reward offer is part of the outcome, so it must be in the SAME
+## write as the counters.
+##
+## The offer used to be written by a SECOND, later save, so a crash in
+## between left a checkpoint with the win applied but no offer -- and
+## the resumed run could not reach the reward at all.
+func _test_A2_the_reward_offer_is_in_the_same_write() -> void:
+	var ctrl: Node = await _make_controller(510006)
+	var writes_before: int = ctrl.save_repository.get_save_count()
+	await _finish_battle(ctrl, 0)
+	var writes_after: int = ctrl.save_repository.get_save_count()
+	_assert(writes_after - writes_before == 1,
+		"the win path is ONE write (got %d)"
+			% (writes_after - writes_before))
+	var on_disk: Dictionary = _disk_dto(ctrl, 510006)
+	_assert(not on_disk.is_empty(), "the win checkpoint was written")
+	var rewards: Dictionary = on_disk.get("rewards", {}) as Dictionary
+	var offered: Array = rewards.get("offered_ids", []) as Array
+	_assert(offered.size() > 0,
+		"the reward offer is in the checkpoint (got %d ids)" % offered.size())
+	_assert(String(on_disk.get("phase", "")) == "reward",
+		"the checkpoint is in the reward phase (got '%s')"
+			% String(on_disk.get("phase", "")))
+	# The resumed run must land in the reward with the same offer.
+	var resumed: Node = await _make_controller(510007)
+	var ok: bool = resumed.resume_run(510006)
+	await process_frame
+	_assert(ok, "the checkpoint with the offer resumes")
+	_assert(resumed.phase == resumed.Phase.REWARD,
+		"the resumed run is in the reward phase")
+	_assert(resumed.reward.offered_ids().size() == offered.size(),
+		"the resumed run restores the same offer")
+
+
+## The checkpoint must carry the CURRENT stream position and the
+## CURRENT shop offer.
+##
+## The continuing-loss checkpoint used to be written BEFORE the shop
+## refresh, so it captured the previous offer and the pre-refresh
+## stream position: the resumed run then diverged from the
+## uninterrupted one.
+func _test_E_the_checkpoint_carries_the_current_stream_and_shop() -> void:
+	var ctrl: Node = await _make_controller(510008)
+	ctrl.state.lives = 2
+	await _finish_battle(ctrl, 1)
+	var on_disk: Dictionary = _disk_dto(ctrl, 510008)
+	var disk_rng: Dictionary = on_disk.get("rng", {}) as Dictionary
+	var live_rng: Dictionary = RngServiceScript.snapshot()
+	_assert(int(disk_rng.get("state", 0)) == int(live_rng.get("state", 0)),
+		"the checkpoint carries the current stream position")
+	var disk_shop: Dictionary = on_disk.get("shop", {}) as Dictionary
+	var disk_ids: Array = disk_shop.get("offered_ids", []) as Array
+	var live_ids: Array = ctrl.shop.offered_ids()
+	_assert(disk_ids.size() == live_ids.size(),
+		"the checkpoint carries the current shop offer")
+	for id in live_ids:
+		_assert(id in disk_ids, "the shop offer on the disk contains %s" % str(id))
 
 
 ## The outcome must be applied ONCE. The scene ticks every frame and
@@ -196,11 +259,23 @@ func _live_state(ctrl: Node) -> Dictionary:
 	}
 
 
-## The state on the disk, read through the same repository the
-## controller wrote.
+## The raw checkpoint DTO on the disk.
 ##
 ## The repository does NOT create its directory -- it expects it to
 ## exist -- so the test creates it before building the repository.
+func _disk_dto(ctrl: Node, seed_value: int) -> Dictionary:
+	DirAccess.make_dir_recursive_absolute(
+		ProjectSettings.globalize_path(ISOLATED_DIR))
+	var repo: Object = RunSaveRepositoryScript.new(ISOLATED_DIR)
+	var result: RefCounted = SaveServiceScript._load_run_v5_with_repository(
+		seed_value, repo)
+	if result == null or not result.is_ok():
+		return {}
+	return result.data as Dictionary
+
+
+## The state on the disk, read through the same repository the
+## controller wrote.
 func _disk_state(ctrl: Node, seed_value: int) -> Dictionary:
 	DirAccess.make_dir_recursive_absolute(
 		ProjectSettings.globalize_path(ISOLATED_DIR))
