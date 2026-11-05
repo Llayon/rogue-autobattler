@@ -11,6 +11,9 @@ class_name RunDomainState extends RefCounted
 ## no save serialisation, no ContentDB lookups. Allocation helpers,
 ## save mapping, queries, RNG wiring live in later tasks.
 
+# int64 maximum is reserved as the exhausted cursor; increment must never wrap.
+const ITEM_INSTANCE_SEQ_LIMIT: int = 9223372036854775807
+
 ## Run seed (also used as the slot identifier by the save layer).
 ## 0 is the placeholder before start_run().
 var seed: int = 0
@@ -43,8 +46,7 @@ var next_item_instance_seq: int = 1
 ##
 ## After 999999 the format still produces a unique id (e.g.
 ## `"unit_1000000"`); overflow is not the allocator's concern — the
-## v4 mapper/validator owns the canonical invariant
-## `next_*_seq == first unused`.
+## persistence gate requires the cursor above every live sequence.
 func allocate_unit_instance_id() -> String:
 	var id: String = "unit_%06d" % next_unit_instance_seq
 	next_unit_instance_seq += 1
@@ -53,8 +55,11 @@ func allocate_unit_instance_id() -> String:
 
 ## Allocates the next free item instance id and advances the
 ## counter. Mirrors `allocate_unit_instance_id`. Unit and item
-## counters are independent streams.
+## counters are independent streams. Returns empty without mutation when
+## inventory is inconsistent or the int64 cursor is exhausted.
 func allocate_item_instance_id() -> String:
+	if not is_inventory_valid() or next_item_instance_seq >= ITEM_INSTANCE_SEQ_LIMIT:
+		return ""
 	var id: String = "item_%06d" % next_item_instance_seq
 	next_item_instance_seq += 1
 	return id
@@ -119,15 +124,18 @@ func get_bench_units() -> Array[RunUnit]:
 ## Creates a new `RunItem` with a fresh instance id and appends it
 ## to `items`. Ownership defaults to `""` (inventory). Returns the
 ## new item so the caller can attach it to a `RunUnit` afterwards.
+## Returns null without mutation for empty definitions, inconsistent
+## inventory or an exhausted item cursor.
 ##
 ## The domain does NOT look up `definition_id` in ContentDB. The
-## caller is responsible for setting `item.owner_unit_id` and
-## the corresponding `unit.equipped_item_ids` entry.
+## caller uses equip_item() to update both ownership references.
 func create_item(definition_id: StringName) -> RunItem:
 	if definition_id == &"" or not is_inventory_valid():
 		return null
 	var item: RunItem = RunItem.new()
 	item.instance_id = allocate_item_instance_id()
+	if item.instance_id == "":
+		return null
 	item.definition_id = definition_id
 	item.owner_unit_id = ""
 	items.append(item)
@@ -222,7 +230,7 @@ func get_equipped_items(unit_instance_id: String) -> Array[RunItem]:
 ## is rejected without mutating state. Equip of an unknown item
 ## or onto an unknown unit is rejected without mutating state.
 ## Returns `true` on success, `false` otherwise (state untouched
-## on failure).
+## on failure). Inconsistent inventory is rejected before mutation.
 func equip_item(item_instance_id: String,
 		unit_instance_id: String) -> bool:
 	if not is_inventory_valid():
@@ -313,9 +321,8 @@ func remove_item(item_instance_id: String) -> bool:
 ## Removes every stale reference to `item_instance_id` from
 ## every unit's `equipped_item_ids`. Called by `unequip_item` and
 ## `remove_item`. Phase 1 keeps this as defensive cleanup — the
-## canonical mapper / validator is responsible for the live
-## invariant; this is best-effort cleanup if the on-disk state
-## arrived inconsistent.
+## public commands reject inconsistent inventory before calling
+## this helper; no partial repair is performed on failed commands.
 func _purge_equipped_references(item_instance_id: String) -> bool:
 	var any: bool = false
 	for u in units:

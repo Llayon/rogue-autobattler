@@ -220,6 +220,9 @@ func equip_item_by_id(item_instance_id: String,
 		target_unit_instance_id: String) -> bool:
 	if item_instance_id == "" or target_unit_instance_id == "":
 		return false
+	var item: RunItem = state.get_item(item_instance_id)
+	if item == null or ContentDB_static.get_by_id_for_type("items", item.definition_id) == null:
+		return false
 	return state.equip_item(item_instance_id, target_unit_instance_id)
 
 
@@ -251,7 +254,10 @@ func grant_item(item_id: StringName) -> bool:
 		GameLog.warn("inventory", "grant_item: inventory full",
 			{"size": state.items.size(), "max": BalanceScript.MAX_INVENTORY})
 		return false
-	state.create_item(item_id)
+	if ContentDB_static.get_by_id_for_type("items", item_id) == null:
+		return false
+	if state.create_item(item_id) == null:
+		return false
 	GameLog.info("inventory", "item granted",
 		{"id": item_id, "size": state.items.size()})
 	return true
@@ -297,7 +303,7 @@ func equip_item_at(item_idx: int, board_idx: int) -> bool:
 		return false
 	var item: RunItem = state.items[item_idx]
 	var target: RunUnit = board[board_idx]
-	return state.equip_item(item.instance_id, target.instance_id)
+	return equip_item_by_id(item.instance_id, target.instance_id)
 
 
 ## Снимает предмет с юнита (возвращает в инвентарь).
