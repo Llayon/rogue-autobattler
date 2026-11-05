@@ -30,9 +30,8 @@ var lives: int = 1
 var units: Array[RunUnit] = []
 var items: Array[RunItem] = []
 
-## Sequence counters. Per Phase 1 contract, counters start at 1
-## and represent the FIRST UNUSED sequence (max_used + 1). The
-## identity allocator (T2) reads/writes these; nothing else does.
+## Monotonic allocation cursors start at 1 and stay above every live
+## sequence. Removal never rewinds them; gaps are valid.
 var next_unit_instance_seq: int = 1
 var next_item_instance_seq: int = 1
 
@@ -125,12 +124,54 @@ func get_bench_units() -> Array[RunUnit]:
 ## caller is responsible for setting `item.owner_unit_id` and
 ## the corresponding `unit.equipped_item_ids` entry.
 func create_item(definition_id: StringName) -> RunItem:
+	if definition_id == &"" or not is_inventory_valid():
+		return null
 	var item: RunItem = RunItem.new()
 	item.instance_id = allocate_item_instance_id()
 	item.definition_id = definition_id
 	item.owner_unit_id = ""
 	items.append(item)
 	return item
+
+
+## Checks live inventory identity and bidirectional ownership without mutation.
+## Content definitions are resolved by callers, not by this pure domain object.
+## A cursor may have gaps, but must exceed all live item sequences.
+func is_inventory_valid() -> bool:
+	if next_item_instance_seq < 1:
+		return false
+	var owners: Dictionary = {}
+	var live_items: Dictionary = {}
+	var listings: Dictionary = {}
+	for u in units:
+		if u == null or u.instance_id == "" or owners.has(u.instance_id):
+			return false
+		owners[u.instance_id] = u
+		for item_id in u.equipped_item_ids:
+			if listings.has(item_id):
+				return false
+			listings[item_id] = u.instance_id
+	for it in items:
+		if it == null or it.definition_id == &"" or live_items.has(it.instance_id):
+			return false
+		if not it.instance_id.begins_with("item_"):
+			return false
+		var digits: String = it.instance_id.trim_prefix("item_")
+		if not digits.is_valid_int():
+			return false
+		var seq: int = int(digits)
+		if seq < 1 or seq >= next_item_instance_seq or it.instance_id != "item_%06d" % seq:
+			return false
+		live_items[it.instance_id] = true
+		if it.owner_unit_id == "":
+			if listings.has(it.instance_id):
+				return false
+		elif not owners.has(it.owner_unit_id) or listings.get(it.instance_id, "") != it.owner_unit_id:
+			return false
+	for item_id in listings:
+		if not live_items.has(item_id):
+			return false
+	return true
 
 
 ## Looks up an item by its instance id. Returns `null` if the id is
@@ -184,6 +225,8 @@ func get_equipped_items(unit_instance_id: String) -> Array[RunItem]:
 ## on failure).
 func equip_item(item_instance_id: String,
 		unit_instance_id: String) -> bool:
+	if not is_inventory_valid():
+		return false
 	var it: RunItem = get_item(item_instance_id)
 	if it == null:
 		return false
@@ -225,6 +268,8 @@ func equip_item(item_instance_id: String,
 ## Returns `true` on success, `false` if the item is unknown or
 ## already unequipped (state untouched on failure).
 func unequip_item(item_instance_id: String) -> bool:
+	if not is_inventory_valid():
+		return false
 	var it: RunItem = get_item(item_instance_id)
 	if it == null:
 		return false
@@ -246,6 +291,8 @@ func unequip_item(item_instance_id: String) -> bool:
 ## Sequence counter does NOT decrement. The id is gone forever;
 ## the allocator's next call continues past it.
 func remove_item(item_instance_id: String) -> bool:
+	if not is_inventory_valid():
+		return false
 	var it: RunItem = get_item(item_instance_id)
 	if it == null:
 		return false
