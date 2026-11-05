@@ -37,8 +37,12 @@ func _ready() -> void:
 		encounter_map.generate(preview_seed)
 		var saved_seed: int = int(saved_stream.get("seed", 0))
 		if saved_seed != 0:
+			# The bookkeeping only: current_seed and _is_seeded.
 			Rng.seed_run(saved_seed)
-			Rng.restore(saved_stream)
+		# The machine state is ALWAYS restored: `restore` writes the
+		# captured PRNG position, and it is exact for every seed,
+		# including 0.
+		Rng.restore(saved_stream)
 	map_view.set_map(encounter_map)
 	_update_status("Choose your first encounter")
 

@@ -844,8 +844,12 @@ func resume_run(seed_value: int) -> bool:
 		# The scratch generation must not consume the run's stream.
 		var saved_seed: int = int(saved_rng.get("seed", 0))
 		if saved_seed != 0:
+			# The bookkeeping only: current_seed and _is_seeded.
 			RngServiceScript.seed_run(saved_seed)
-			RngServiceScript.restore(saved_rng)
+		# The machine state is ALWAYS restored: `restore` writes the
+		# captured PRNG position, and it is exact for every seed,
+		# including 0.
+		RngServiceScript.restore(saved_rng)
 		GameLog.warn("run", "resume_run: the map was reproduced from the seed",
 			{"encounter_id": loaded_state.current_encounter_id})
 
@@ -863,8 +867,12 @@ func resume_run(seed_value: int) -> bool:
 	var rng_snapshot: Dictionary = decoded.get("rng", {}) as Dictionary
 	var rng_seed: int = int(rng_snapshot.get("seed", state.seed))
 	if rng_seed != 0:
+		# The bookkeeping only: current_seed and _is_seeded.
 		RngServiceScript.seed_run(rng_seed)
-		RngServiceScript.restore(rng_snapshot)
+	# The machine state is ALWAYS restored: `restore` writes the
+	# captured PRNG position, and it is exact for every seed,
+	# including 0.
+	RngServiceScript.restore(rng_snapshot)
 
 	# The phase is restored from the stable wire name.
 	var wire_phase: String = str(decoded.get("phase", SaveSchemaV5Script.PHASE_PREP))
