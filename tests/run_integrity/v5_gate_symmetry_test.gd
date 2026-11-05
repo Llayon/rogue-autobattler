@@ -20,11 +20,18 @@ extends SceneTree
 const RunSaveRepositoryScript = preload("res://core/save/run_save_repository.gd")
 const SemanticScript = preload("res://core/save/run_domain_semantic_validator.gd")
 
+const PROBE_DIR: String = "user://run_integrity_gate_probe/"
+
 var _passed: int = 0
 var _failed: int = 0
 
 
 func _initialize() -> void:
+	# The probe repository writes into its OWN directory: it must exist,
+	# or the write cannot happen and the assertions about the file on
+	# disk would be vacuously true.
+	DirAccess.make_dir_recursive_absolute(
+		ProjectSettings.globalize_path(PROBE_DIR))
 	await _test_A_the_v5_load_path_runs_the_semantic_gate()
 	await _test_B_the_v5_save_path_runs_the_semantic_gate()
 	await _test_C_a_bad_checkpoint_is_not_written()
@@ -76,7 +83,7 @@ func _test_A_the_v5_load_path_runs_the_semantic_gate() -> void:
 	_assert(not bool(gate.get("success", true)),
 		"the semantic gate rejects the inconsistent checkpoint")
 
-	var repo = RunSaveRepositoryScript.new("user://run_integrity_gate_probe")
+	var repo = RunSaveRepositoryScript.new(PROBE_DIR)
 	var result: RefCounted = repo._load_v5_canonical(dto, "user://probe", 777)
 	_assert(result != null, "the load returns a result")
 	if result != null:
@@ -86,22 +93,32 @@ func _test_A_the_v5_load_path_runs_the_semantic_gate() -> void:
 
 func _test_B_the_v5_save_path_runs_the_semantic_gate() -> void:
 	var dto: Dictionary = _bad_dto()
-	var repo = RunSaveRepositoryScript.new("user://run_integrity_gate_probe")
+	var repo = RunSaveRepositoryScript.new(PROBE_DIR)
 	var result: RefCounted = repo._save_canonical(777, dto, "v5")
 	_assert(result != null, "the save returns a result")
 	if result != null:
 		_assert(not result.is_ok(),
 			"the v5 save path rejects the semantically invalid checkpoint")
+	# The rejection must happen BEFORE the write. Without the pre-write
+	# gate the save still fails, but only in the post-commit validation,
+	# i.e. AFTER the atomic swap -- and then the invalid bytes are
+	# already on disk.
+	var path: String = PROBE_DIR + "run_777.tres"
+	if FileAccess.file_exists(path):
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
+	repo._save_canonical(777, dto, "v5")
+	_assert(not FileAccess.file_exists(path),
+		"the invalid checkpoint never reaches the disk")
 
 
 ## The invalid checkpoint must never reach the disk.
 func _test_C_a_bad_checkpoint_is_not_written() -> void:
-	var path: String = "user://saves/runs/run_777.tres"
+	var path: String = PROBE_DIR + "run_777.tres"
 	# Remove a leftover from a previous run.
 	if FileAccess.file_exists(path):
 		DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
 	var dto: Dictionary = _bad_dto()
-	var repo = RunSaveRepositoryScript.new("user://run_integrity_gate_probe")
+	var repo = RunSaveRepositoryScript.new(PROBE_DIR)
 	repo._save_canonical(777, dto, "v5")
 	if FileAccess.file_exists(path):
 		var f: FileAccess = FileAccess.open(path, FileAccess.READ)
