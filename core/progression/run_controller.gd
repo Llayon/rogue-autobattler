@@ -656,9 +656,9 @@ func _on_battle_ended() -> void:
 	# only hold as long as nothing set the phase back to ENDED; the
 	# latch removes the whole class of the defect. It lives in the
 	# controller because the runner is replaced by every new battle.
-	# MUTATED: a state check instead of the one-shot latch.
-	if runner.state.phase != BattleStateScript.Phase.ENDED:
+	if _battle_outcome_applied:
 		return
+	_battle_outcome_applied = true
 	runner.state.phase = BattleStateScript.Phase.APPLIED
 	var winner: int = runner.state.winner_team
 	# Clear battle lifetime bridge BEFORE the outcome is applied: the
