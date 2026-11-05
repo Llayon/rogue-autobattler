@@ -306,21 +306,36 @@ static func validate(data: Dictionary) -> Dictionary:
 					"item %s listed by unit %s has empty owner"
 						% [itm_str2, unit_id], unit_id))
 
-	# The sequence counters must be exactly the first unused sequence.
-	if int(data.get("next_unit_instance_seq", 0)) != max_unit_seq + 1:
+	# The sequence counters are a MONOTONIC ALLOCATION CURSOR, not
+	# "max live id + 1".
+	#
+	# The allocator never reuses or wraps a consumed id, and a removal
+	# does NOT roll the cursor back. A gap between the cursor and the
+	# live ids is therefore normal and valid:
+	#
+	#     live ids [1, 2, 3], next_seq = 4
+	#     remove 3
+	#     live ids [1, 2],    next_seq = 4   <- valid
+	#
+	# The invariant that matters is that the cursor is STRICTLY above
+	# every live id, so the next allocation can never collide with an
+	# existing identity, and that the cursor starts at 1.
+	var unit_cursor: int = int(data.get("next_unit_instance_seq", 0))
+	if unit_cursor < 1 or unit_cursor <= max_unit_seq:
 		result["success"] = false
 		result["diagnostics"].append(_error(
 			"next_unit_instance_seq_invalid",
-			"next_unit_instance_seq must be first unused sequence (expected %d, got %d)"
-				% [max_unit_seq + 1, int(data.get("next_unit_instance_seq", 0))],
-			str(max_unit_seq + 1)))
-	if int(data.get("next_item_instance_seq", 0)) != max_item_seq + 1:
+			"next_unit_instance_seq must be above every live unit id and at least 1 (max live id %d, got %d)"
+				% [max_unit_seq, unit_cursor],
+			str(max_unit_seq)))
+	var item_cursor: int = int(data.get("next_item_instance_seq", 0))
+	if item_cursor < 1 or item_cursor <= max_item_seq:
 		result["success"] = false
 		result["diagnostics"].append(_error(
 			"next_item_instance_seq_invalid",
-			"next_item_instance_seq must be first unused sequence (expected %d, got %d)"
-				% [max_item_seq + 1, int(data.get("next_item_instance_seq", 0))],
-			str(max_item_seq + 1)))
+			"next_item_instance_seq must be above every live item id and at least 1 (max live id %d, got %d)"
+				% [max_item_seq, item_cursor],
+			str(max_item_seq)))
 
 	return result
 
