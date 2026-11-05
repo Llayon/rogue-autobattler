@@ -1033,9 +1033,14 @@ func _commit_verified_temp(temp: String, target: String, seed_value: int) -> boo
 		if not _ops.rename(temp, target):
 			return false
 		if not _post_commit_validate(target, seed_value):
-			# No previous generation exists; the invalid file remains
-			# on disk under target. The next load_run() surfaces the
-			# recovery error.
+			# No previous generation exists, so there is nothing to roll
+			# back to: the invalid file stays on disk under the target.
+			# The next load_run() surfaces the recovery error for that
+			# slot.
+			#
+			# This is why the v5 SAVE path runs the semantic gate BEFORE
+			# the write: without it the invalid bytes would reach the
+			# disk first and only be rejected here, after the swap.
 			return false
 		return true
 
