@@ -1,107 +1,107 @@
-[
-  {
-    "control": "NC-I1",
-    "red": {
-      "rc": 1,
-      "script_errors": 0,
-      "parse_errors": 0,
-      "semantic_fail": true
-    },
-    "restored_green": {
-      "rc": 0,
-      "script_errors": 0,
-      "parse_errors": 0,
-      "semantic_fail": false
-    }
-  },
-  {
-    "control": "NC-I2",
-    "red": {
-      "rc": 1,
-      "script_errors": 0,
-      "parse_errors": 0,
-      "semantic_fail": true
-    },
-    "restored_green": {
-      "rc": 0,
-      "script_errors": 0,
-      "parse_errors": 0,
-      "semantic_fail": false
-    }
-  },
-  {
-    "control": "NC-I3",
-    "red": {
-      "rc": 1,
-      "script_errors": 0,
-      "parse_errors": 0,
-      "semantic_fail": true
-    },
-    "restored_green": {
-      "rc": 0,
-      "script_errors": 0,
-      "parse_errors": 0,
-      "semantic_fail": false
-    }
-  },
-  {
-    "control": "NC-I4",
-    "red": {
-      "rc": 1,
-      "script_errors": 0,
-      "parse_errors": 0,
-      "semantic_fail": true
-    },
-    "restored_green": {
-      "rc": 0,
-      "script_errors": 0,
-      "parse_errors": 0,
-      "semantic_fail": false
-    }
-  },
-  {
-    "control": "NC-I5",
-    "red": {
-      "rc": 1,
-      "script_errors": 0,
-      "parse_errors": 0,
-      "semantic_fail": true
-    },
-    "restored_green": {
-      "rc": 0,
-      "script_errors": 0,
-      "parse_errors": 0,
-      "semantic_fail": false
-    }
-  },
-  {
-    "control": "NC-I6",
-    "red": {
-      "rc": 1,
-      "script_errors": 0,
-      "parse_errors": 0,
-      "semantic_fail": true
-    },
-    "restored_green": {
-      "rc": 0,
-      "script_errors": 0,
-      "parse_errors": 0,
-      "semantic_fail": false
-    }
-  },
-  {
-    "control": "NC-I7",
-    "red": {
-      "rc": 1,
-      "script_errors": 0,
-      "parse_errors": 0,
-      "semantic_fail": true
-    },
-    "restored_green": {
-      "rc": 0,
-      "script_errors": 0,
-      "parse_errors": 0,
-      "semantic_fail": false
-    }
-  }
+[
+  {
+    "control": "NC-I1",
+    "red": {
+      "rc": 1,
+      "script_errors": 0,
+      "parse_errors": 0,
+      "semantic_fail": true
+    },
+    "restored_green": {
+      "rc": 0,
+      "script_errors": 0,
+      "parse_errors": 0,
+      "semantic_fail": false
+    }
+  },
+  {
+    "control": "NC-I2",
+    "red": {
+      "rc": 1,
+      "script_errors": 0,
+      "parse_errors": 0,
+      "semantic_fail": true
+    },
+    "restored_green": {
+      "rc": 0,
+      "script_errors": 0,
+      "parse_errors": 0,
+      "semantic_fail": false
+    }
+  },
+  {
+    "control": "NC-I3",
+    "red": {
+      "rc": 1,
+      "script_errors": 0,
+      "parse_errors": 0,
+      "semantic_fail": true
+    },
+    "restored_green": {
+      "rc": 0,
+      "script_errors": 0,
+      "parse_errors": 0,
+      "semantic_fail": false
+    }
+  },
+  {
+    "control": "NC-I4",
+    "red": {
+      "rc": 1,
+      "script_errors": 0,
+      "parse_errors": 0,
+      "semantic_fail": true
+    },
+    "restored_green": {
+      "rc": 0,
+      "script_errors": 0,
+      "parse_errors": 0,
+      "semantic_fail": false
+    }
+  },
+  {
+    "control": "NC-I5",
+    "red": {
+      "rc": 1,
+      "script_errors": 0,
+      "parse_errors": 0,
+      "semantic_fail": true
+    },
+    "restored_green": {
+      "rc": 0,
+      "script_errors": 0,
+      "parse_errors": 0,
+      "semantic_fail": false
+    }
+  },
+  {
+    "control": "NC-I6",
+    "red": {
+      "rc": 1,
+      "script_errors": 0,
+      "parse_errors": 0,
+      "semantic_fail": true
+    },
+    "restored_green": {
+      "rc": 0,
+      "script_errors": 0,
+      "parse_errors": 0,
+      "semantic_fail": false
+    }
+  },
+  {
+    "control": "NC-I7",
+    "red": {
+      "rc": 1,
+      "script_errors": 0,
+      "parse_errors": 0,
+      "semantic_fail": true
+    },
+    "restored_green": {
+      "rc": 0,
+      "script_errors": 0,
+      "parse_errors": 0,
+      "semantic_fail": false
+    }
+  }
 ]

@@ -1,8 +1,8 @@
-Godot Engine v4.7.stable.official.5b4e0cb0f - https://godotengine.org
-
-[FAIL] invalid/exhausted direct cursor rejected: 0
-[FAIL] invalid/exhausted direct cursor rejected: -1
-[FAIL] invalid/exhausted direct cursor rejected: 9223372036854775807
-[FAIL] create cannot wrap invalid/exhausted cursor: 9223372036854775807
-[FAIL] direct stale allocator rejects existing identity
-=== allocator boundary: 2 passed, 5 failed ===
+Godot Engine v4.7.stable.official.5b4e0cb0f - https://godotengine.org
+
+[FAIL] invalid/exhausted direct cursor rejected: 0
+[FAIL] invalid/exhausted direct cursor rejected: -1
+[FAIL] invalid/exhausted direct cursor rejected: 9223372036854775807
+[FAIL] create cannot wrap invalid/exhausted cursor: 9223372036854775807
+[FAIL] direct stale allocator rejects existing identity
+=== allocator boundary: 2 passed, 5 failed ===

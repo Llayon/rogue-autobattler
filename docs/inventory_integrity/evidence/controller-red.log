@@ -1,13 +1,13 @@
-Godot Engine v4.7.stable.official.5b4e0cb0f - https://godotengine.org
-
-[INFO ] [     content] Loaded content { "total_resources": 41, "types": ["units", "enemies", "abilities", "effects", "items", "reactions"] }
-[INFO ] [   inventory] item granted { "id": &"unknown_inventory_definition", "size": 1 }
-[FAIL] unknown grant is atomic failure
-[INFO ] [   inventory] item granted { "id": &"warrior", "size": 2 }
-[FAIL] unit definition cannot be granted as item
-[INFO ] [   inventory] item granted { "id": &"potion_strength", "size": 1 }
-[FAIL] unknown definition equip by id rejects atomically
-[FAIL] compatibility equip also rejects unknown definition
-[INFO ] [   inventory] item granted { "id": &"potion_strength", "size": 1 }
-[FAIL] grant propagates domain rejection
-=== controller inventory: 1 passed, 5 failed ===
+Godot Engine v4.7.stable.official.5b4e0cb0f - https://godotengine.org
+
+[INFO ] [     content] Loaded content { "total_resources": 41, "types": ["units", "enemies", "abilities", "effects", "items", "reactions"] }
+[INFO ] [   inventory] item granted { "id": &"unknown_inventory_definition", "size": 1 }
+[FAIL] unknown grant is atomic failure
+[INFO ] [   inventory] item granted { "id": &"warrior", "size": 2 }
+[FAIL] unit definition cannot be granted as item
+[INFO ] [   inventory] item granted { "id": &"potion_strength", "size": 1 }
+[FAIL] unknown definition equip by id rejects atomically
+[FAIL] compatibility equip also rejects unknown definition
+[INFO ] [   inventory] item granted { "id": &"potion_strength", "size": 1 }
+[FAIL] grant propagates domain rejection
+=== controller inventory: 1 passed, 5 failed ===
