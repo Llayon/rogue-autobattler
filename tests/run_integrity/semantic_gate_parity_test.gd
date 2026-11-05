@@ -46,6 +46,10 @@ func _initialize() -> void:
 	_case_S_an_empty_item_definition_id()
 	_case_T_an_int_instead_of_a_string()
 	_case_U_a_non_array_equipped_list()
+	_case_V_a_numeric_unit_instance_id()
+	_case_W_a_numeric_item_instance_id()
+	_case_X_a_numeric_owner_unit_id()
+	_case_Y_a_signed_instance_id_sequence()
 	print("")
 	print("=== STAGE 3E: SEMANTIC GATE PARITY: %d pass / %d fail ===" % [_passed, _failed])
 	if _failed > 0:
@@ -67,7 +71,7 @@ func _base() -> Dictionary:
 	}
 
 
-func _unit(id: String, order: int, hp: int, max_hp: int, equipped: Array) -> Dictionary:
+func _unit(id: Variant, order: int, hp: int, max_hp: int, equipped: Array) -> Dictionary:
 	return {
 		"instance_id": id, "definition_id": &"warrior", "current_hp": hp,
 		"max_hp": max_hp, "bonus_attack": 0, "dead": false,
@@ -75,7 +79,7 @@ func _unit(id: String, order: int, hp: int, max_hp: int, equipped: Array) -> Dic
 	}
 
 
-func _item(id: String, owner: String) -> Dictionary:
+func _item(id: Variant, owner: Variant) -> Dictionary:
 	return {
 		"instance_id": id, "definition_id": &"potion_strength",
 		"owner_unit_id": owner,
@@ -284,6 +288,51 @@ func _case_U_a_non_array_equipped_list() -> void:
 	dto["units"] = [unit]
 	dto["next_unit_instance_seq"] = 2
 	_agree("U: equipped_item_ids is not an array", dto)
+
+
+## The instance ids and the owner id are read through the strict
+## string helper in the original gate. The port must do the same: a
+## numeric id must be REJECTED, not crash the validator (there is no
+## `String(int)` constructor in Godot 4).
+func _case_V_a_numeric_unit_instance_id() -> void:
+	var dto: Dictionary = _base()
+	var unit: Dictionary = _unit("unit_000001", 0, 10, 10, [])
+	unit["instance_id"] = 1
+	dto["units"] = [unit]
+	dto["next_unit_instance_seq"] = 2
+	_agree("V: the unit instance_id is a number", dto)
+
+
+func _case_W_a_numeric_item_instance_id() -> void:
+	var dto: Dictionary = _base()
+	dto["units"] = [_unit("unit_000001", 0, 10, 10, [])]
+	dto["items"] = [_item("item_000001", "")]
+	dto["items"][0]["instance_id"] = 1
+	dto["next_unit_instance_seq"] = 2
+	dto["next_item_instance_seq"] = 2
+	_agree("W: the item instance_id is a number", dto)
+
+
+func _case_X_a_numeric_owner_unit_id() -> void:
+	var dto: Dictionary = _base()
+	dto["units"] = [_unit("unit_000001", 0, 10, 10, [])]
+	dto["items"] = [_item("item_000001", "")]
+	dto["items"][0]["owner_unit_id"] = 1
+	dto["next_unit_instance_seq"] = 2
+	dto["next_item_instance_seq"] = 2
+	_agree("X: the item owner_unit_id is a number", dto)
+
+
+## The sequence extraction accepts a signed integer, exactly like the
+## original: `is_valid_int()` accepts "+5". The port read "+5" as 0,
+## so it demanded a SMALLER cursor than the original and accepted a
+## checkpoint the original rejects.
+func _case_Y_a_signed_instance_id_sequence() -> void:
+	var dto: Dictionary = _base()
+	dto["units"] = [_unit("unit_+5", 0, 10, 10, [])]
+	# The original reads the sequence as 5, so the cursor must be > 5.
+	dto["next_unit_instance_seq"] = 1
+	_agree("Y: a signed instance id has the signed sequence", dto)
 
 
 # ----------------------------------------------------------------

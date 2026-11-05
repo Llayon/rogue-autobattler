@@ -530,7 +530,11 @@ static func validate(data: Dictionary) -> Dictionary:
 	# Bidirectional equipment consistency (H5 A-E).
 	for instance_id in item_instance_to_idx.keys():
 		var it2: Dictionary = items_value[item_instance_to_idx[instance_id]] as Dictionary
-		var owner2: String = String(it2.get("owner_unit_id", ""))
+		# The owner id was validated by the strict string helper in the
+		# item loop, so it is a String here. The re-read must not crash
+		# either: there is no `String(int)` constructor in Godot 4.
+		var owner2_value: Variant = it2.get("owner_unit_id", "")
+		var owner2: String = owner2_value if owner2_value is String or owner2_value is StringName else ""
 		# Invariant A: item.owner set but unit does not list it.
 		if owner2 != "" and unit_instance_to_idx.has(owner2):
 			var unit_equipped: Array = unit_owner_listings.get(owner2, [])
@@ -565,7 +569,10 @@ static func validate(data: Dictionary) -> Dictionary:
 					"unit %s lists unknown item id %s" % [unit_id, itm_str2],
 					unit_id))
 				continue
-			var owner3: String = String((items_value[item_instance_to_idx[itm_str2]] as Dictionary).get("owner_unit_id", ""))
+			# The owner id was validated by the strict string helper in the
+			# item loop. The re-read must not crash either.
+			var owner3_value: Variant = (items_value[item_instance_to_idx[itm_str2]] as Dictionary).get("owner_unit_id", "")
+			var owner3: String = owner3_value if owner3_value is String or owner3_value is StringName else ""
 			if owner3 == "":
 				result["success"] = false
 				result["diagnostics"].append(MigrationDiagnostic.error(

@@ -65,7 +65,13 @@ static func validate(data: Dictionary) -> Dictionary:
 						"unit_required_key_missing",
 						"unit[%d] missing required key %s" % [i, req_key],
 						str(i)))
-			var instance_id: String = String(u.get("instance_id", ""))
+			var instance_id_v: Variant = _strict_str(
+				u.get("instance_id", ""), "instance_id", str(i),
+				result["diagnostics"])
+			if instance_id_v == null:
+				result["success"] = false
+				instance_id_v = ""
+			var instance_id: String = String(instance_id_v)
 			if instance_id == "":
 				result["success"] = false
 				result["diagnostics"].append(_error(
@@ -220,7 +226,13 @@ static func validate(data: Dictionary) -> Dictionary:
 						"item_required_key_missing",
 						"item[%d] missing required key %s" % [i, req_key],
 						str(i)))
-			var item_id: String = String(it.get("instance_id", ""))
+			var item_id_v: Variant = _strict_str(
+				it.get("instance_id", ""), "instance_id", str(i),
+				result["diagnostics"])
+			if item_id_v == null:
+				result["success"] = false
+				item_id_v = ""
+			var item_id: String = String(item_id_v)
 			if item_id == "":
 				result["success"] = false
 				result["diagnostics"].append(_error(
@@ -247,7 +259,13 @@ static func validate(data: Dictionary) -> Dictionary:
 				result["diagnostics"].append(_error(
 					"empty_item_definition_id",
 					"item[%d] has empty definition_id" % i, item_id))
-			var owner: String = String(it.get("owner_unit_id", ""))
+			var owner_v: Variant = _strict_str(
+				it.get("owner_unit_id", ""), "owner_unit_id", item_id,
+				result["diagnostics"])
+			if owner_v == null:
+				result["success"] = false
+				owner_v = ""
+			var owner: String = String(owner_v)
 			# A loose item (no owner) is legal. An owner that names a
 			# unit which does not exist is not.
 			if owner != "" and not unit_instance_to_idx.has(owner):
@@ -260,7 +278,11 @@ static func validate(data: Dictionary) -> Dictionary:
 	# Bidirectional equipment consistency.
 	for instance_id in item_instance_to_idx.keys():
 		var it2: Dictionary = items_value[item_instance_to_idx[instance_id]] as Dictionary
-		var owner2: String = String(it2.get("owner_unit_id", ""))
+		# The owner id was validated by the strict string helper in the
+		# item loop, so it is a String here. The re-read must not crash
+		# either: there is no `String(int)` constructor in Godot 4.
+		var owner2_value: Variant = it2.get("owner_unit_id", "")
+		var owner2: String = owner2_value if owner2_value is String or owner2_value is StringName else ""
 		# Invariant A: the item names an owner, but the unit does not
 		# list it.
 		if owner2 != "" and unit_instance_to_idx.has(owner2):
@@ -296,9 +318,10 @@ static func validate(data: Dictionary) -> Dictionary:
 					"unit %s lists unknown item id %s" % [unit_id, itm_str2],
 					unit_id))
 				continue
-			var owner3: String = String(
-				(items_value[item_instance_to_idx[itm_str2]] as Dictionary)
-					.get("owner_unit_id", ""))
+			# The owner id was validated by the strict string helper in the
+			# item loop. The re-read must not crash either.
+			var owner3_value: Variant = (items_value[item_instance_to_idx[itm_str2]] as Dictionary).get("owner_unit_id", "")
+			var owner3: String = owner3_value if owner3_value is String or owner3_value is StringName else ""
 			if owner3 == "":
 				result["success"] = false
 				result["diagnostics"].append(_error(
@@ -345,17 +368,21 @@ static func validate(data: Dictionary) -> Dictionary:
 ## The canonical form is `unit_000001` / `item_000001`: the digits at
 ## the end are the sequence. An id without the expected prefix or
 ## without digits has no sequence.
+## Extracts the numeric sequence of an instance id.
+##
+## The canonical form is `unit_000001` / `item_000001`: the digits at
+## the end are the sequence. The semantics are EXACTLY the original
+## gate's: the remainder must be a valid integer, so a signed form
+## such as "+5" is a sequence of 5. A hand-rolled digit loop would
+## read "+5" as 0, and the port would then demand a smaller cursor
+## than the original and accept a checkpoint the original rejects.
 static func _seq_from_instance_id(instance_id: String, prefix: String) -> int:
 	if not instance_id.begins_with(prefix):
 		return 0
-	var digits: String = instance_id.substr(prefix.length())
-	if digits.is_empty():
+	var rest: String = instance_id.substr(prefix.length(), instance_id.length() - prefix.length())
+	if not rest.is_valid_int():
 		return 0
-	for i in digits.length():
-		var ch: String = digits[i]
-		if ch < "0" or ch > "9":
-			return 0
-	return int(digits)
+	return int(rest)
 
 
 ## Strict string check: the canonical validator accepts a String or a
