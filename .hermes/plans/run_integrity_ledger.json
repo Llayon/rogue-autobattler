@@ -76,16 +76,16 @@
     {
       "id": "RI-10",
       "title": "bench capacity / purchase atomicity",
-      "status": "CONFIRMED",
-      "evidence": "core/progression/run_controller.gd:109-126 buy_unit() checks phase, offer and gold, then mutates gold (:119), creates the unit (:121) and takes the offer (:122) - it never checks the bench capacity. core/balance.gd:83 MAX_BENCH_UNITS = 4 exists but is not consulted here.",
-      "closed": false
+      "status": "CLOSED",
+      "evidence": "CLOSED in 50c199c. buy_unit checked the phase, the offer and the gold, then mutated the gold, created the unit on the bench and took the offer -- it never consulted MAX_BENCH_UNITS. Measured: with a bench of 4 (the capacity) the purchase still went through and the bench grew to 5: the gold was spent, the unit was created and the offer was taken. The capacity check is now BEFORE any mutation, so a refused purchase changes nothing. Suite: tests/run_integrity/bench_capacity_test.gd (4 cases).",
+      "closed": true
     },
     {
       "id": "RI-11",
       "title": "no run-integrity test suite exists",
-      "status": "CONFIRMED",
-      "evidence": "tests/ has no run_integrity/ directory. The existing suites cover the v4 mapper and the save repository, but none of them asserts a checkpoint round trip, RNG continuation, battle outcome transaction or phase guard.",
-      "closed": false
+      "status": "CLOSED",
+      "evidence": "CLOSED by the run-integrity effort itself: tests/run_integrity/ now holds 17 suites that assert the checkpoint round trip, the RNG continuation, the RNG wire contract, the battle outcome transaction, the transaction atomicity, the command phase guards, the bench capacity, the semantic gate parity, the sequence cursor contract, the subsystem snapshot, the v4 migration, the v5 gate symmetry, the continue routing, the malformed file diagnostics, the checkpoint determinism and the critic findings. The original finding was that NO such suite existed; the suites are the fix.",
+      "closed": true
     },
     {
       "id": "RI-12",
@@ -222,6 +222,17 @@
       "ci_gates": "10/10 clean",
       "lint": "0 errors, 5 warnings (baseline)",
       "editor_parse": "0 errors"
+    },
+    "push": "NOT performed (no explicit permission)"
+  },
+  "ri10": {
+    "baseline": "ead6d1f",
+    "head": "50c199c",
+    "suite": "tests/run_integrity/bench_capacity_test.gd (4 cases)",
+    "verification": {
+      "runner": "93 suites / 8461 assertions / 0 fail / 0 unparsed",
+      "ci_gates": "10/10 clean",
+      "lint": "0 errors, 5 warnings (baseline)"
     },
     "push": "NOT performed (no explicit permission)"
   }
