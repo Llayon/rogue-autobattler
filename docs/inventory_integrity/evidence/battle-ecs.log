@@ -1,0 +1,111 @@
+=== Battle ECS suite runner ===
+godot    : D:/Programms/Max/Godot_v4.7-stable_win64.exe/Godot_v4.7-stable_win64_console.exe
+root     : C:\Users\user\Documents\GodotProjects\rogue-autobattler-inventory
+expected : 94 suites
+probes   : 1 (not suites, judged by a comparator)
+            tests/battle_ecs/effects/b64c_ah_diff_probe.gd — consumed by the A-H semantic differential comparator
+
+  [OK]   tests/battle_ecs/battle_ecs_adversarial_test.gd — 37 pass / 0 fail
+  [OK]   tests/battle_ecs/battle_ecs_combat_test.gd — 51 pass / 0 fail
+  [OK]   tests/battle_ecs/battle_ecs_contracts_world_test.gd — 74 pass / 0 fail
+  [OK]   tests/battle_ecs/battle_setup_builder_test.gd — 67 pass / 0 fail
+  [OK]   tests/battle_ecs/determinism_stress_test.gd — 105 pass / 0 fail
+  [OK]   tests/battle_ecs/effects/b11_repair_test.gd — 62 pass / 0 fail
+  [OK]   tests/battle_ecs/effects/b12_repair_test.gd — 21 pass / 0 fail
+  [OK]   tests/battle_ecs/effects/b20_event_namespace_test.gd — 109 pass / 0 fail
+  [OK]   tests/battle_ecs/effects/b21_event_contract_test.gd — 38 pass / 0 fail
+  [OK]   tests/battle_ecs/effects/b22_effect_ancestry_test.gd — 502 pass / 0 fail
+  [OK]   tests/battle_ecs/effects/b23_parent_ancestry_test.gd — 44 pass / 0 fail
+  [OK]   tests/battle_ecs/effects/b31_contentdb_typed_id_test.gd — 31 pass / 0 fail
+  [OK]   tests/battle_ecs/effects/b32_periodic_foundation_test.gd — 39 pass / 0 fail
+  [OK]   tests/battle_ecs/effects/b33_periodic_payload_test.gd — 40 pass / 0 fail
+  [OK]   tests/battle_ecs/effects/b3_burn_regen_test.gd — 116 pass / 0 fail
+  [OK]   tests/battle_ecs/effects/b41_indefinite_blocking_test.gd — 36 pass / 0 fail
+  [OK]   tests/battle_ecs/effects/b4_stun_test.gd — 37 pass / 0 fail
+  [OK]   tests/battle_ecs/effects/b51_dispatcher_parity_test.gd — 151 pass / 0 fail
+  [OK]   tests/battle_ecs/effects/b5_dispatcher_test.gd — 188 pass / 0 fail
+  [OK]   tests/battle_ecs/effects/b611_perform_attack_reaction_test.gd — 586 pass / 0 fail
+  [OK]   tests/battle_ecs/effects/b61_attack_math_test.gd — 2 pass / 0 fail
+  [OK]   tests/battle_ecs/effects/b61_perform_attack_effect_test.gd — 153 pass / 0 fail
+  [OK]   tests/battle_ecs/effects/b61_sim_attack_parity_test.gd — 44 pass / 0 fail
+  [OK]   tests/battle_ecs/effects/b62a_ownership_test.gd — 40 pass / 0 fail
+  [OK]   tests/battle_ecs/effects/b62a_reaction_content_test.gd — 38 pass / 0 fail
+  [OK]   tests/battle_ecs/effects/b62b_counterattack_adversarial_test.gd — 435 pass / 0 fail
+  [OK]   tests/battle_ecs/effects/b62b_counterattack_rundomain_test.gd — 23 pass / 0 fail
+  [OK]   tests/battle_ecs/effects/b62b_reaction_validator_test.gd — 62 pass / 0 fail
+  [OK]   tests/battle_ecs/effects/b63_aao_closure_test.gd — 700 pass / 0 fail
+  [OK]   tests/battle_ecs/effects/b63_aoo_adversarial_test.gd — 43 pass / 0 fail
+  [OK]   tests/battle_ecs/effects/b63_movement_window_test.gd — 14 pass / 0 fail
+  [OK]   tests/battle_ecs/effects/b64a_reaction_chance_test.gd — 270 pass / 0 fail
+  [OK]   tests/battle_ecs/effects/b64b1_commit_failure_test.gd — 92 pass / 0 fail
+  [OK]   tests/battle_ecs/effects/b64b_damage_transaction_test.gd — 217 pass / 0 fail
+  [OK]   tests/battle_ecs/effects/b64c_action_discovery_test.gd — 5 pass / 0 fail
+  [OK]   tests/battle_ecs/effects/b64c_cursor_first_entity_test.gd — 4 pass / 0 fail
+  [OK]   tests/battle_ecs/effects/b64c_drained_window_test.gd — 7 pass / 0 fail
+  [OK]   tests/battle_ecs/effects/b64c_effect_result_semantics_test.gd — 18 pass / 0 fail
+  [OK]   tests/battle_ecs/effects/b64c_legacy_process_tick_test.gd — 20 pass / 0 fail
+  [OK]   tests/battle_ecs/effects/b64c_periodic_cursor_live_membership_test.gd — 59 pass / 0 fail
+  [OK]   tests/battle_ecs/effects/b64c_periodic_discovery_test.gd — 7 pass / 0 fail
+  [OK]   tests/battle_ecs/effects/b64c_pre_damage_window_test.gd — 219 pass / 0 fail
+  [OK]   tests/battle_ecs/effects/b64c_r1_r2_dispatch_order_test.gd — 68 pass / 0 fail
+  [OK]   tests/battle_ecs/effects/b64c_sibling_order_test.gd — 15 pass / 0 fail
+  [OK]   tests/battle_ecs/effects/b64c_validator_guard_test.gd — 13 pass / 0 fail
+  [OK]   tests/battle_ecs/effects/b64c_window_sibling_order_test.gd — 6 pass / 0 fail
+  [OK]   tests/battle_ecs/effects/b64d_shield_block_test.gd — 186 pass / 0 fail
+  [OK]   tests/battle_ecs/effects/b65_max_events_window_parity_test.gd — 27 pass / 0 fail
+  [OK]   tests/battle_ecs/effects/b65_s28_hostile_minimum_e2e_test.gd — 16 pass / 0 fail
+  [OK]   tests/battle_ecs/effects/b65_zero_damage_stalemate_test.gd — 9 pass / 0 fail
+  [OK]   tests/battle_ecs/effects/b6_trigger_integration_test.gd — 383 pass / 0 fail
+  [OK]   tests/battle_ecs/effects/effect_core_contracts_test.gd — 82 pass / 0 fail
+  [OK]   tests/battle_ecs/effects/real_attack_up_test.gd — 36 pass / 0 fail
+  [OK]   tests/battle_ecs/effects/status_and_heal_test.gd — 71 pass / 0 fail
+  [OK]   tests/battle_ecs/identity_lifecycle_test.gd — 65 pass / 0 fail
+  [OK]   tests/battle_ecs/legacy_semantic_comparison_test.gd — 22 pass / 0 fail
+  [OK]   tests/battle_ecs/lifecycle_edge_test.gd — 176 pass / 0 fail
+  [OK]   tests/battle_ecs/performance_benchmark_test.gd — 20 pass / 0 fail
+  [OK]   tests/battle_ecs/real_content_test.gd — 42 pass / 0 fail
+  [OK]   tests/deterministic_rng_test.gd — 446 pass / 0 fail
+  [OK]   tests/inventory_integrity/allocator_boundary_test.gd — 7 pass / 0 fail
+  [OK]   tests/inventory_integrity/battle_inventory_boundary_test.gd — 5 pass / 0 fail
+  [OK]   tests/inventory_integrity/controller_inventory_test.gd — 6 pass / 0 fail
+  [OK]   tests/inventory_integrity/inventory_integrity_test.gd — 35 pass / 0 fail
+  [OK]   tests/inventory_integrity/negative_control_test.gd — 7 pass / 0 fail
+  [OK]   tests/legacy/shield_block_legacy_compatibility_test.gd — 122 pass / 0 fail
+  [OK]   tests/legacy_characterization/legacy_characterization_test.gd — 25 pass / 0 fail
+  [OK]   tests/legacy_save_fixtures/loader_test.gd — 60 pass / 0 fail
+  [OK]   tests/progression/run_unit_test.gd — 5 pass / 0 fail
+  [OK]   tests/rng_characterization_test.gd — 11 pass / 0 fail
+  [OK]   tests/rng_facade_migration_test.gd — 42 pass / 0 fail
+  [OK]   tests/run_domain/legacy_battle_participant_map_test.gd — 50 pass / 0 fail
+  [OK]   tests/run_domain/run_controller_stable_identity_test.gd — 152 pass / 0 fail
+  [OK]   tests/run_domain/run_domain_state_test.gd — 182 pass / 0 fail
+  [OK]   tests/run_domain/run_state_v4_mapper_test.gd — 69 pass / 0 fail
+  [OK]   tests/run_domain/save_service_v4_test.gd — 29 pass / 0 fail
+  [OK]   tests/run_domain/ui_stable_identity_test.gd — 13 pass / 0 fail
+  [OK]   tests/run_integrity/checkpoint_determinism_test.gd — 9 pass / 0 fail
+  [OK]   tests/run_integrity/checkpoint_roundtrip_test.gd — 41 pass / 0 fail
+  [OK]   tests/run_integrity/continue_routing_test.gd — 16 pass / 0 fail
+  [OK]   tests/run_integrity/critic_findings_test.gd — 9 pass / 0 fail
+  [OK]   tests/run_integrity/malformed_file_diagnostics_test.gd — 12 pass / 0 fail
+  [OK]   tests/run_integrity/rng_resume_continuity_test.gd — 10 pass / 0 fail
+  [OK]   tests/run_integrity/rng_wire_precision_test.gd — 64 pass / 0 fail
+  [OK]   tests/run_integrity/semantic_gate_parity_test.gd — 21 pass / 0 fail
+  [OK]   tests/run_integrity/sequence_cursor_contract_test.gd — 15 pass / 0 fail
+  [OK]   tests/run_integrity/subsystem_snapshot_test.gd — 37 pass / 0 fail
+  [OK]   tests/run_integrity/v4_migration_test.gd — 18 pass / 0 fail
+  [OK]   tests/run_integrity/v5_gate_symmetry_test.gd — 7 pass / 0 fail
+  [OK]   tests/run_tests.gd — 524 pass / 0 fail
+  [OK]   tests/save_repository/run_save_file_ops_test.gd — 17 pass / 0 fail
+  [OK]   tests/save_repository/save_repository_test.gd — 152 pass / 0 fail
+  [OK]   tests/save_schema_v4/byte_for_byte_determinism_test.gd — 31 pass / 0 fail
+  [OK]   tests/save_schema_v4/save_schema_v4_test.gd — 146 pass / 0 fail
+
+=== SUMMARY ===
+expected : 94
+executed : 94
+passed   : 94
+failed   : 0
+unparsed : 0
+assertions: 8438 pass / 0 fail
+
+RUNNER: GREEN

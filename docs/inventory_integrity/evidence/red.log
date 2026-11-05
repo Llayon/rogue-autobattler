@@ -1,0 +1,8 @@
+Godot Engine v4.7.stable.official.5b4e0cb0f - https://godotengine.org
+
+[FAIL] empty definition rejected atomically
+[FAIL] T4 stale cursor rejected without mutation
+[FAIL] T1 duplicate identity rejected atomically
+[FAIL] dangling equipment rejected atomically
+[FAIL] invalid old owner rejected atomically
+=== inventory integrity: 17 passed, 5 failed ===
