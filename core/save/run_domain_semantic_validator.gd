@@ -81,17 +81,59 @@ static func validate(data: Dictionary) -> Dictionary:
 				var seq: int = _seq_from_instance_id(instance_id, "unit_")
 				if seq > max_unit_seq:
 					max_unit_seq = seq
-			var definition_id: String = String(u.get("definition_id", ""))
+			var definition_id_v: Variant = _strict_str(
+				u.get("definition_id", ""), "definition_id", instance_id,
+				result["diagnostics"])
+			if definition_id_v == null:
+				result["success"] = false
+				definition_id_v = ""
+			var definition_id: String = String(definition_id_v)
 			if definition_id == "":
 				result["success"] = false
 				result["diagnostics"].append(_error(
 					"empty_unit_definition_id",
 					"unit[%d] (%s) has empty definition_id" % [i, instance_id],
 					instance_id))
-			var current_hp: int = int(u.get("current_hp", 0))
-			var max_hp: int = int(u.get("max_hp", 0))
-			var location: int = int(u.get("location", -1))
-			var order: int = int(u.get("order", -1))
+			var current_hp_v: Variant = _strict_int(
+				u.get("current_hp", 0), "current_hp", instance_id,
+				result["diagnostics"])
+			if current_hp_v == null:
+				result["success"] = false
+				current_hp_v = 0
+			var current_hp: int = int(current_hp_v)
+			var max_hp_v: Variant = _strict_int(
+				u.get("max_hp", 0), "max_hp", instance_id,
+				result["diagnostics"])
+			if max_hp_v == null:
+				result["success"] = false
+				max_hp_v = 0
+			var max_hp: int = int(max_hp_v)
+			var bonus_attack_v: Variant = _strict_int(
+				u.get("bonus_attack", 0), "bonus_attack", instance_id,
+				result["diagnostics"])
+			if bonus_attack_v == null:
+				result["success"] = false
+				bonus_attack_v = 0
+			var location_v: Variant = _strict_int(
+				u.get("location", -1), "location", instance_id,
+				result["diagnostics"])
+			if location_v == null:
+				result["success"] = false
+				location_v = 0
+			var location: int = int(location_v)
+			var order_v: Variant = _strict_int(
+				u.get("order", -1), "order", instance_id,
+				result["diagnostics"])
+			if order_v == null:
+				result["success"] = false
+				order_v = 0
+			var order: int = int(order_v)
+			var dead_v: Variant = _strict_bool(
+				u.get("dead", false), "dead", instance_id,
+				result["diagnostics"])
+			if dead_v == null:
+				result["success"] = false
+				dead_v = false
 
 			# Location must be 0 or 1.
 			if location != 0 and location != 1:
@@ -132,11 +174,31 @@ static func validate(data: Dictionary) -> Dictionary:
 						% [instance_id, current_hp, max_hp], instance_id))
 
 			# The equipped item ids of this unit.
-			var equipped: Array = u.get("equipped_item_ids", []) as Array
-			var listing: Array = []
-			for e in equipped:
-				listing.append(String(e))
-			unit_owner_listings[instance_id] = listing
+			var equipped_v: Variant = _strict_array(
+				u.get("equipped_item_ids", []), "equipped_item_ids",
+				instance_id, result["diagnostics"])
+			if equipped_v == null:
+				result["success"] = false
+				equipped_v = [] as Array
+			var equipped: Array = equipped_v
+			# A duplicate entry inside one unit's list is an error.
+			var seen_equipped: Dictionary = {}
+			for itm in equipped:
+				var itm_str_v: Variant = _strict_str(
+					itm, "equipped_item_ids_entry", instance_id,
+					result["diagnostics"])
+				if itm_str_v == null:
+					result["success"] = false
+					itm_str_v = ""
+				var itm_str: String = String(itm_str_v)
+				if seen_equipped.has(itm_str):
+					result["success"] = false
+					result["diagnostics"].append(_error(
+						"duplicate_in_unit_equipped",
+						"unit %s has duplicate equipped item id %s"
+							% [instance_id, itm_str], instance_id))
+				seen_equipped[itm_str] = true
+			unit_owner_listings[instance_id] = equipped
 
 	var max_item_seq: int = 0
 	var item_instance_to_idx: Dictionary = {}
@@ -174,6 +236,17 @@ static func validate(data: Dictionary) -> Dictionary:
 				var seq: int = _seq_from_instance_id(item_id, "item_")
 				if seq > max_item_seq:
 					max_item_seq = seq
+			var item_definition_v: Variant = _strict_str(
+				it.get("definition_id", ""), "definition_id", item_id,
+				result["diagnostics"])
+			if item_definition_v == null:
+				result["success"] = false
+				item_definition_v = ""
+			if String(item_definition_v) == "":
+				result["success"] = false
+				result["diagnostics"].append(_error(
+					"empty_item_definition_id",
+					"item[%d] has empty definition_id" % i, item_id))
 			var owner: String = String(it.get("owner_unit_id", ""))
 			# A loose item (no owner) is legal. An owner that names a
 			# unit which does not exist is not.
@@ -268,6 +341,63 @@ static func _seq_from_instance_id(instance_id: String, prefix: String) -> int:
 		if ch < "0" or ch > "9":
 			return 0
 	return int(digits)
+
+
+## Strict string check: the canonical validator accepts a String or a
+## StringName only.
+static func _strict_str(value: Variant, key: String,
+		instance_id: String, diags: Array) -> Variant:
+	if typeof(value) == TYPE_STRING or typeof(value) == TYPE_STRING_NAME:
+		return value
+	diags.append(_error(
+		"unit_field_type_invalid",
+		"%s.%s has wrong type %s"
+			% [instance_id, key, type_string(typeof(value))],
+		instance_id))
+	return null
+
+
+## Strict int check: the canonical validator accepts TYPE_INT only.
+##
+## The wire layer (SaveSchemaV4._wire_int) is the only place that
+## coerces an integral float to an int. A canonical DTO must hold
+## ints, not floats.
+static func _strict_int(value: Variant, key: String,
+		instance_id: String, diags: Array) -> Variant:
+	if typeof(value) == TYPE_INT:
+		return value
+	diags.append(_error(
+		"unit_field_type_invalid",
+		"%s.%s has wrong type %s (canonical validator accepts only TYPE_INT)"
+			% [instance_id, key, type_string(typeof(value))],
+		instance_id))
+	return null
+
+
+## Strict bool check: the canonical validator accepts TYPE_BOOL only.
+static func _strict_bool(value: Variant, key: String,
+		instance_id: String, diags: Array) -> Variant:
+	if typeof(value) == TYPE_BOOL:
+		return value
+	diags.append(_error(
+		"unit_field_type_invalid",
+		"%s.%s has wrong type %s"
+			% [instance_id, key, type_string(typeof(value))],
+		instance_id))
+	return null
+
+
+## Strict array check: the canonical validator accepts an Array only.
+static func _strict_array(value: Variant, key: String,
+		instance_id: String, diags: Array) -> Variant:
+	if value is Array:
+		return value
+	diags.append(_error(
+		"unit_field_type_invalid",
+		"%s.%s has wrong type %s"
+			% [instance_id, key, type_string(typeof(value))],
+		instance_id))
+	return null
 
 
 static func _error(code: String, detail: String, context: String) -> RefCounted:

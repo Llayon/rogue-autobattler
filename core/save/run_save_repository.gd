@@ -393,6 +393,38 @@ static func _normalize_wire_v5(parsed: Dictionary) -> Dictionary:
 			rng_out["state"] = SaveSchemaV5Script.encode_int64(
 				int(decoded_state.get("value", 0)))
 		out["rng"] = rng_out
+	# The nested unit integers must be coerced back from the JSON
+	# floats, exactly like the v4 normalizer does. Without this the
+	# canonical DTO would carry floats in the unit fields, and the
+	# strict semantic gate would reject a LEGITIMATE checkpoint.
+	if out.has("units"):
+		var units_value: Variant = out["units"]
+		if not (units_value is Array):
+			return {}
+		var normalized_units: Array = []
+		for u in units_value:
+			if not (u is Dictionary):
+				return {}
+			var nu: Dictionary = (u as Dictionary).duplicate()
+			for k in UNIT_INTEGER_FIELDS:
+				if nu.has(k):
+					var r2: Dictionary = SaveSchemaV5Script._wire_int(nu[k])
+					if not bool(r2.get("ok", false)):
+						return {}
+					nu[k] = r2.get("value", 0)
+			normalized_units.append(nu)
+		out["units"] = normalized_units
+	if out.has("encounter_visited_ids"):
+		var ids: Variant = out["encounter_visited_ids"]
+		if not (ids is Array):
+			return {}
+		var normalized_ids: Array = []
+		for v in (ids as Array):
+			var r3: Dictionary = SaveSchemaV5Script._wire_int(v)
+			if not bool(r3.get("ok", false)):
+				return {}
+			normalized_ids.append(r3.get("value", 0))
+		out["encounter_visited_ids"] = normalized_ids
 	return out
 
 

@@ -40,6 +40,12 @@ func _initialize() -> void:
 	_case_M_a_clean_state_is_accepted()
 	_case_N_the_missing_owner_unit()
 	_case_O_an_item_with_an_unknown_owner()
+	_case_P_a_float_instead_of_an_int()
+	_case_Q_a_string_instead_of_a_bool()
+	_case_R_a_duplicate_equipped_entry()
+	_case_S_an_empty_item_definition_id()
+	_case_T_an_int_instead_of_a_string()
+	_case_U_a_non_array_equipped_list()
 	print("")
 	print("=== STAGE 3E: SEMANTIC GATE PARITY: %d pass / %d fail ===" % [_passed, _failed])
 	if _failed > 0:
@@ -218,6 +224,66 @@ func _case_O_an_item_with_an_unknown_owner() -> void:
 	dto["next_unit_instance_seq"] = 2
 	dto["next_item_instance_seq"] = 2
 	_agree("O: a loose item with no owner is legal", dto)
+
+
+## The original gate reads the unit fields with STRICT helpers: an int
+## field must hold TYPE_INT, a bool field TYPE_BOOL, a string field a
+## String or a StringName, and the equipped list an Array. The
+## extracted gate must reject exactly the same inputs.
+func _case_P_a_float_instead_of_an_int() -> void:
+	var dto: Dictionary = _base()
+	var unit: Dictionary = _unit("unit_000001", 0, 10, 10, [])
+	unit["current_hp"] = 10.0
+	dto["units"] = [unit]
+	dto["next_unit_instance_seq"] = 2
+	_agree("P: current_hp is a float instead of an int", dto)
+
+
+func _case_Q_a_string_instead_of_a_bool() -> void:
+	var dto: Dictionary = _base()
+	var unit: Dictionary = _unit("unit_000001", 0, 10, 10, [])
+	unit["dead"] = "no"
+	dto["units"] = [unit]
+	dto["next_unit_instance_seq"] = 2
+	_agree("Q: dead is a string instead of a bool", dto)
+
+
+func _case_R_a_duplicate_equipped_entry() -> void:
+	var dto: Dictionary = _base()
+	var unit: Dictionary = _unit("unit_000001", 0, 10, 10, ["item_000001", "item_000001"])
+	dto["units"] = [unit]
+	dto["items"] = [_item("item_000001", "unit_000001")]
+	dto["next_unit_instance_seq"] = 2
+	dto["next_item_instance_seq"] = 2
+	_agree("R: one unit lists the same item twice", dto)
+
+
+func _case_S_an_empty_item_definition_id() -> void:
+	var dto: Dictionary = _base()
+	dto["units"] = [_unit("unit_000001", 0, 10, 10, [])]
+	dto["items"] = [_item("item_000001", "")]
+	dto["items"][0]["definition_id"] = &""
+	dto["next_unit_instance_seq"] = 2
+	dto["next_item_instance_seq"] = 2
+	_agree("S: the item has an empty definition_id", dto)
+
+
+func _case_T_an_int_instead_of_a_string() -> void:
+	var dto: Dictionary = _base()
+	var unit: Dictionary = _unit("unit_000001", 0, 10, 10, [])
+	unit["definition_id"] = 42
+	dto["units"] = [unit]
+	dto["next_unit_instance_seq"] = 2
+	_agree("T: definition_id is an int instead of a string", dto)
+
+
+func _case_U_a_non_array_equipped_list() -> void:
+	var dto: Dictionary = _base()
+	var unit: Dictionary = _unit("unit_000001", 0, 10, 10, [])
+	unit["equipped_item_ids"] = "item_000001"
+	dto["units"] = [unit]
+	dto["next_unit_instance_seq"] = 2
+	_agree("U: equipped_item_ids is not an array", dto)
 
 
 # ----------------------------------------------------------------
