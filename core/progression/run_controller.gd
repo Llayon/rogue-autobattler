@@ -658,7 +658,6 @@ func _on_battle_ended() -> void:
 	# controller because the runner is replaced by every new battle.
 	if _battle_outcome_applied:
 		return
-	_battle_outcome_applied = true
 	runner.state.phase = BattleStateScript.Phase.APPLIED
 	var winner: int = runner.state.winner_team
 	# Clear battle lifetime bridge BEFORE the outcome is applied: the
@@ -684,16 +683,22 @@ func _on_battle_ended() -> void:
 		# counters. Writing it later left a window in which the disk
 		# held the outcome but no offer, and the resumed run could not
 		# reach the reward at all.
+		# S3.1: победа на MAX_ROUND завершает ран.
+		#
+		# The end of the run is decided BEFORE the write: a finished
+		# run must NOT write a checkpoint, not even to delete it right
+		# afterwards. Writing it first left a window in which a
+		# finished run was resumable, and the window was not tight: it
+		# spanned the reward emission and the meta-unlock draws.
+		if state.round_index > BalanceScript.MAX_ROUND:
+			_end_run(true)
+			return
 		_enter_reward_offer()
 		_set_phase(Phase.REWARD)
 		# The TRANSACTION: the outcome, the offer and the stream
 		# position are on the disk in ONE write.
-		save_now()
+		_write_outcome()
 		GameBus.emit_reward_offered(reward.offered_ids())
-		# S3.1: победа на MAX_ROUND завершает ран.
-		if state.round_index > BalanceScript.MAX_ROUND:
-			_end_run(true)
-			return
 	elif winner == 1:
 		state.losses += 1
 		state.lives -= 1
@@ -710,7 +715,7 @@ func _on_battle_ended() -> void:
 		# continues the same stream.
 		_refresh_shop()
 		# The TRANSACTION: the outcome is on the disk in ONE write.
-		save_now()
+		_write_outcome()
 	else:
 		# A neutral outcome ends the run too, and it is not counted as
 		# a loss. The run file is removed with the run.
@@ -851,10 +856,32 @@ func _clear_active_run() -> void:
 func _delete_run_file() -> void:
 	if state == null:
 		return
+	var removed: bool = false
 	if save_repository != null:
-		SaveService._delete_run_with_repository(state.seed, save_repository)
-		return
-	SaveService.delete_run(state.seed)
+		removed = SaveService._delete_run_with_repository(
+			state.seed, save_repository)
+	else:
+		removed = SaveService.delete_run(state.seed)
+	if not removed:
+		# A finished run that stays on the disk is resumable, so the
+		# failure must be visible.
+		GameLog.error("run", "the finished run file was not removed",
+			{"seed": state.seed})
+
+## Writes the checkpoint of the applied outcome.
+##
+## The idempotence latch is consumed ONLY when the checkpoint landed.
+## A failed write leaves the outcome applied in memory and still
+## persistable: the latch would otherwise make the outcome
+## unrecoverable, because every later attempt would return early.
+func _write_outcome() -> bool:
+	var written: bool = save_now()
+	if written:
+		_battle_outcome_applied = true
+	else:
+		GameLog.error("run", "the outcome checkpoint failed to write",
+			{"seed": state.seed})
+	return written
 
 ## S3.3: загружает RunDomainState из диска по seed и продолжает ран.
 ## Phase 1 / T3F.7: live state is RunDomainState. We load the

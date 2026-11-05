@@ -1147,9 +1147,19 @@ func delete_run(seed_value: int) -> bool:
 	if seed_value == 0:
 		return false
 	var path: String = _run_path(seed_value)
-	if not _ops.exists(path):
-		return true
-	return _ops.remove(path)
+	# The WHOLE slot is removed. The `.commit-old` is the authoritative
+	# generation when the target is missing -- the recovery path
+	# restores it -- so leaving it behind would resurrect the deleted
+	# slot on the next load. The temp file and the legacy backup
+	# belong to the slot as well.
+	var removed: bool = true
+	for candidate in [path, path + COMMIT_OLD_SUFFIX,
+			path + TEMP_SUFFIX, path + BACKUP_SUFFIX]:
+		if not _ops.exists(candidate):
+			continue
+		if not _ops.remove(candidate):
+			removed = false
+	return removed
 
 
 func _read_dict_text(path: String) -> Dictionary:
