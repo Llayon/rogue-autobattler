@@ -839,6 +839,10 @@ func resume_run(seed_value: int) -> bool:
 		RngServiceScript.seed_run(loaded_state.seed)
 		new_map.generate(loaded_state.seed)
 		new_map.start_run()
+		# The walked path is NOT reproducible from the seed: the graph is,
+		# but the nodes the run actually walked are not. The authoritative
+		# list is the domain state's, so it is applied to the graph.
+		new_map.mark_visited(loaded_state.encounter_visited_ids)
 		if loaded_state.current_encounter_id != -1:
 			new_map.goto_node(loaded_state.current_encounter_id)
 		# The scratch generation must not consume the run's stream.

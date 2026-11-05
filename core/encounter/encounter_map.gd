@@ -358,6 +358,24 @@ func start_run() -> int:
 	return _current_node_id
 
 
+## Marks the given nodes as visited.
+##
+## The walked path is NOT reproducible from the seed: the graph is, but
+## which nodes the run actually walked is not. `goto_node` marks only
+## the current node, so a migrated checkpoint would render the nodes
+## the run had already walked as unvisited.
+##
+## The authoritative list of the walked nodes is
+## `RunDomainState.encounter_visited_ids`; this applies it to the
+## graph. Unknown ids are ignored: the graph is the seed's, and a node
+## that is not in it was never part of this run.
+func mark_visited(node_ids: Array) -> void:
+	for value in node_ids:
+		var node = _get_node(int(value))
+		if node != null:
+			node.visited = true
+
+
 ## S5.4: установить current_node_id напрямую (для restore из save).
 ## НЕ вызывает choose_next, не проверяет visited. Private-логика для recovery.
 ## Только для восстановления состояния после resume_run.
