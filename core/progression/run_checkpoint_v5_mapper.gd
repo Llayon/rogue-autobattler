@@ -191,9 +191,6 @@ static func migrate_v4_to_v5(v4_dto: Dictionary) -> Dictionary:
 
 ## Decodes the persisted RNG machine state.
 ##
-## The wire form is a lossless decimal string. A numeric value is
-## accepted as a legacy fallback, but it is already lossy at that
-## point, so the checkpoint reports it.
 ## Decodes the persisted PRNG machine state.
 ##
 ## The state is a lossless decimal string. A numeric value is NOT

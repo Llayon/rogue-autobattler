@@ -167,5 +167,13 @@ func restore(snap: Dictionary) -> void:
 	var restored_count: int = int(snap.get("draw_count", 0))
 	var restored_state: Variant = snap.get("state", 0)
 	seed_with(restored_seed)
-	_rng.state = restored_state
+	# A machine state of 0 is the DEGENERATE state, not a position in
+	# the stream: assigning it overwrites the correctly seeded state,
+	# and the first draw is then exactly 0.0 for EVERY seed.
+	#
+	# A state of 0 therefore means "no continuation was persisted": the
+	# stream stays at the seeded position, exactly like a fresh run.
+	# A migrated v4 checkpoint carries state 0 for that reason.
+	if int(restored_state) != 0:
+		_rng.state = restored_state
 	draw_count = restored_count

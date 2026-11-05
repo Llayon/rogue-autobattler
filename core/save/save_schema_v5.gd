@@ -149,6 +149,44 @@ static func validate_shape(data) -> Dictionary:
 				"unknown_phase",
 				"phase is not a resumable wire name: '%s'" % phase,
 				"phase"))
+	# The rng continuation is validated at the SHAPE level too.
+	#
+	# The PRNG machine state is a lossless decimal string: a JSON
+	# number cannot hold the low bits of a 64-bit state. Without this
+	# check a DTO with a numeric state passed the shape gate AND the
+	# semantic gate (the gate does not look at `rng`), was written to
+	# the disk, and could then NOT be read back: the load rejected it
+	# in the wire normaliser. A save that cannot be read back is a
+	# poison slot.
+	if result.success:
+		var rng_value: Variant = data.get("rng", {})
+		if not (rng_value is Dictionary):
+			result.success = false
+			result.diagnostics.append(_err(
+				"rng_not_dict", "rng is not a Dictionary", "rng"))
+		else:
+			var rng_dict: Dictionary = rng_value as Dictionary
+			for key in ["seed", "state"]:
+				if not rng_dict.has(key):
+					result.success = false
+					result.diagnostics.append(_err(
+						"rng_key_missing",
+						"rng is missing the key %s" % key, "rng"))
+			var rng_state: Variant = rng_dict.get("state", null)
+			if rng_dict.has("state") and not (rng_state is String):
+				result.success = false
+				result.diagnostics.append(_err(
+					"rng_state_not_a_string",
+					"rng.state must be a lossless decimal string, got %s"
+						% type_string(typeof(rng_state)), "rng"))
+			elif rng_state is String:
+				var decoded: Dictionary = decode_int64(rng_state)
+				if not bool(decoded.get("ok", false)):
+					result.success = false
+					result.diagnostics.append(_err(
+						"rng_state_malformed",
+						"rng.state is not a canonical decimal int64: '%s'"
+							% str(rng_state), "rng"))
 	return result
 
 
