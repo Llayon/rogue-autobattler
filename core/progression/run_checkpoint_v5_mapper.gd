@@ -180,6 +180,7 @@ static func migrate_v4_to_v5(v4_dto: Dictionary) -> Dictionary:
 		"diagnostics": [
 			"v4->v5: the phase was not persisted; the checkpoint enters the conservative prep phase",
 			"v4->v5: the shop, map, reward and rng continuation were not persisted; they are regenerated",
+			"v4->v5: the encounter map is reproduced from the run seed, so the graph is exact, but the visited state and the current node are not persisted; a run that had entered the map replays one encounter at the current node before the flow returns to the map phase",
 		],
 	}
 
