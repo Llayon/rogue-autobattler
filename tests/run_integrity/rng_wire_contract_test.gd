@@ -1,4 +1,5 @@
 extends SceneTree
+const ISOLATED_DIR: String = "user://run_integrity_rng_wire_contract/"
 
 ## The v5 rng contract must hold on the SAVE path too.
 ##
@@ -123,7 +124,7 @@ func _dto_with_rng(rng: Dictionary) -> Dictionary:
 ## souls and run counters, and leaving orphan run files in the browse
 ## list.
 func _isolate_saves(controller: Object) -> void:
-	var dir: String = "user://run_integrity_isolated/"
+	var dir: String = ISOLATED_DIR
 	DirAccess.make_dir_recursive_absolute(
 		ProjectSettings.globalize_path(dir))
 	controller.save_repository = RunSaveRepositoryScript.new(dir)

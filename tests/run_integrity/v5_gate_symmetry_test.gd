@@ -1,4 +1,5 @@
 extends SceneTree
+const ISOLATED_DIR: String = "user://run_integrity_v5_gate_symmetry/"
 
 ## The v5 load and save paths must apply the SAME semantic gate as
 ## the v4 paths.
@@ -141,7 +142,7 @@ func _test_C_a_bad_checkpoint_is_not_written() -> void:
 ## souls and run counters, and leaving orphan run files in the browse
 ## list.
 func _isolate_saves(controller: Object) -> void:
-	var dir: String = "user://run_integrity_isolated/"
+	var dir: String = ISOLATED_DIR
 	DirAccess.make_dir_recursive_absolute(
 		ProjectSettings.globalize_path(dir))
 	controller.save_repository = RunSaveRepositoryScript.new(dir)

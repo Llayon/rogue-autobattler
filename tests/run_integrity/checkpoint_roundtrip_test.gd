@@ -1,4 +1,5 @@
 extends SceneTree
+const ISOLATED_DIR: String = "user://run_integrity_checkpoint_roundtrip/"
 const RunSaveRepositoryScript = preload("res://core/save/run_save_repository.gd")
 
 ## Run Integrity — Stage 3A RED: the persisted checkpoint must describe
@@ -66,8 +67,15 @@ func _make_controller(seed_value: int) -> Node:
 
 
 ## Reads the persisted DTO for a seed through the production service.
+## Loads the DTO the controller wrote.
+##
+## The read must use the SAME repository as the write: the controller
+## writes through the ISOLATED repository, so a production read would
+## find nothing (on a clean CI box) or a stale file (on a dev box).
 func _load_dto(seed_value: int) -> Dictionary:
-	var result: RefCounted = SaveServiceScript.load_run_v4(seed_value)
+	var repo: Object = RunSaveRepositoryScript.new(ISOLATED_DIR)
+	var result: RefCounted = SaveServiceScript._load_run_v4_with_repository(
+		seed_value, repo)
 	if result == null or not result.is_ok():
 		return {}
 	return result.data
@@ -377,7 +385,7 @@ func _test_E_red_5_merchant_offer_survives() -> void:
 ## souls and run counters, and leaving orphan run files in the browse
 ## list.
 func _isolate_saves(controller: Object) -> void:
-	var dir: String = "user://run_integrity_isolated/"
+	var dir: String = ISOLATED_DIR
 	DirAccess.make_dir_recursive_absolute(
 		ProjectSettings.globalize_path(dir))
 	controller.save_repository = RunSaveRepositoryScript.new(dir)

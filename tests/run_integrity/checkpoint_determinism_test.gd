@@ -1,4 +1,5 @@
 extends SceneTree
+const ISOLATED_DIR: String = "user://run_integrity_checkpoint_determinism/"
 
 ## Run Integrity — the v5 checkpoint serialization is byte-stable.
 ##
@@ -173,7 +174,7 @@ func _test_C_the_key_order_is_canonical() -> void:
 ## souls and run counters, and leaving orphan run files in the browse
 ## list.
 func _isolate_saves(controller: Object) -> void:
-	var dir: String = "user://run_integrity_isolated/"
+	var dir: String = ISOLATED_DIR
 	DirAccess.make_dir_recursive_absolute(
 		ProjectSettings.globalize_path(dir))
 	controller.save_repository = RunSaveRepositoryScript.new(dir)

@@ -1,4 +1,5 @@
 extends SceneTree
+const ISOLATED_DIR: String = "user://run_integrity_subsystem_snapshot/"
 const RunSaveRepositoryScript = preload("res://core/save/run_save_repository.gd")
 
 ## Run Integrity — Stage 3A RED: the subsystems need a pure
@@ -263,7 +264,7 @@ func _test_E_red_rng_snapshot_contract() -> void:
 ## souls and run counters, and leaving orphan run files in the browse
 ## list.
 func _isolate_saves(controller: Object) -> void:
-	var dir: String = "user://run_integrity_isolated/"
+	var dir: String = ISOLATED_DIR
 	DirAccess.make_dir_recursive_absolute(
 		ProjectSettings.globalize_path(dir))
 	controller.save_repository = RunSaveRepositoryScript.new(dir)

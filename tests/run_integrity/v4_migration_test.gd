@@ -1,4 +1,5 @@
 extends SceneTree
+const ISOLATED_DIR: String = "user://run_integrity_v4_migration/"
 const RunSaveRepositoryScript = preload("res://core/save/run_save_repository.gd")
 
 ## Run Integrity — a v4 save must stay recoverable through the v5
@@ -161,7 +162,7 @@ func _test_C_the_migrated_checkpoint_is_a_valid_v5() -> void:
 ## souls and run counters, and leaving orphan run files in the browse
 ## list.
 func _isolate_saves(controller: Object) -> void:
-	var dir: String = "user://run_integrity_isolated/"
+	var dir: String = ISOLATED_DIR
 	DirAccess.make_dir_recursive_absolute(
 		ProjectSettings.globalize_path(dir))
 	controller.save_repository = RunSaveRepositoryScript.new(dir)

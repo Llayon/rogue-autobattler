@@ -1,4 +1,5 @@
 extends SceneTree
+const ISOLATED_DIR: String = "user://run_integrity_continue_routing/"
 const RunSaveRepositoryScript = preload("res://core/save/run_save_repository.gd")
 
 ## Run Integrity — RI-01: New Run and Continue are different intents.
@@ -204,7 +205,10 @@ func _test_E_continue_does_not_overwrite_the_save() -> void:
 	_assert(not ok, "the failed CONTINUE reports failure")
 
 	# The original save must still hold the original values.
-	var loaded: RefCounted = SaveServiceScript.load_run_v4(seed)
+	# The read must use the SAME repository as the write: the
+	# controller writes through the ISOLATED repository.
+	var loaded: RefCounted = SaveServiceScript._load_run_v4_with_repository(
+		seed, RunSaveRepositoryScript.new(ISOLATED_DIR))
 	_assert(loaded != null and loaded.is_ok(),
 		"the original save is still loadable after a failed CONTINUE")
 	if loaded != null and loaded.is_ok():
@@ -227,7 +231,7 @@ func _test_E_continue_does_not_overwrite_the_save() -> void:
 ## souls and run counters, and leaving orphan run files in the browse
 ## list.
 func _isolate_saves(controller: Object) -> void:
-	var dir: String = "user://run_integrity_isolated/"
+	var dir: String = ISOLATED_DIR
 	DirAccess.make_dir_recursive_absolute(
 		ProjectSettings.globalize_path(dir))
 	controller.save_repository = RunSaveRepositoryScript.new(dir)

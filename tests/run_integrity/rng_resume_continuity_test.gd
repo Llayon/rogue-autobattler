@@ -1,4 +1,5 @@
 extends SceneTree
+const ISOLATED_DIR: String = "user://run_integrity_rng_resume_continuity/"
 const RunSaveRepositoryScript = preload("res://core/save/run_save_repository.gd")
 
 ## Run Integrity — Stage 3A RED-6: RNG CONTINUATION.
@@ -244,7 +245,7 @@ func _test_C_red_6_rng_continuation_across_several_seeds() -> void:
 ## souls and run counters, and leaving orphan run files in the browse
 ## list.
 func _isolate_saves(controller: Object) -> void:
-	var dir: String = "user://run_integrity_isolated/"
+	var dir: String = ISOLATED_DIR
 	DirAccess.make_dir_recursive_absolute(
 		ProjectSettings.globalize_path(dir))
 	controller.save_repository = RunSaveRepositoryScript.new(dir)
