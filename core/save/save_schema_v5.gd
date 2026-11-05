@@ -308,8 +308,18 @@ static func _wire_dict(value: Variant) -> Dictionary:
 	return {"ok": false, "reason": "not_a_dictionary"}
 
 
-static func _err(code: String, detail: String, context: String):
-	# Lazy import to avoid a load-order cycle with MigrationDiagnostic.
-	if not ClassDB.class_exists("MigrationDiagnostic"):
-		return {"code": code, "detail": detail, "context": context, "severity": "error"}
-	return MigrationDiagnostic.error(code, detail, context)
+static func _err(code: String, detail: String, context: String) -> RefCounted:
+	# MigrationDiagnostic is a class_name, so it is directly available.
+	#
+	# The ClassDB check is NOT a valid test for a class_name script:
+	# ClassDB only knows the engine's own classes, so it always reports
+	# false for a project script. The earlier fallback returned a plain
+	# Dictionary, and the caller passed it to SaveLoadResult.
+	# add_diagnostic(), which expects a RefCounted -> the load path
+	# CRASHED on a shape-invalid file.
+	var diagnostic: MigrationDiagnostic = MigrationDiagnostic.new()
+	diagnostic.severity = MigrationDiagnostic.Severity.ERROR
+	diagnostic.code = code
+	diagnostic.detail = detail
+	diagnostic.context = context
+	return diagnostic
