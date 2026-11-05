@@ -115,10 +115,75 @@ func start_run(seed_value: int = 0) -> void:
 	GameLog.info("run", "Run started", {"seed": seed_value, "starting": state.units.size()})
 
 
+## The allowed phases of every public mutation command.
+##
+## RI-09: the matrix is the source of truth, and the guards are derived
+## from it, so they cannot drift apart. See
+## docs/ri09_command_phase_matrix.md for the rationale of every row.
+##
+## The board and the gold commands are only editable between the
+## battles: the battle snapshot is taken from the board units in
+## `start_battle`, and the participants are already captured, so a
+## mutation during a battle would change the live state under the
+## fight.
+##
+## The equipment commands are allowed in every live phase: the
+## inventory is an overlay inside the battle scene and is reachable at
+## any time, and the equipment bonuses are read ONCE, at the start of
+## a battle, so equipping during a battle changes the NEXT battle.
+const COMMAND_PHASES: Dictionary = {
+	# The board: only between the battles.
+	"board_to_bench": [Phase.PREP],
+	"bench_to_board": [Phase.PREP],
+	"swap_board_units": [Phase.PREP],
+	"swap_units_by_id": [Phase.PREP],
+	"board_to_bench_by_id": [Phase.PREP],
+	"bench_to_board_by_id": [Phase.PREP],
+	"move_to_board": [Phase.PREP],
+	# The gold: only between the battles.
+	"buy_unit": [Phase.PREP],
+	"buy_item": [Phase.PREP],
+	# The inventory, apart from the equipment: only between the
+	# battles. Granting and removing an item changes what the next
+	# battle starts with.
+	"grant_item": [Phase.PREP],
+	"remove_item_at": [Phase.PREP],
+	"equip_item_at": [Phase.PREP],
+	"unequip_item_at": [Phase.PREP],
+	# The equipment: in every live phase.
+	"equip_item_by_id": [Phase.PREP, Phase.BATTLE, Phase.REWARD,
+		Phase.MAP, Phase.SERVICE],
+	"unequip_item_by_id": [Phase.PREP, Phase.BATTLE, Phase.REWARD,
+		Phase.MAP, Phase.SERVICE],
+}
+
+
+## Answers whether a command may run in the current phase.
+##
+## A refusal is logged and changes NOTHING: the guard is the FIRST
+## statement of the command, so no gold, no inventory, no unit, no
+## map/reward state, no RNG draw, no event and no checkpoint can be
+## touched.
+func _command_allowed(command: String) -> bool:
+	var allowed: Variant = COMMAND_PHASES.get(command, null)
+	if allowed == null:
+		# An unknown command is refused: the matrix is the contract,
+		# and a command that is not in it has no allowed phase.
+		GameLog.error("run", "the command is not in the phase matrix",
+			{"command": command})
+		return false
+	var phases: Array = allowed as Array
+	if phases.has(phase):
+		return true
+	GameLog.warn("run", "the command is not allowed in this phase",
+		{"command": command, "phase": phase})
+	return false
+
+
 ## Покупает юнита из слота магазина и ставит на скамейку (bench).
 ## Возвращает купленный UnitDef или null.
 func buy_unit(slot: int) -> Resource:
-	if phase != Phase.PREP:
+	if not _command_allowed("buy_unit"):
 		return null
 	var def: Resource = shop.offer_at(slot)
 	if def == null:
@@ -137,6 +202,8 @@ func buy_unit(slot: int) -> Resource:
 
 ## S6.2: перемещает юнита в bench по позиции (board_index). Возвращает true если успешно.
 func board_to_bench(board_index: int) -> bool:
+	if not _command_allowed("board_to_bench"):
+		return false
 	var board := state.get_board_units()
 	if board_index < 0 or board_index >= board.size():
 		return false
@@ -150,6 +217,8 @@ func board_to_bench(board_index: int) -> bool:
 ## S6.2: перемещает юнита из bench на доску в указанную позицию. Возвращает true если успешно.
 ## Если board_index == -1, ищет первую свободную позицию (append).
 func bench_to_board(bench_index: int, board_index: int = -1) -> bool:
+	if not _command_allowed("bench_to_board"):
+		return false
 	var bench := state.get_bench_units()
 	if bench_index < 0 or bench_index >= bench.size():
 		return false
@@ -163,6 +232,8 @@ func bench_to_board(bench_index: int, board_index: int = -1) -> bool:
 ## S6.2: меняет местами двух юнитов на доске по позициям (0..MAX_BOARD_UNITS-1).
 ## Если b == -1, перемещает board[a] в bench.
 func swap_board_units(a: int, b: int) -> bool:
+	if not _command_allowed("swap_board_units"):
+		return false
 	var board := state.get_board_units()
 	var board_size: int = board.size()
 	if a < 0 or a >= board_size:
@@ -184,6 +255,8 @@ func swap_board_units(a: int, b: int) -> bool:
 ## Swap two RunUnits by `instance_id` regardless of which side
 ## (board or bench) they currently occupy.
 func swap_units_by_id(src_id: String, dst_id: String) -> bool:
+	if not _command_allowed("swap_units_by_id"):
+		return false
 	if src_id == "" or dst_id == "" or src_id == dst_id:
 		return false
 	return state.swap_units(src_id, dst_id)
@@ -192,6 +265,8 @@ func swap_units_by_id(src_id: String, dst_id: String) -> bool:
 ## Move a RunUnit to the bench by `instance_id`. Returns false if
 ## the unit does not exist or the bench is full.
 func board_to_bench_by_id(src_id: String) -> bool:
+	if not _command_allowed("board_to_bench_by_id"):
+		return false
 	if src_id == "":
 		return false
 	var u: RunUnit = state.get_unit(src_id)
@@ -207,6 +282,8 @@ func board_to_bench_by_id(src_id: String) -> bool:
 ## Move a RunUnit from the bench to the board by `instance_id`.
 ## If `board_index` is -1, append to the first free slot.
 func bench_to_board_by_id(src_id: String, board_index: int = -1) -> bool:
+	if not _command_allowed("bench_to_board_by_id"):
+		return false
 	if src_id == "":
 		return false
 	var u: RunUnit = state.get_unit(src_id)
@@ -226,6 +303,8 @@ func bench_to_board_by_id(src_id: String, board_index: int = -1) -> bool:
 ## false if the item or target unit does not exist.
 func equip_item_by_id(item_instance_id: String,
 		target_unit_instance_id: String) -> bool:
+	if not _command_allowed("equip_item_by_id"):
+		return false
 	if item_instance_id == "" or target_unit_instance_id == "":
 		return false
 	return state.equip_item(item_instance_id, target_unit_instance_id)
@@ -234,6 +313,8 @@ func equip_item_by_id(item_instance_id: String,
 ## Unequip a RunItem by `instance_id`. The item lands in
 ## inventory (owner_unit_id becomes "").
 func unequip_item_by_id(item_instance_id: String) -> bool:
+	if not _command_allowed("unequip_item_by_id"):
+		return false
 	if item_instance_id == "":
 		return false
 	return state.unequip_item(item_instance_id)
@@ -242,6 +323,8 @@ func unequip_item_by_id(item_instance_id: String) -> bool:
 ## Перемещает юнита со скамейки на доску (cell).
 ## v1 — упрощённо, без валидации cell.
 func move_to_board(bench_index: int, _cell: Vector2i) -> bool:
+	if not _command_allowed("move_to_board"):
+		return false
 	return bench_to_board(bench_index, -1)
 
 
@@ -252,6 +335,8 @@ func move_to_board(bench_index: int, _cell: Vector2i) -> bool:
 ## (inventory + equipped), matching legacy semantics.
 ## Возвращает true если успешно. Если уже MAX_INVENTORY предметов, returns false.
 func grant_item(item_id: StringName) -> bool:
+	if not _command_allowed("grant_item"):
+		return false
 	if item_id == &"":
 		GameLog.warn("inventory", "grant_item: empty id")
 		return false
@@ -270,6 +355,8 @@ func grant_item(item_id: StringName) -> bool:
 ## equipped items, matching legacy item_ids.
 ## Возвращает true если успешно.
 func remove_item_at(idx: int) -> bool:
+	if not _command_allowed("remove_item_at"):
+		return false
 	if idx < 0 or idx >= state.items.size():
 		return false
 	var removed_id: String = state.items[idx].instance_id
@@ -298,6 +385,8 @@ func get_item_def_at(idx: int) -> Resource:
 ## Если board_idx невалиден (нет такого юнита), returns false.
 ## Допускается эипить несколько предметов на одного юнита.
 func equip_item_at(item_idx: int, board_idx: int) -> bool:
+	if not _command_allowed("equip_item_at"):
+		return false
 	if item_idx < 0 or item_idx >= state.items.size():
 		return false
 	var board := state.get_board_units()
@@ -310,6 +399,8 @@ func equip_item_at(item_idx: int, board_idx: int) -> bool:
 
 ## Снимает предмет с юнита (возвращает в инвентарь).
 func unequip_item_at(item_idx: int) -> bool:
+	if not _command_allowed("unequip_item_at"):
+		return false
 	if item_idx < 0 or item_idx >= state.items.size():
 		return false
 	var item: RunItem = state.items[item_idx]
@@ -376,6 +467,8 @@ func get_unit_bonus_stats(board_idx: int) -> Dictionary:
 ## S7.4: покупает item из текущего shop offer (с MAP_MERCHANT_DISCOUNT).
 ## Возвращает true если успешно.
 func buy_item(slot: int) -> bool:
+	if not _command_allowed("buy_item"):
+		return false
 	var offered: int = merchant_shop.get_offered_count()
 	if slot < 0 or slot >= offered:
 		return false
