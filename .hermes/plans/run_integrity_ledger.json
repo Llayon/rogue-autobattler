@@ -143,6 +143,14 @@
       "scope": "RI-09 phase guards",
       "findings": "no critic: the thirteen unguarded commands were already confirmed in the ledger, and the matrix was derived from the CODE rather than from the finding, which corrected the ledger: the equipment commands are legal in every live phase because the inventory overlay is reachable at any time and the equipment bonuses are read once, at the start of a battle",
       "fixes": "ed71b8c, 3eccaa2"
+    },
+    {
+      "round": 7,
+      "scope": "RI-09 phase guards, independent review",
+      "findings": "HIGH-1 (the TREASURE item grant happens in the MAP phase and the guarded command refused it), HIGH-2 (the post-victory combat drop happens in the BATTLE phase and the guarded command refused it), MAJOR-1 (the package's own suite asserted the broken behaviour), MAJOR-2 (the index pair and the by-id pair of the equipment commands had different phase sets), MAJOR-3 (the matrix document was stale against the code on every row and contradicted itself), MINOR-1..4",
+      "fixes": "5aef1a8, 44611eb",
+      "all_reproduced": true,
+      "measured": "0/20 combat drops and 0/20 treasure drops before the fix"
     }
   ],
   "cursor_contract": {
@@ -213,17 +221,27 @@
   },
   "ri09": {
     "baseline": "9b4dab4",
-    "head": "3eccaa2",
+    "head": "44611eb",
     "matrix": "docs/ri09_command_phase_matrix.md",
-    "suite": "tests/run_integrity/command_phase_guard_test.gd (5 cases)",
-    "negative_controls": "NC-28..NC-31, all honest RED",
+    "suite": "tests/run_integrity/command_phase_guard_test.gd (6 cases) + tests/run_integrity/item_reward_delivery_test.gd (27 assertions)",
+    "negative_controls": "NC-28..NC-31, NC-32..NC-34, all honest RED",
     "verification": {
-      "runner": "93 suites / 8461 assertions / 0 fail / 0 unparsed",
+      "runner": "96 suites / 8522 assertions / 0 fail / 0 unparsed",
       "ci_gates": "10/10 clean",
+      "a_h": "PASS (8 fixtures per side)",
       "lint": "0 errors, 5 warnings (baseline)",
       "editor_parse": "0 errors"
     },
-    "push": "NOT performed (no explicit permission)"
+    "push": "NOT performed (no explicit permission)",
+    "commits": [
+      "cdb83d8 docs(run): record the ri-09 command phase matrix",
+      "cbcf9be test(run): characterize the missing command phase guards",
+      "ed71b8c fix(run): derive the command phase guards from one matrix",
+      "3eccaa2 test(run): make the buy_item phase refusal observable",
+      "5aef1a8 test(run): characterize the delivery of the item rewards",
+      "44611eb fix(run): keep the item rewards out of the phase-guarded command"
+    ],
+    "critic": "The independent critic found two HIGH defects in the matrix: the TREASURE item grant (MAP) and the post-victory combat drop (BATTLE) both go through the guarded `grant_item` command, so both rewards were dead -- 0/20 drops through the real battle path. The fix separates the PLAYER-FACING command (still PREP-only) from the INTERNAL reward delivery (`_grant_reward_item`, no phase guard). The critic also found that the index pair of the equipment commands and the by-id pair had different phase sets, and that the matrix document was stale against the code on every row."
   },
   "ri10": {
     "baseline": "ead6d1f",
