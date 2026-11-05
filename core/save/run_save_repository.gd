@@ -168,6 +168,19 @@ func _save_canonical(seed_value: int, data: Dictionary, format: String) -> RefCo
 			for d in shape_v5.get("diagnostics", []):
 				r5.add_diagnostic(d)
 			return r5
+		# The semantic gate runs BEFORE the write, exactly like the v4
+		# branch. Without it the gate would fire only in
+		# _post_commit_validate, i.e. AFTER the atomic swap: on a fresh
+		# slot the invalid file would stay on disk under the target and
+		# the slot would become unrecoverable.
+		var semantic_v5: Dictionary = RunDomainSemanticValidatorScript.validate(data)
+		if not bool(semantic_v5.get("success", false)):
+			var rs5: RefCounted = _error(
+				SaveLoadResultScript.ERROR_V4_VALIDATION_FAILED, "v5",
+				"v5 DTO failed the semantic validation before write")
+			for d in semantic_v5.get("diagnostics", []):
+				rs5.add_diagnostic(d)
+			return rs5
 	else:
 		var v: Dictionary = MigratorScript.validate(data)
 		if not bool(v.get("success", false)):
@@ -657,6 +670,18 @@ func _load_v5_canonical(parsed: Dictionary, path: String, seed_value: int) -> Re
 		for d in shape.get("diagnostics", []):
 			r.add_diagnostic(d)
 		return r
+	# The semantic gate runs here too, exactly like on the v4 load
+	# path. The repository must not hand out a semantically invalid
+	# checkpoint as a valid, loadable save: the mapper gates as a
+	# backstop, but every other caller of the public facade would get
+	# an unchecked DTO.
+	var semantic: Dictionary = RunDomainSemanticValidatorScript.validate(parsed)
+	if not bool(semantic.get("success", false)):
+		var rs: RefCounted = _error(SaveLoadResultScript.ERROR_V4_VALIDATION_FAILED, "v5",
+			"v5 file failed the semantic validation")
+		for d in semantic.get("diagnostics", []):
+			rs.add_diagnostic(d)
+		return rs
 	var ok: RefCounted = SaveLoadResultScript.ok()
 	ok.source_format = "v5"
 	ok.source_path = path
