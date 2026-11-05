@@ -54,6 +54,27 @@ func _initialize() -> void:
 	x.owner_unit_id = "unit_999999"
 	before = _snapshot(s)
 	_check(not s.equip_item(x.instance_id, a.instance_id) and _snapshot(s) == before, "invalid old owner rejected atomically")
+	x.owner_unit_id = ""
+	_check(s.is_inventory_valid(), "valid inventory passes live gate")
+	s.next_item_instance_seq = 1000
+	_check(s.is_inventory_valid(), "T3 large allocator gap is valid")
+	s.next_item_instance_seq = 100
+	_check(not s.is_inventory_valid(), "T4 cursor equal to max live id is invalid")
+	s.next_item_instance_seq = 99
+	_check(not s.is_inventory_valid(), "T4 cursor below max live id is invalid")
+	s.next_item_instance_seq = 1000
+	for bad_id in ["", "item_000000", "item_-00001", "sword", "item_1"]:
+		x.instance_id = bad_id
+		before = _snapshot(s)
+		_check(not s.remove_item(bad_id) and _snapshot(s) == before, "malformed identity rejects remove atomically: " + bad_id)
+	x.instance_id = identity
+	a.equipped_item_ids.append(identity)
+	before = _snapshot(s)
+	_check(not s.unequip_item(identity) and _snapshot(s) == before, "inconsistent unequip rejects without cleanup mutation")
+	a.equipped_item_ids.clear()
+	_check(s.equip_item(identity, a.instance_id), "equip before bench move")
+	_check(s.move_unit(a.instance_id, UnitScript.LOCATION_BENCH) and x.owner_unit_id == a.instance_id and s.is_inventory_valid(), "unit move preserves ownership")
+	_check(s.unequip_item(identity) and s.get_item(identity) == x, "bench owner can unequip preserving instance")
 	print("=== inventory integrity: %d passed, %d failed ===" % [_passed, _failed])
 	quit(1 if _failed else 0)
 
