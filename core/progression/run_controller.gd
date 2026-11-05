@@ -191,6 +191,14 @@ func buy_unit(slot: int) -> Resource:
 	if state.gold < def.cost:
 		GameLog.debug("run", "Not enough gold", {"need": def.cost, "have": state.gold})
 		return null
+	# RI-10: the bench has a capacity. The check is BEFORE any
+	# mutation, so a refused purchase changes nothing: the gold stays,
+	# no unit is created and the offer is not taken.
+	if state.get_bench_units().size() >= BalanceScript.MAX_BENCH_UNITS:
+		GameLog.warn("run", "Bought unit: the bench is full",
+			{"size": state.get_bench_units().size(),
+			"max": BalanceScript.MAX_BENCH_UNITS})
+		return null
 	state.gold -= def.cost
 	# Stable instance_id is allocated by RunDomainState.create_unit.
 	state.create_unit(def.id, def.max_hp if def != null else 100, RunUnit.LOCATION_BENCH)
