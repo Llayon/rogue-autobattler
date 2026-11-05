@@ -56,7 +56,7 @@
       "id": "RI-07",
       "title": "new run may retain old runtime objects",
       "status": "CLOSED",
-      "evidence": "CLOSED in 314ef75. start_run created a fresh state and refreshed the shop, but it never reset the transient runtime: encounter_map, reward, runner, ctx and _battle_participants. The map is created LAZILY in _enter_map, so the new run inherited the PREVIOUS run's map -- the visited nodes and the current node -- and continued in the middle of the old map instead of at its start. The reward offer survived as well. The transient runtime now belongs to the run: _reset_transient_runtime clears it before the new state is built, and RewardScreen.reset_offer was added for it. Suite: tests/run_integrity/new_run_isolation_test.gd (4 cases).",
+      "evidence": "CLOSED in 314ef75. start_run created a fresh state and refreshed the shop, but it never reset the transient runtime: encounter_map, reward, runner, ctx and _battle_participants. The map is created LAZILY in _enter_map, so the new run inherited the PREVIOUS run's map -- the visited nodes and the current node -- and continued in the middle of the old map instead of at its start. The reward offer survived as well. The transient runtime now belongs to the run: _reset_transient_runtime clears it before the new state is built, and RewardScreen.reset_offer was added for it. Suite: tests/run_integrity/new_run_isolation_test.gd (4 cases). The second independent review found the fix INCOMPLETE: the merchant offer was the one run-scoped transient left behind. `ShopScreen.reset_offer` was added and the offer is now reset with the rest of the transient runtime. Measured before the fix: a new run that never visited a merchant carried the previous offer, `buy_item` succeeded in it, and the checkpoint of a fixed seed depended on the controller's history (911 bytes clean vs 957 dirty). Measured after: no leak, no purchase, and the checkpoint of the seed is identical in both cases.",
       "closed": true
     },
     {
@@ -151,6 +151,14 @@
       "fixes": "5aef1a8, 44611eb",
       "all_reproduced": true,
       "measured": "0/20 combat drops and 0/20 treasure drops before the fix"
+    },
+    {
+      "round": 8,
+      "scope": "RI-07 + RI-09 + RI-10, second independent review",
+      "findings": "HIGH: NONE -- the two HIGH defects of the first critic (the TREASURE item grant and the combat drop) are genuinely closed, and the reviewer exercised all 15 guarded commands over all 6 phases (90 combinations) with zero failures. MAJOR-1: the merchant offer survived start_run -- a run-scoped, RNG-derived object like the reward offer and the map, but ShopScreen had no way to clear it. Measured: a new run that never visited a merchant carried the previous offer, buy_item succeeded in it, and the checkpoint of a fixed seed depended on the controller's HISTORY (911 bytes clean vs 957 dirty), so the v5 checkpoint was not a pure function of (seed, profile). MINOR-1: get_save_count counted ATTEMPTS, not successful writes, which made the 'no checkpoint was written' observable of the RI-09 and RI-10 suites weaker than claimed (a defect the third RI-05 critic had already found and that was not fixed). MINOR-2: the matrix document cited a stale line number.",
+      "fixes": "ac464ba",
+      "all_reproduced": true,
+      "measured": "the offer leaked, buy_item succeeded in a fresh run, and the checkpoint of seed 790009 differed between a clean and a dirty controller"
     }
   ],
   "cursor_contract": {
@@ -221,7 +229,7 @@
   },
   "ri09": {
     "baseline": "9b4dab4",
-    "head": "44611eb",
+    "head": "ac464ba",
     "matrix": "docs/ri09_command_phase_matrix.md",
     "suite": "tests/run_integrity/command_phase_guard_test.gd (6 cases) + tests/run_integrity/item_reward_delivery_test.gd (27 assertions)",
     "negative_controls": "NC-28..NC-31, NC-32..NC-34, all honest RED",
@@ -245,7 +253,7 @@
   },
   "ri10": {
     "baseline": "ead6d1f",
-    "head": "50c199c",
+    "head": "ac464ba",
     "suite": "tests/run_integrity/bench_capacity_test.gd (4 cases)",
     "verification": {
       "runner": "93 suites / 8461 assertions / 0 fail / 0 unparsed",
@@ -256,8 +264,8 @@
   },
   "ri07": {
     "baseline": "e7135d3",
-    "head": "314ef75",
-    "suite": "tests/run_integrity/new_run_isolation_test.gd (4 cases)",
+    "head": "ac464ba",
+    "suite": "tests/run_integrity/new_run_isolation_test.gd (5 cases, including the merchant offer)",
     "push": "NOT performed (no explicit permission)"
   },
   "ri08": {
