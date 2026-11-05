@@ -69,9 +69,9 @@
     {
       "id": "RI-09",
       "title": "command/domain guards are incomplete",
-      "status": "CONFIRMED",
-      "evidence": "Only 7 phase guards exist (run_controller.gd:110, 391, 474, 802, 828, 849, 885). board_to_bench (:128), bench_to_board (:141), swap_board_units (:154), swap_units_by_id (:175), board_to_bench_by_id (:183), bench_to_board_by_id (:198), equip_item_by_id (:216), unequip_item_by_id (:225), move_to_board (:233), grant_item (:243), remove_item_at (:261), equip_item_at (:289), unequip_item_at (:301) have NO phase guard.",
-      "closed": false
+      "status": "CLOSED",
+      "evidence": "CLOSED in ed71b8c + 3eccaa2. The guards are DERIVED from one table (RunController.COMMAND_PHASES), the machine-readable form of docs/ri09_command_phase_matrix.md, so they cannot become a scatter of ad-hoc conditions that drift apart. A refusal is logged and changes NOTHING: the guard is the FIRST statement of the command, so no gold, no inventory, no unit, no map/reward state, no RNG draw, no event and no checkpoint can be touched. A command that is not in the table is refused too. The matrix was corrected against the CODE before it was implemented: the inventory is an overlay inside the battle scene and is reachable in every phase, and the equipment bonuses are read once at the start of a battle, so the equipment commands are allowed in every live phase -- a naive PREP-only guard would have broken the inventory UI. Suite: tests/run_integrity/command_phase_guard_test.gd (5 cases). Negative controls NC-28..NC-31 are honest REDs.",
+      "closed": true
     },
     {
       "id": "RI-10",
@@ -137,6 +137,12 @@
       "findings": "H1 (the MAX_ROUND win wrote a resumable checkpoint and removed it afterwards, so a crash in the window resurrected a finished run past MAX_ROUND), M1 (delete_run left the .commit-old behind and the recovery path resurrected the deleted slot), M2 (the delete result was discarded, so a failed removal was silent), M3 (the idempotence latch was consumed before the write, so a failed write stranded the outcome with no retry), m1 (get_save_count counts attempts, not successful writes), m2 (a dead reward offer at MAX_ROUND), m3 (resume_run bypassed the meta seam)",
       "fixes": "ff604b8, 38396ab",
       "all_reproduced": true
+    },
+    {
+      "round": 6,
+      "scope": "RI-09 phase guards",
+      "findings": "no critic: the thirteen unguarded commands were already confirmed in the ledger, and the matrix was derived from the CODE rather than from the finding, which corrected the ledger: the equipment commands are legal in every live phase because the inventory overlay is reachable at any time and the equipment bonuses are read once, at the start of a battle",
+      "fixes": "ed71b8c, 3eccaa2"
     }
   ],
   "cursor_contract": {
@@ -204,5 +210,19 @@
     },
     "push": "NOT performed (no explicit permission)",
     "lesson": "a mutation run must not share the working tree with a commit: the commit 1b4c58a captured a mutated file, and the suite caught it immediately"
+  },
+  "ri09": {
+    "baseline": "9b4dab4",
+    "head": "3eccaa2",
+    "matrix": "docs/ri09_command_phase_matrix.md",
+    "suite": "tests/run_integrity/command_phase_guard_test.gd (5 cases)",
+    "negative_controls": "NC-28..NC-31, all honest RED",
+    "verification": {
+      "runner": "93 suites / 8461 assertions / 0 fail / 0 unparsed",
+      "ci_gates": "10/10 clean",
+      "lint": "0 errors, 5 warnings (baseline)",
+      "editor_parse": "0 errors"
+    },
+    "push": "NOT performed (no explicit permission)"
   }
 }
