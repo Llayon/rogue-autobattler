@@ -1,4 +1,5 @@
 extends SceneTree
+const RunSaveRepositoryScript = preload("res://core/save/run_save_repository.gd")
 
 ## Run Integrity — RI-01: New Run and Continue are different intents.
 ##
@@ -85,6 +86,7 @@ func _test_A_launch_intent_is_explicit() -> void:
 ## A NEW RUN must reach start_run().
 func _test_B_new_run_reaches_start_run() -> void:
 	var controller: Node = RunControllerScript.new()
+	_isolate_saves(controller)
 	get_root().add_child.call_deferred(controller)
 	await process_frame
 
@@ -109,6 +111,7 @@ func _test_B_new_run_reaches_start_run() -> void:
 func _test_C_continue_reaches_resume_run() -> void:
 	var seed: int = 778899
 	var controller: Node = RunControllerScript.new()
+	_isolate_saves(controller)
 	get_root().add_child.call_deferred(controller)
 	await process_frame
 
@@ -123,6 +126,7 @@ func _test_C_continue_reaches_resume_run() -> void:
 	# A FRESH controller that receives the CONTINUE intent must
 	# restore the persisted state, not begin a new run.
 	var resumed: Node = RunControllerScript.new()
+	_isolate_saves(resumed)
 	get_root().add_child.call_deferred(resumed)
 	await process_frame
 	resumed.profile = controller.profile
@@ -147,6 +151,7 @@ func _test_C_continue_reaches_resume_run() -> void:
 ## live state must survive untouched.
 func _test_D_failed_continue_never_falls_back_to_start_run() -> void:
 	var controller: Node = RunControllerScript.new()
+	_isolate_saves(controller)
 	get_root().add_child.call_deferred(controller)
 	await process_frame
 
@@ -184,6 +189,7 @@ func _test_D_failed_continue_never_falls_back_to_start_run() -> void:
 func _test_E_continue_does_not_overwrite_the_save() -> void:
 	var seed: int = 654321
 	var controller: Node = RunControllerScript.new()
+	_isolate_saves(controller)
 	get_root().add_child.call_deferred(controller)
 	await process_frame
 
@@ -211,6 +217,31 @@ func _test_E_continue_does_not_overwrite_the_save() -> void:
 
 
 # ----------------------------------------------------------------
+
+
+## Points the controller at a temporary save tree.
+##
+## Without this the suite would write into the PRODUCTION save tree
+## (`user://saves/runs`) and overwrite `user://saves/meta.tres` with
+## the throwaway profile -- destroying the developer's unlocked units,
+## souls and run counters, and leaving orphan run files in the browse
+## list.
+func _isolate_saves(controller: Object) -> void:
+	var dir: String = "user://run_integrity_isolated/"
+	DirAccess.make_dir_recursive_absolute(
+		ProjectSettings.globalize_path(dir))
+	controller.save_repository = RunSaveRepositoryScript.new(dir)
+	controller.meta_writer = _MetaWriter.new()
+
+
+## A meta writer that does NOT touch the production meta file.
+class _MetaWriter:
+	extends RefCounted
+
+	func write_meta(profile: Object) -> bool:
+		# The suites never need a persisted profile, so nothing is
+		# written: the production `user://saves/meta.tres` stays intact.
+		return true
 
 
 func _assert(cond: bool, label: String) -> void:

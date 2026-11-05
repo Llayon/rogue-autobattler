@@ -1,11 +1,15 @@
 class_name ShopScreen extends RefCounted
+const BalanceScript = preload("res://core/balance.gd")
 ## Генерирует shop offer для MERCHANT encounter (S7.4).
 ## 3 случайных ItemDef с discounted price (MAP_MERCHANT_DISCOUNT).
 
 const OFFER_SIZE: int = 3
 
 var _offered_item_ids: Array[StringName] = []
-var _discount: float = 0.5
+## The discount comes from the balance, not from a literal: the v5
+## checkpoint PERSISTS the discount, so a literal here would silently
+## diverge from the persisted offer when the balance changes.
+var _discount: float = BalanceScript.MAP_MERCHANT_DISCOUNT
 
 
 ## Заполняет _offered_item_ids случайными ItemDef id из ContentDB.

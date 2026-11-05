@@ -1,4 +1,5 @@
 extends SceneTree
+const RunSaveRepositoryScript = preload("res://core/save/run_save_repository.gd")
 
 ## Run Integrity — the critic's findings, pinned as regressions.
 ##
@@ -45,6 +46,7 @@ func _initialize() -> void:
 
 func _make_controller(seed_value: int) -> Node:
 	var ctrl: Node = RunControllerScript.new()
+	_isolate_saves(ctrl)
 	get_root().add_child(ctrl)
 	await process_frame
 	ctrl.profile = MetaProfileScript.new()
@@ -74,9 +76,11 @@ func _test_H1_a_v4_map_save_can_still_be_continued() -> void:
 	ctrl.state.current_encounter_id = ctrl.encounter_map.get_current_node_id()
 	ctrl._set_phase(ctrl.Phase.MAP)
 
-	# Write a REAL v4 save through the production v4 facade.
+	# Write a REAL v4 save through the production v4 facade, into the
+	# SAME isolated repository the resume reads from: the write and the
+	# read must use one repository, otherwise the resume finds nothing.
 	var v4_dto: Dictionary = RunStateV4MapperScript.to_v4_dto(ctrl.state)
-	var repo = SaveServiceScript._run_repository()
+	var repo: Object = ctrl.save_repository
 	var written: RefCounted = repo.save_run(seed_value, v4_dto)
 	_assert(written != null and written.is_ok(), "the v4 save is written")
 	# The values are captured BEFORE the controller is freed.
@@ -87,6 +91,7 @@ func _test_H1_a_v4_map_save_can_still_be_continued() -> void:
 
 	# The run must be continuable.
 	var resumed_ctrl: Node = RunControllerScript.new()
+	_isolate_saves(resumed_ctrl)
 	get_root().add_child(resumed_ctrl)
 	await process_frame
 	resumed_ctrl.profile = MetaProfileScript.new()
@@ -177,6 +182,31 @@ func _test_m2_the_v5_gate_validates_the_unit_collection() -> void:
 
 
 # ----------------------------------------------------------------
+
+
+## Points the controller at a temporary save tree.
+##
+## Without this the suite would write into the PRODUCTION save tree
+## (`user://saves/runs`) and overwrite `user://saves/meta.tres` with
+## the throwaway profile -- destroying the developer's unlocked units,
+## souls and run counters, and leaving orphan run files in the browse
+## list.
+func _isolate_saves(controller: Object) -> void:
+	var dir: String = "user://run_integrity_isolated/"
+	DirAccess.make_dir_recursive_absolute(
+		ProjectSettings.globalize_path(dir))
+	controller.save_repository = RunSaveRepositoryScript.new(dir)
+	controller.meta_writer = _MetaWriter.new()
+
+
+## A meta writer that does NOT touch the production meta file.
+class _MetaWriter:
+	extends RefCounted
+
+	func write_meta(profile: Object) -> bool:
+		# The suites never need a persisted profile, so nothing is
+		# written: the production `user://saves/meta.tres` stays intact.
+		return true
 
 
 func _assert(cond: bool, label: String) -> void:

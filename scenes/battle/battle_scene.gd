@@ -214,9 +214,18 @@ func _find_event_bus() -> Node:
 
 
 
-## Переинициализировать battle с новым seed (вызывается из RootScene).
-## Очищает state, run_controller, battle_runner.
+## DEPRECATED: do not call this.
+##
+## This was the old "start a new run" entry point, and it is exactly the
+## hole the launch-intent model closed: it starts a run without a
+## `RunLaunchRequest`, so a caller can reintroduce the defect where a
+## CONTINUE creates a replacement run instead of resuming.
+##
+## Nothing calls it any more. A new run goes through the launch
+## request: `RunLaunchRequest.new_run(seed)` -> `apply_launch_request`
+## -> `start_run`. Use that path.
 func restart_with_seed(seed: int) -> void:
+	GameLog.warn("battle", "restart_with_seed is deprecated; use the launch request")
 	if run_controller != null:
 		run_controller.start_run(seed)
 	if run_controller != null and run_controller.profile != null:

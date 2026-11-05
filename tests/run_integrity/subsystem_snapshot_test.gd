@@ -1,4 +1,5 @@
 extends SceneTree
+const RunSaveRepositoryScript = preload("res://core/save/run_save_repository.gd")
 
 ## Run Integrity — Stage 3A RED: the subsystems need a pure
 ## snapshot / restore contract.
@@ -252,6 +253,31 @@ func _test_E_red_rng_snapshot_contract() -> void:
 
 
 # ----------------------------------------------------------------
+
+
+## Points the controller at a temporary save tree.
+##
+## Without this the suite would write into the PRODUCTION save tree
+## (`user://saves/runs`) and overwrite `user://saves/meta.tres` with
+## the throwaway profile -- destroying the developer's unlocked units,
+## souls and run counters, and leaving orphan run files in the browse
+## list.
+func _isolate_saves(controller: Object) -> void:
+	var dir: String = "user://run_integrity_isolated/"
+	DirAccess.make_dir_recursive_absolute(
+		ProjectSettings.globalize_path(dir))
+	controller.save_repository = RunSaveRepositoryScript.new(dir)
+	controller.meta_writer = _MetaWriter.new()
+
+
+## A meta writer that does NOT touch the production meta file.
+class _MetaWriter:
+	extends RefCounted
+
+	func write_meta(profile: Object) -> bool:
+		# The suites never need a persisted profile, so nothing is
+		# written: the production `user://saves/meta.tres` stays intact.
+		return true
 
 
 func _assert(cond: bool, label: String) -> void:

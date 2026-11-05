@@ -1,4 +1,5 @@
 extends SceneTree
+const RunSaveRepositoryScript = preload("res://core/save/run_save_repository.gd")
 
 ## Run Integrity — Stage 3A RED: the persisted checkpoint must describe
 ## the REAL runtime state.
@@ -52,6 +53,7 @@ func _initialize() -> void:
 ## Builds a controller with a clean profile and a deterministic seed.
 func _make_controller(seed_value: int) -> Node:
 	var ctrl: Node = RunControllerScript.new()
+	_isolate_saves(ctrl)
 	get_root().add_child(ctrl)
 	await process_frame
 	# The controller's own _ready() loads the meta profile; replace it
@@ -77,6 +79,7 @@ func _load_dto(seed_value: int) -> Dictionary:
 ## the state that was actually persisted.
 func _resume(seed_value: int) -> Node:
 	var ctrl: Node = RunControllerScript.new()
+	_isolate_saves(ctrl)
 	get_root().add_child(ctrl)
 	await process_frame
 	ctrl.profile = MetaProfileScript.new()
@@ -364,6 +367,31 @@ func _test_E_red_5_merchant_offer_survives() -> void:
 
 
 # ----------------------------------------------------------------
+
+
+## Points the controller at a temporary save tree.
+##
+## Without this the suite would write into the PRODUCTION save tree
+## (`user://saves/runs`) and overwrite `user://saves/meta.tres` with
+## the throwaway profile -- destroying the developer's unlocked units,
+## souls and run counters, and leaving orphan run files in the browse
+## list.
+func _isolate_saves(controller: Object) -> void:
+	var dir: String = "user://run_integrity_isolated/"
+	DirAccess.make_dir_recursive_absolute(
+		ProjectSettings.globalize_path(dir))
+	controller.save_repository = RunSaveRepositoryScript.new(dir)
+	controller.meta_writer = _MetaWriter.new()
+
+
+## A meta writer that does NOT touch the production meta file.
+class _MetaWriter:
+	extends RefCounted
+
+	func write_meta(profile: Object) -> bool:
+		# The suites never need a persisted profile, so nothing is
+		# written: the production `user://saves/meta.tres` stays intact.
+		return true
 
 
 func _assert(cond: bool, label: String) -> void:

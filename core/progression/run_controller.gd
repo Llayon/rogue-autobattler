@@ -58,6 +58,11 @@ var ctx: BattleContext = null
 var runner: BattleRunner = null
 var phase: int = Phase.PREP
 var profile: MetaProfile = null
+## The save seam. A test points the whole controller at a temporary
+## directory, so the suites never write into the production save tree
+## and never touch the developer's meta profile.
+var save_repository: Object = null
+var meta_writer: Object = null
 # S5.3: encounter map owned by RunController после первого перехода в MAP phase.
 # Scene получает его через get_encounter_map() и передаёт в EncounterMapScene.set_encounter_map().
 var encounter_map: EncounterMap = null
@@ -662,11 +667,37 @@ func _end_run(won: bool) -> void:
 				GameBus.emit_unit_unlocked(new_id)
 	profile.best_round = maxi(profile.best_round, state.round_index)
 	UnlockManager.award_souls(profile, state.round_index)
+
 	# S3.3: ран завершён — current_run_seed = 0 (нечего продолжать).
 	_clear_active_run()
-	SaveService.save_meta(profile)
+	_save_meta(profile)
 	run_ended.emit(won)
 	GameLog.info("run", "Run ended", {"round": state.round_index, "won": won})
+
+
+## The save seam.
+##
+## Without an injected repository the production service is used; a
+## test injects a repository over a temporary directory, so the suites
+## never write into `user://saves`.
+func _save_run_v5(seed_value: int, dto: Dictionary) -> RefCounted:
+	if save_repository == null:
+		return SaveService.save_run_v5(seed_value, dto)
+	return SaveService._save_run_v5_with_repository(seed_value, dto, save_repository)
+
+
+## The load seam. See `_save_run_v5`.
+func _load_run_v5(seed_value: int) -> RefCounted:
+	if save_repository == null:
+		return SaveService.load_run_v5(seed_value)
+	return SaveService._load_run_v5_with_repository(seed_value, save_repository)
+
+
+## The meta seam. See `_save_run_v5`.
+func _save_meta(meta_profile: MetaProfile) -> bool:
+	if meta_writer != null and meta_writer.has_method("write_meta"):
+		return bool(meta_writer.write_meta(meta_profile))
+	return SaveService.save_meta(meta_profile)
 
 
 # === S3.3: Save/Load в середине рана ===
@@ -714,7 +745,7 @@ func save_now() -> bool:
 	if dto.is_empty():
 		GameLog.error("run", "save_now: the checkpoint DTO is empty")
 		return false
-	var result: RefCounted = SaveService.save_run_v5(state.seed, dto)
+	var result: RefCounted = _save_run_v5(state.seed, dto)
 	if result == null or not result.is_ok():
 		var err: String = "unknown"
 		var ctx_msg: String = ""
@@ -732,7 +763,7 @@ func save_now() -> bool:
 		return false
 	if profile != null:
 		profile.current_run_seed = state.seed
-		SaveService.save_meta(profile)
+		_save_meta(profile)
 		GameBus.emit_run_saved(state.seed)
 		GameLog.info("run", "Run saved", {"seed": state.seed, "round": state.round_index})
 	return true
@@ -760,7 +791,7 @@ func resume_run(seed_value: int) -> bool:
 	# has been loaded AND validated. If any step fails, the live
 	# runtime stays exactly as it was, the save stays unchanged, and
 	# no replacement run is started.
-	var result: RefCounted = SaveService.load_run_v5(seed_value)
+	var result: RefCounted = _load_run_v5(seed_value)
 	if result == null or not result.is_ok():
 		var err: String = "unknown"
 		if result != null:
