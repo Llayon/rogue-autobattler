@@ -62,9 +62,9 @@
     {
       "id": "RI-08",
       "title": "final boss termination depends only on battle count",
-      "status": "CONFIRMED",
-      "evidence": "core/progression/run_controller.gd:628 and :909 terminate the run only on state.round_index > BalanceScript.MAX_ROUND. core/encounter/encounter_map.gd:45-46 and :99-106 build an explicit BOSS node on depth 10, but the boss node does not drive the run completion.",
-      "closed": false
+      "status": "CLOSED",
+      "evidence": "CLOSED in b33406c. The run terminated only on `state.round_index > MAX_ROUND` -- the number of WON BATTLES -- and the boss node did not drive the completion. The two counters are different: the round grows by one per won battle, while the map has 10 layers with 2..4 nodes each and the BOSS is on layer 10. Measured: the run ended on round 11 after a victory over a node of the FIRST layer, with the boss never fought. The completion is now the BOSS: `_is_boss_encounter` decides, and the round counter is no longer the completion condition. Suite: tests/run_integrity/boss_termination_test.gd (4 cases). The two protected tests that asserted the old count semantics modelled a state the game cannot reach (ten wins WITHOUT a map) and were migrated to the semantic equivalent: the run is on the map and the encounter is the boss, and they still check the round counter, the win counter, the GAMEOVER phase and the run_ended(true) signal.",
+      "closed": true
     },
     {
       "id": "RI-09",
@@ -258,6 +258,12 @@
     "baseline": "e7135d3",
     "head": "314ef75",
     "suite": "tests/run_integrity/new_run_isolation_test.gd (4 cases)",
+    "push": "NOT performed (no explicit permission)"
+  },
+  "ri08": {
+    "baseline": "34c694e",
+    "head": "b33406c",
+    "suite": "tests/run_integrity/boss_termination_test.gd (4 cases)",
     "push": "NOT performed (no explicit permission)"
   }
 }
