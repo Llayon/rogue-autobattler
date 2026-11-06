@@ -1421,6 +1421,27 @@ func _apply_service_effect(node) -> void:
 		return
 	var available: Array[int] = encounter_map.get_available_next_ids()
 	if available.is_empty():
+		# H-07: an empty successor list DOES NOT IMPLY that the boss
+		# was defeated. A corrupted map whose service node has no
+		# successors reaches this branch too, and ending the run here
+		# produced a FALSE VICTORY: `run_ended(true)`, a total win, a
+		# meta unlock and the DELETION of the checkpoint of a run that
+		# was never won.
+		#
+		# The map knows the difference: `is_valid()` requires a boss
+		# and rejects a dead end that is not the boss. A corrupted map
+		# is a CONTROLLED FAILURE -- an explicit error, no victory, no
+		# meta unlock, no checkpoint deletion -- and not a game loss
+		# and not a game win.
+		#
+		# The legitimate case is untouched: the boss node has no
+		# successors either, and the run still ends there -- but
+		# through the BOSS path, where the outcome was confirmed.
+		if not encounter_map.is_valid():
+			GameLog.error("run",
+				"the map has no successor and is not a valid map: the run is NOT a victory",
+				{"seed": int(state.seed)})
+			return
 		# Нет следующих ходов: это конец карты, то есть победа над
 		# боссом. Завершаем.
 		_end_run(true)
