@@ -54,6 +54,8 @@ func _test_A_the_v5_diagnostics_are_refcounted() -> void:
 		"every v5 diagnostic is an Object, so add_diagnostic() accepts it")
 	_assert(all_carry_the_code,
 		"every v5 diagnostic carries its code, so the caller can report it")
+	_assert(_all_are_errors(diagnostics),
+		"every v5 diagnostic is an ERROR")
 
 
 func _test_B_the_v4_diagnostics_are_refcounted() -> void:
@@ -73,6 +75,8 @@ func _test_B_the_v4_diagnostics_are_refcounted() -> void:
 		"every v4 diagnostic is an Object, so add_diagnostic() accepts it")
 	_assert(all_carry_the_code,
 		"every v4 diagnostic carries its code, so the caller can report it")
+	_assert(_all_are_errors(diagnostics),
+		"every v4 diagnostic is an ERROR")
 
 
 ## The load path must REPORT the failure, not crash.
@@ -123,9 +127,23 @@ func _test_C_a_shape_invalid_file_does_not_crash_the_load() -> void:
 			if not (d is Object):
 				all_objects = false
 		_assert(all_objects, "every reported diagnostic is an Object")
+		_assert(_all_are_errors(diagnostics),
+			"every reported diagnostic is an ERROR")
 
 
 # ----------------------------------------------------------------
+
+
+## Whether every diagnostic carries the ERROR severity.
+func _all_are_errors(diagnostics: Array) -> bool:
+	if diagnostics.is_empty():
+		return false
+	for diagnostic in diagnostics:
+		if not (diagnostic is MigrationDiagnostic):
+			return false
+		if int(diagnostic.severity) != int(MigrationDiagnostic.Severity.ERROR):
+			return false
+	return true
 
 
 func _assert(cond: bool, label: String) -> void:
