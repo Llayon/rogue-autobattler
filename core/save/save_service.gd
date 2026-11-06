@@ -188,15 +188,9 @@ static func has_active_run(profile: MetaProfile) -> bool:
 ## S3.3: список всех сохранённых ранов (по seed). Используется для UI browse.
 ## Возвращает Array[int] — seed'ы найденных run_<N>.tres файлов.
 static func list_runs() -> Array[int]:
-	var result: Array[int] = []
-	var dir: DirAccess = DirAccess.open(SaveSvc.RUNS_DIR)
-	if dir == null:
-		return result
-	for fname in dir.get_files():
-		if not fname.begins_with("run_") or not fname.ends_with(".tres"):
-			continue
-		# run_<seed>.tres → seed (4 = "run_", .length()-9 = "-X.tres")
-		var seed_str: String = fname.substr(4, fname.length() - 9)
-		if seed_str.is_valid_int():
-			result.append(int(seed_str))
-	return result
+	# R-07: the parser of the `run_<seed>.tres` format lives in ONE
+	# place -- the repository owns the FILE FORMAT and this service
+	# owns the PATHS. The service already preloads the repository, so
+	# the dependency points this way and the two parsers cannot
+	# drift.
+	return RunSaveRepositoryScript.list_saved_seeds_in(SaveSvc.RUNS_DIR)

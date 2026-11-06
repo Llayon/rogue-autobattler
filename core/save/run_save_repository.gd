@@ -1155,15 +1155,29 @@ func get_save_count() -> int:
 ## injected repository sees its own runs and the production runs are
 ## not touched.
 func list_saved_seeds() -> Array[int]:
+	# R-07: this is the ONLY parser of the `run_<seed>.tres` format.
+	# The service delegates to it, so the two parsers cannot drift.
+	return list_saved_seeds_in(ProjectSettings.globalize_path(runs_dir))
+
+
+## The seeds of the run files in the given directory.
+##
+## R-07: the single owner of the `run_<seed>.tres` format. The
+## repository owns the FILE FORMAT and the service owns the PATHS, so
+## the parser lives here and the service asks for it -- the service
+## already preloads this script, and the reverse dependency would be
+## a cycle.
+##
+## The result is SORTED, so the discovery order is deterministic.
+static func list_saved_seeds_in(runs_dir_path: String) -> Array[int]:
 	var seeds: Array[int] = []
-	var dir_path: String = ProjectSettings.globalize_path(runs_dir)
-	var dir: DirAccess = DirAccess.open(dir_path)
+	var dir: DirAccess = DirAccess.open(runs_dir_path)
 	if dir == null:
 		return seeds
 	for fname in dir.get_files():
 		if not fname.begins_with("run_") or not fname.ends_with(".tres"):
 			continue
-		# run_<seed>.tres -> seed
+		# run_<seed>.tres -> seed (4 = "run_", .length()-9 = "-X.tres")
 		var seed_str: String = fname.substr(4, fname.length() - 9)
 		if seed_str.is_valid_int():
 			seeds.append(int(seed_str))
