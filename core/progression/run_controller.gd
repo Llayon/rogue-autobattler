@@ -978,6 +978,13 @@ func _on_battle_ended() -> void:
 		# finished run was resumable, and the window was not tight: it
 		# spanned the reward emission and the meta-unlock draws.
 		if _is_boss_encounter(state.current_encounter_id):
+			# H-12: the terminal outcome consumes the latch too. The
+			# latch is the one-shot of the OUTCOME, not of the write:
+			# a finished run writes no checkpoint, so the write path
+			# never consumed it, and a repeated completion callback
+			# applied the terminal outcome AGAIN -- a second total
+			# win, a second meta unlock, a second set of rewards.
+			_battle_outcome_applied = true
 			_end_run(true)
 			return
 		_enter_reward_offer()
@@ -992,6 +999,11 @@ func _on_battle_ended() -> void:
 		if state.lives <= 0:
 			# The run is over: the checkpoint of a finished run must not
 			# stay resumable, so it is removed instead of written.
+			#
+			# H-12: the terminal outcome consumes the latch too, so a
+			# repeated completion callback does not repeat the loss,
+			# the run count and the terminal rewards.
+			_battle_outcome_applied = true
 			_end_run(false)
 			return
 		state.round_index += 1
@@ -1006,6 +1018,9 @@ func _on_battle_ended() -> void:
 	else:
 		# A neutral outcome ends the run too, and it is not counted as
 		# a loss. The run file is removed with the run.
+		#
+		# H-12: the terminal outcome consumes the latch too.
+		_battle_outcome_applied = true
 		_end_run(false)
 
 
