@@ -331,6 +331,9 @@ func equip_item_by_id(item_instance_id: String,
 		return false
 	if item_instance_id == "" or target_unit_instance_id == "":
 		return false
+	var item: RunItem = state.get_item(item_instance_id)
+	if item == null or ContentDB_static.get_by_id_for_type("items", item.definition_id) == null:
+		return false
 	return state.equip_item(item_instance_id, target_unit_instance_id)
 
 
@@ -364,6 +367,9 @@ func grant_item(item_id: StringName) -> bool:
 	if item_id == &"":
 		GameLog.warn("inventory", "grant_item: empty id")
 		return false
+	# The content check and the null check are the inventory contract;
+	# the internal helper carries them, because the reward delivery
+	# goes through it.
 	return _grant_reward_item(item_id)
 
 
@@ -411,7 +417,7 @@ func equip_item_at(item_idx: int, board_idx: int) -> bool:
 		return false
 	var item: RunItem = state.items[item_idx]
 	var target: RunUnit = board[board_idx]
-	return state.equip_item(item.instance_id, target.instance_id)
+	return equip_item_by_id(item.instance_id, target.instance_id)
 
 
 ## Снимает предмет с юнита (возвращает в инвентарь).
@@ -1041,7 +1047,16 @@ func _grant_reward_item(item_id: StringName) -> bool:
 		GameLog.warn("inventory", "grant_item: inventory full",
 			{"size": state.items.size(), "max": BalanceScript.MAX_INVENTORY})
 		return false
-	state.create_item(item_id)
+	# The content boundary: an item with no definition is not granted.
+	if ContentDB_static.get_by_id_for_type("items", item_id) == null:
+		return false
+	# `create_item` returns null for an inconsistent inventory or an
+	# exhausted cursor, and the inventory contract makes that a
+	# refusal: a silent success there would be a lie.
+	if state.create_item(item_id) == null:
+		GameLog.warn("inventory", "grant_item: the item was not created",
+			{"id": item_id})
+		return false
 	GameLog.info("inventory", "item granted",
 		{"id": item_id, "size": state.items.size()})
 	return true

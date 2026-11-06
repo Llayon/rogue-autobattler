@@ -303,3 +303,16 @@ class_name UnitDef extends Resource
 6. **Темп.** Tick-based настраивается пользователем (ускорение ×1/×2/×4)?
 
 По умолчанию при отсутствии ответа: 7×4, сингл, 2D, pixel-art (опционально), 10–12 раундов, с возможностью ускорения.
+
+
+## Inventory integrity boundary
+
+`RunDomainState.is_inventory_valid()` checks canonical positive item instance IDs,
+monotonic cursor gaps and both directions of equipment ownership before item
+create/equip/unequip/remove. Invalid commands leave live state unchanged. Item
+allocation fails without mutation on an invalid or exhausted int64 cursor.
+`RunController` resolves grants/equips through the typed ContentDB items index;
+the pure domain does not resolve content. Existing transfer, multi-item,
+board-only equip and detach-then-remove contracts remain. Unit removal has no
+production command; its future ownership rule requires a gameplay decision.
+See [inventory audit](docs/inventory_integrity/AUDIT.md) for contracts and evidence.
