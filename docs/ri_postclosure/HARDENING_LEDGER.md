@@ -77,16 +77,23 @@ new findings below are tracked separately.
 
 ### H-04 — Runtime isolation: a stale battle runtime across `resume_run`
 
-- **Area:** `core/progression/run_controller.gd`
-- **Baseline behavior:** `resume_run` calls `_reset_transient_runtime()` at
-  line 1234, before the new state is installed. The regression exists:
-  `tests/run_integrity/stale_battle_resume_test.gd` (3 cases, 16 assertions).
-- **Root cause:** N/A — fixed by the published integration.
-- **Severity:** N/A.
-- **Status:** **ALREADY FIXED IN BASELINE.** Confirmed by the existing
-  regression. Additional checks required by the mission (the stale
-  `BattleScene.battle_view._ctx`, the stale `UIOverlay._ctx`, the failed-resume
-  path, the RNG parity) are still to be verified.
+- **Area:** `core/progression/run_controller.gd`, `scenes/battle/battle_scene.gd`
+- **Baseline behavior:** the CORE was already fixed by the published
+  integration: `resume_run` calls `_reset_transient_runtime()` before it
+  installs the restored state, so the runner, the participants, the context
+  and the outcome latch do not survive the resume.
+- **Root cause:** N/A for the core. The PRESENTATION boundary was not
+  covered: `battle_scene.gd` refreshed the battle view only when the
+  controller's context was NOT null, so a NULL context -- the state after a
+  successful resume -- did NOT clear the stale visual context of the
+  previous battle.
+- **Severity:** MEDIUM for the presentation leak: the view kept drawing
+  the combatants of a battle that no longer existed.
+- **Status:** **ALREADY FIXED IN BASELINE** for the core, **FIXED HERE** for
+  the presentation boundary — `443c49b` (RED) → `5d380c0` (FIX).
+  The suite `tests/run_integrity/resume_isolation_test.gd` confirms the
+  core clear, the FAILED-resume transactionality, the exact RNG parity
+  and the visual context.
 
 ### H-05 — Outcome transaction: a failed outcome write has no safe retry
 **[FIXED]** — `8a73743` (RED) → `022ec47` (FIX). The third state
@@ -234,6 +241,26 @@ allocation, no mutation.
   are tests; the production path is the legacy `start_battle`, so the public
   signature can be made fail-closed without breaking a production caller.
 
+### H-12 — Terminal outcome: a repeated completion callback duplicates the rewards
+
+- **Area:** `core/progression/run_controller.gd`
+- **DISCOVERED BY:** the cross-package gauntlet (G10), not by the original
+  eleven findings.
+- **Baseline behavior:** the idempotence latch is consumed by
+  `_write_outcome()`. The TERMINAL branches never write a checkpoint -- a
+  finished run must not be resumable -- so they never consumed the latch
+  either. A repeated completion callback therefore applied the terminal
+  outcome AGAIN: a second `total_runs`, a second `total_wins`, a second
+  meta unlock and a second set of terminal rewards.
+- **Root cause:** the latch was the one-shot of the WRITE, not of the
+  OUTCOME. The terminal paths have no write.
+- **Severity:** HIGH. A duplicate meta unlock and a duplicate win count are
+  permanent progression errors in the player's profile.
+- **Status:** **FIXED** — `f50d7e0` (the gauntlet, RED) → `0d147d5` (FIX).
+  The latch is now consumed by the terminal branches as well, BEFORE the
+  terminal cleanup, so a failure in the cleanup does not make the outcome
+  reapplicable.
+
 ---
 
 ## NEGATIVE CONTROL MATRIX
@@ -265,6 +292,17 @@ finding as the packages land.
 | NC-H10C | a removed mandatory section | H-10 | semantic RED |
 | NC-H11A | remove the inventory validation | H-11 | semantic RED |
 | NC-H11B | accept a duplicate ownership silently | H-11 | semantic RED |
+| NC-H12 | the terminal outcome does not consume the latch | H-12 | semantic RED |
+| NC-H03 | restore the save-before-PREP | H-03 | semantic RED |
+| NC-H05A | remove the outcome retry | H-05 | semantic RED |
+| NC-H05B | re-apply the outcome on a retry | H-05 | semantic RED |
+| NC-H06A | remove the purchase save | H-06 | semantic RED |
+| NC-H06C | remove the merchant exit guard | H-06 | semantic RED |
+| NC-H07A | restore the service dead-end = victory | H-07 | semantic RED |
+| NC-H09A | remove the equip no-op guard | H-09 | semantic RED |
+| NC-H10A | a zero-byte ledger | H-10 | semantic RED |
+| NC-H10B | a malformed JSON ledger | H-10 | semantic RED |
+| NC-H10C | a removed mandatory section | H-10 | semantic RED |
 
 ---
 
@@ -275,7 +313,7 @@ finding as the packages land.
 | H-01 | FIXED | `5048c9d` `5695085` `1084de2` |
 | H-02 | FIXED | `8a17df2` `8f4e680` |
 | H-03 | FIXED | `3c85fef` `bc3365e` |
-| H-04 | ALREADY FIXED — to verify | published integration |
+| H-04 | ALREADY FIXED (core) + FIXED (presentation) | `443c49b` `5d380c0` |
 | H-05 | FIXED | `8a73743` `022ec47` |
 | H-06 | FIXED | `858cf70` `4ee9feb` |
 | H-07 | FIXED | `a9635ef` `4a34d93` |
@@ -284,8 +322,8 @@ finding as the packages land.
 | H-10 | FIXED | `8633fe4` `793aebc` |
 | H-11 | FIXED | `c204be3` `a74e58d` |
 
-**Progress: 9 of 11 fixed (H-01, H-02, H-03, H-05, H-06, H-07, H-08,
-H-09, H-10), 1 already fixed (H-04, to verify), 1 to verify (H-04).
+**Progress: 11 of 11 fixed, plus one NEW finding (H-12) that the
+cross-package gauntlet discovered.**
 
-**Runner after the fixed packages:** 114 suites / 8967 assertions /
+**Runner after the fixed packages:** 115 suites / 8992 assertions /
 0 fail / 0 unparsed, CI gates 10/10 clean.
