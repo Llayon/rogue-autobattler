@@ -281,8 +281,8 @@
     "merge_base": "d6df480b5de4427858f37e4fa9d1f8ab75ad7287",
     "merge_commit": "8b06503",
     "conflict_resolution": "db2a1c6",
-    "final_sha": "96ed7b1c5f61ce2ccd11d0cf165137c25fec8ee9",
-    "commits_ahead_of_baseline": 23,
+    "final_sha": "8642de541da88c7d76fe7f083997360a143c355f",
+    "commits_ahead_of_baseline": 24,
     "production_files_touched": [
       "core/progression/run_controller.gd (+19/-1)",
       "core/progression/run_domain_state.gd (+78/-14)",
@@ -330,7 +330,67 @@
       "stale_battle": "tests/run_integrity/stale_battle_resume_test.gd, 16 assertions over three cases",
       "negative_controls": "NC-01..NC-43: 43 controls, all honest RED on the final HEAD, no SKIP and no INVALID. Eleven anchors had decayed and were retargeted at the current code. Three controls exposed real COVERAGE GAPS and were closed with new assertions: the v4 map GRAPH, the diagnostic SEVERITY, and the consumer that runs before the rng restore. One control was removed after the measurement showed the mutation is harmless."
     },
-    "push": "NOT performed (no explicit permission)",
+    "push": {
+      "status": "PUBLISHED / GREEN",
+      "published_sha": "8642de541da88c7d76fe7f083997360a143c355f",
+      "remote_branch": "canonical/phase3/effect-status-trigger-gauntlet",
+      "baseline": "b0e315e7ba38f5cba5c9cde1a345fe5c579a458a",
+      "push_kind": "fast-forward, no force, no rebase, no reset",
+      "pre_push_gate": {
+        "head": "8642de541da88c7d76fe7f083997360a143c355f",
+        "remote": "b0e315e7ba38f5cba5c9cde1a345fe5c579a458a",
+        "ahead_behind": "24/0",
+        "tracked_changes": 0,
+        "merge_base": "b0e315e == the remote",
+        "fast_forward": "YES",
+        "commits_ahead": 24
+      },
+      "post_push_gate": {
+        "remote_sha": "8642de541da88c7d76fe7f083997360a143c355f",
+        "remote_equals_head": true,
+        "ahead_behind": "0/0",
+        "worktree_clean": true,
+        "canonical_master_untouched": "02fe83ef378d13965184c6224a512a91ae6263a1",
+        "origin_master_untouched": "ba0fd818f552b47ca7e9db61d2d793ce0a85230d",
+        "inventory_worktree_untouched": "4986157bb30be4955ab8998f9d146c16f4d32d58",
+        "a_h_baseline_untouched": "8c3ae13be260a128a1f1ab9542bd0bff49fb3290"
+      },
+      "ci": {
+        "run_id": "42258689657",
+        "url": "https://github.com/Llayon/rogue-autobattler/actions/runs/42258689657",
+        "conclusion": "success",
+        "jobs": {
+          "battle-ecs": "success",
+          "save-battle-migration": "success"
+        },
+        "suites": {
+          "expected": 106,
+          "executed": 106,
+          "passed": 106,
+          "failed": 0,
+          "unparsed": 0,
+          "assertions_pass": 8735,
+          "assertions_fail": 0
+        },
+        "a_h": {
+          "executed": true,
+          "baseline_fixtures": 8,
+          "candidate_fixtures": 8,
+          "result": "PASS (8 fixtures, legacy-projected traces + world + rng + emitter + result all identical)"
+        },
+        "new_suites_confirmed_in_ci": {
+          "inventory_integrity_test": "35 pass / 0 fail",
+          "allocator_boundary_test": "7 pass / 0 fail",
+          "battle_inventory_boundary_test": "5 pass / 0 fail",
+          "controller_inventory_test": "6 pass / 0 fail",
+          "negative_control_test": "7 pass / 0 fail",
+          "merge_invariants_test": "55 pass / 0 fail",
+          "identity_gate_agreement_test": "19 pass / 0 fail",
+          "stale_battle_resume_test": "16 pass / 0 fail"
+        }
+      },
+      "verdict": "INVENTORY + RUN INTEGRITY INTEGRATION = PUBLISHED / GREEN"
+    },
     "critic": {
       "verdict": "HOLD on HIGH-1, PASS after the fix",
       "high_findings": "HIGH-1: the two packages hardened different halves of the same identity contract, and the merge reconciled only the grant half. A checkpoint that passed EVERY v5 gate produced a live inventory in which the ENTIRE item subsystem failed closed forever -- grant, equip, unequip AND remove -- and the poison was re-written unchanged on every save.",
