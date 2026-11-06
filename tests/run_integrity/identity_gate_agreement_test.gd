@@ -113,9 +113,8 @@ func _persistence_accepts(item_id: String) -> bool:
 
 ## Whether the LIVE gate accepts an item id.
 func _live_accepts(item_id: String) -> bool:
-	var ctrl: Node = RunControllerScript.new()
-	ctrl.save_repository = RunSaveRepositoryScript.new(ISOLATED_DIR)
-	ctrl.meta_writer = _MetaWriter.new()
+	# The live gate is a pure domain method: no controller and no tree
+	# are needed, so nothing leaks at the exit.
 	var state: Object = RunDomainStateScript.new()
 	state.seed = 660099
 	state.next_item_instance_seq = 2
