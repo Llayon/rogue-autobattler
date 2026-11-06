@@ -299,8 +299,23 @@ func unequip_item(item_instance_id: String) -> bool:
 ## Sequence counter does NOT decrement. The id is gone forever;
 ## the allocator's next call continues past it.
 func remove_item(item_instance_id: String) -> bool:
+	# The INVENTORY contract: the removal refuses an inconsistent
+	# inventory, atomically.
 	if not is_inventory_valid():
 		return false
+	return remove_item_force(item_instance_id)
+
+
+## Removes an item EVEN WHEN the live inventory is inconsistent.
+##
+## This is the REPAIR path: the whole item subsystem fails closed when
+## the live gate is false, so a removal that refuses too would turn
+## one bad id into a permanent dead end -- the item could never be
+## removed and the poison was re-written on every save.
+##
+## The cursor is NOT rewound: the id stays allocated, so it is never
+## reused.
+func remove_item_force(item_instance_id: String) -> bool:
 	var it: RunItem = get_item(item_instance_id)
 	if it == null:
 		return false
@@ -311,10 +326,13 @@ func remove_item(item_instance_id: String) -> bool:
 			var idx: int = old_owner.equipped_item_ids.find(item_instance_id)
 			if idx >= 0:
 				old_owner.equipped_item_ids.remove_at(idx)
+			old_owner.equipped_item_ids.erase(item_instance_id)
 	# Remove the item itself from the items array.
 	var pos: int = items.find(it)
 	if pos >= 0:
 		items.remove_at(pos)
+	# The cursor is NOT rewound: the id stays allocated, so it is never
+	# reused.
 	return true
 
 

@@ -390,6 +390,24 @@ func remove_item_at(idx: int) -> bool:
 	return ok
 
 
+## Removes an item EVEN WHEN the live inventory is inconsistent.
+##
+## The repair path: the whole item subsystem fails closed when the
+## live gate is false, so a removal that refuses too would lock the
+## player out of their own inventory with no way out. It is NOT a
+## phase-guarded command: it repairs a broken state, so it must work
+## in any phase.
+func remove_item_force_at(idx: int) -> bool:
+	if idx < 0 or idx >= state.items.size():
+		return false
+	var removed_id: String = state.items[idx].instance_id
+	var ok: bool = state.remove_item_force(removed_id)
+	if ok:
+		GameLog.warn("inventory", "item removed from an inconsistent inventory",
+			{"id": removed_id, "idx": idx, "size": state.items.size()})
+	return ok
+
+
 ## Кол-во предметов в инвентаре + equipped (legacy semantics).
 func inventory_count() -> int:
 	return state.items.size()

@@ -248,6 +248,18 @@ static func validate(data: Dictionary) -> Dictionary:
 				var seq: int = _seq_from_instance_id(item_id, "item_")
 				if seq > max_item_seq:
 					max_item_seq = seq
+				# The CANONICAL form: the live gate requires it, so
+				# the persistence gate must require it too. Otherwise
+				# a checkpoint that passes every v5 gate produces a
+				# live inventory in which the whole item subsystem
+				# fails closed forever -- and the poison is re-written
+				# unchanged on every save.
+				if item_id != "item_%06d" % seq or seq < 1:
+					result["success"] = false
+					result["diagnostics"].append(_error(
+						"non_canonical_item_instance_id",
+						"item[%d] has a non-canonical instance_id %s"
+							% [i, item_id], item_id))
 			var item_definition_v: Variant = _strict_str(
 				it.get("definition_id", ""), "definition_id", item_id,
 				result["diagnostics"])
