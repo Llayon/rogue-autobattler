@@ -64,12 +64,23 @@ static func build(
 	# `BattleSetup.validate()` keeps its own job -- it validates the
 	# STRUCTURE of the finished snapshot. This check validates the
 	# DOMAIN the snapshot is built from.
+	#
+	# R-02: the refusal is an OBJECT, not a null. The declared return
+	# type is non-nullable and 23 existing callsites dereference the
+	# result unguarded, so a null would be a SCRIPT ERROR instead of a
+	# clean refusal. The refused setup carries no units, so no item
+	# bonus is applied and no battle can start from it, and
+	# `validate()` reports the reason.
 	if p_state == null:
-		return null
+		GameLog.error("battle", "the battle setup is refused: there is no state",
+			{"seed": int(p_seed)})
+		return BattleSetupScript.refused(int(p_seed),
+			"the battle setup is refused: there is no state")
 	if not p_state.is_inventory_valid():
 		GameLog.error("battle", "the battle setup is refused: the inventory is invalid",
 			{"seed": int(p_seed)})
-		return null
+		return BattleSetupScript.refused(int(p_seed),
+			"the battle setup is refused: the inventory is invalid")
 	var player_units: Array = []
 	var board_units: Array = p_state.get_board_units()
 	var total_atk_bonus: int = int(p_state.meta_modifiers.get("rest_attack_bonus", 0)) + \

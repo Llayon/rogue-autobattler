@@ -13,12 +13,24 @@ extends SceneTree
 ## That is the defect. The contract now is:
 ##
 ##   state.is_inventory_valid() == true  -> a valid BattleSetup
-##   invalid inventory                   -> NO battle setup at all:
-##                                         no silent normalization, no
+##   invalid inventory                   -> a setup that REFUSES to
+##                                         start a battle: it is never
+##                                         null (the declared return
+##                                         type is non-nullable and
+##                                         the existing callers
+##                                         dereference it), it carries
+##                                         NO units, and `validate()`
+##                                         reports the refusal reason.
+##                                         No silent normalization, no
 ##                                         duplicated item bonus, no
 ##                                         domain mutation, no
 ##                                         unintended RNG consumption,
-##                                         no battle startup
+##                                         no battle startup.
+##
+## R-02 (independent critic): the refusal was a `null`, and the 23
+## existing callsites dereference the result unguarded -- so the
+## failure mode was a SCRIPT ERROR, not a clean refusal. The refusal
+## is an OBJECT now.
 ##
 ## The cases:
 ## - the valid ownership transfer: A loses the bonus, B gets exactly
@@ -95,7 +107,14 @@ func _test_B_a_dangling_reference_is_rejected() -> void:
 		"the dangling reference makes the domain invalid")
 	var before_cursor: int = s.next_item_instance_seq
 	var setup: Object = BuilderScript.build(s, 123, 1)
-	_check(setup == null, "the build is REJECTED for a dangling reference")
+	_check(setup != null,
+		"the refused build is an OBJECT, not a null (no crash at the caller)")
+	_check(setup != null and str(setup.validate()) != "",
+		"the refused build reports the refusal through validate()")
+	_check(setup != null and setup.player_units.is_empty(),
+		"the refused build carries no player unit")
+	_check(setup != null and setup.enemy_units.is_empty(),
+		"the refused build carries no enemy unit")
 	_check(s.next_item_instance_seq == before_cursor,
 		"the rejected build consumed no allocation")
 	_check(not s.is_inventory_valid(),
@@ -121,7 +140,14 @@ func _test_C_a_duplicate_logical_item_is_rejected() -> void:
 	_check(not s.is_inventory_valid(),
 		"the duplicate instance id makes the domain invalid")
 	var setup: Object = BuilderScript.build(s, 123, 1)
-	_check(setup == null, "the build is REJECTED for a duplicate item")
+	_check(setup != null,
+		"the refused build is an OBJECT, not a null (no crash at the caller)")
+	_check(setup != null and str(setup.validate()) != "",
+		"the refused build reports the refusal through validate()")
+	_check(setup != null and setup.player_units.is_empty(),
+		"the refused build carries no player unit")
+	_check(setup != null and setup.enemy_units.is_empty(),
+		"the refused build carries no enemy unit")
 	_check(not s.is_inventory_valid(),
 		"the rejected build did not normalize the domain")
 
@@ -143,7 +169,14 @@ func _test_D_a_broken_mirrored_ownership_is_rejected() -> void:
 	_check(not s.is_inventory_valid(),
 		"the broken mirrored ownership makes the domain invalid")
 	var setup: Object = BuilderScript.build(s, 123, 1)
-	_check(setup == null, "the build is REJECTED for a broken ownership")
+	_check(setup != null,
+		"the refused build is an OBJECT, not a null (no crash at the caller)")
+	_check(setup != null and str(setup.validate()) != "",
+		"the refused build reports the refusal through validate()")
+	_check(setup != null and setup.player_units.is_empty(),
+		"the refused build carries no player unit")
+	_check(setup != null and setup.enemy_units.is_empty(),
+		"the refused build carries no enemy unit")
 
 
 ## E. The valid state: the same seed produces the same setup, and the

@@ -27,6 +27,15 @@ var player_units: Array = []  # Array[BattleUnitSetup] (defensive copies)
 var enemy_units: Array = []   # Array[BattleUnitSetup] (defensive copies)
 var grid_width: int = 7
 var grid_height: int = 4
+## R-02: the reason the build was REFUSED, or "" when the setup was
+## built normally.
+##
+## The builder never returns null: a refusal returns a setup with no
+## units and this reason set. That keeps the public contract honest
+## (the declared return type is non-nullable) and keeps every
+## existing callsite safe -- the refusal is visible through
+## `validate()`, which is the mechanism that exists for it.
+var build_error: String = ""
 
 
 func _init(
@@ -40,6 +49,18 @@ func _init(
 	enemy_units = _clone_unit_array(p_enemy_units)
 	grid_width = maxi(1, p_grid_width)
 	grid_height = maxi(1, p_grid_height)
+
+
+## A setup that REFUSES to start a battle.
+##
+## R-02: the refusal is an object, not a null. Every existing caller
+## dereferences the build result, so a null would be a SCRIPT ERROR
+## instead of a clean refusal. The refused setup carries NO units, so
+## no item bonus can be applied and no battle can start from it.
+static func refused(p_seed: int, p_error: String) -> BattleSetup:
+	var s: BattleSetup = BattleSetup.new(p_seed, [], [], 7, 4)
+	s.build_error = p_error
+	return s
 
 
 static func _clone_unit_array(src: Array) -> Array:
@@ -80,6 +101,9 @@ static func _clone_unit_array(src: Array) -> Array:
 ## Returns a human-readable error string on the first defect, or
 ## "" when valid.
 func validate() -> String:
+	# R-02: a refused build reports its refusal reason first.
+	if build_error != "":
+		return build_error
 	if player_units.is_empty():
 		return "no player units"
 	if enemy_units.is_empty():
