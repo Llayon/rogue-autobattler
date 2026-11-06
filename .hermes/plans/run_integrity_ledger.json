@@ -273,5 +273,45 @@
     "head": "b33406c",
     "suite": "tests/run_integrity/boss_termination_test.gd (4 cases)",
     "push": "NOT performed (no explicit permission)"
+  },
+  "integration": {
+    "branch": "integration/inventory-run-integrity",
+    "baseline_sha": "b0e315e7ba38f5cba5c9cde1a345fe5c579a458a",
+    "inventory_sha": "4986157bb30be4955ab8998f9d146c16f4d32d58",
+    "merge_base": "d6df480b5de4427858f37e4fa9d1f8ab75ad7287",
+    "merge_commit": "8b06503",
+    "conflict_resolution": "db2a1c6",
+    "final_sha": "4e9c54763b910bb40bfb4500b43dad2676f56327",
+    "commits_ahead_of_baseline": 10,
+    "production_files_touched": [
+      "core/progression/run_controller.gd (+19/-1)",
+      "core/progression/run_domain_state.gd (+78/-14)"
+    ],
+    "semantic_conflicts": 1,
+    "semantic_conflict_report": [
+      {
+        "site": "core/progression/run_controller.gd, grant_item",
+        "run_integrity_side": "the body calls the internal _grant_reward_item, because the reward delivery happens in the MAP and the BATTLE phase, where a guarded command is refused -- without that split the TREASURE node's item and the post-victory combat drop were dead",
+        "inventory_side": "the body is hardened with a content check and with the create_item null check",
+        "resolution": "both properties survive: the internal helper takes the content check and honours the null return of create_item, so a caller is never told it granted an item that was never created"
+      }
+    ],
+    "untouched": [
+      "core/battle_ecs/ (Battle ECS)",
+      "the clock policy",
+      "content/ and the .tres files (shipping content)",
+      "core/balance.gd"
+    ],
+    "verification": {
+      "runner": "104 suites / 8694 assertions / 0 fail / 0 unparsed",
+      "ci_gates": "10/10 clean",
+      "a_h": "PASS (8 fixtures per side)",
+      "lint": "0 errors, 5 warnings (baseline)",
+      "editor_parse": "0 errors",
+      "inventory_suites": "35/0 + 7/0 + 5/0 + 6/0",
+      "negative_controls": "NC-18..NC-40: 23 honest REDs (NC-18/19/20 had to be retargeted at the current code: their anchors had decayed, and a stale anchor proves nothing)",
+      "merge_invariants": "tests/run_integrity/merge_invariants_test.gd, 8 cases, 55 assertions"
+    },
+    "push": "NOT performed (no explicit permission)"
   }
 }
