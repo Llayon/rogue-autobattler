@@ -67,6 +67,17 @@ var save_repository: Object = null
 var meta_writer: Object = null
 ## The one-shot latch of the battle outcome. See `_on_battle_ended`.
 var _battle_outcome_applied: bool = false
+## H-05: the outcome was applied to the live state, but its
+## checkpoint did NOT land. The live state already holds the applied
+## outcome, so the retry only has to WRITE it -- it must never
+## re-apply it.
+var _outcome_pending_persist: bool = false
+## H-05: the retry is rate limited, so a persistent filesystem failure
+## does not turn into a write on every frame. The value is the
+## timestamp of the last attempt in milliseconds.
+var _outcome_retry_after_ms: int = 0
+## H-05: the minimum interval between two persistence retries.
+const OUTCOME_RETRY_INTERVAL_MS: int = 1000
 # S5.3: encounter map owned by RunController после первого перехода в MAP phase.
 # Scene получает его через get_encounter_map() и передаёт в EncounterMapScene.set_encounter_map().
 var encounter_map: EncounterMap = null
@@ -738,6 +749,10 @@ func start_battle() -> bool:
 	runner.start()
 	# A new battle may produce a new outcome.
 	_battle_outcome_applied = false
+	# H-05: a fresh battle has no pending outcome, and a fresh run
+	# has no stale pending persistence.
+	_outcome_pending_persist = false
+	_outcome_retry_after_ms = 0
 	_set_phase(Phase.BATTLE)
 	GameBus.emit_round_started(state.round_index)
 	return true
@@ -745,11 +760,63 @@ func start_battle() -> bool:
 
 ## Тикает бой. Вызывай из сцены каждый кадр с учётом speed.
 func tick_battle(dt: float) -> void:
+	# H-05: the pending outcome is recovered by the ORDINARY game
+	# loop, so the retry is REACHABLE and not a dead method without a
+	# caller. It is rate limited, so a persistent filesystem failure
+	# does not become a write on every frame.
+	_retry_pending_outcome_persistence()
 	if runner == null:
 		return
 	runner.step(dt)
 	if runner.state.phase == BattleStateScript.Phase.ENDED:
 		_on_battle_ended()
+
+
+## Whether the outcome was applied but its checkpoint did not land.
+##
+## H-05: the third state of the outcome contract:
+##
+##   OUTCOME_NOT_APPLIED
+##   OUTCOME_APPLIED_PENDING_PERSIST
+##   OUTCOME_PERSISTED
+func outcome_persistence_pending() -> bool:
+	return _outcome_pending_persist
+
+
+## Retries the persistence of an ALREADY applied outcome.
+##
+## The retry writes the CURRENT live state, which already holds the
+## applied outcome. It therefore CANNOT re-apply anything: no second
+## win counter, no second gold, no second round advance, no second
+## loot, no second reward offer, no extra gameplay RNG draw and no
+## repeated gameplay event.
+##
+## Returns true when there was pending work and it landed.
+func retry_outcome_persistence() -> bool:
+	if not _outcome_pending_persist:
+		return false
+	var report: RefCounted = save_now_report()
+	if not bool(report.checkpoint_committed):
+		_outcome_retry_after_ms = Time.get_ticks_msec() + OUTCOME_RETRY_INTERVAL_MS
+		GameLog.error("run", "the outcome persistence retry failed",
+			{"seed": state.seed})
+		return false
+	_outcome_pending_persist = false
+	_outcome_retry_after_ms = 0
+	GameLog.info("run", "the outcome persistence retry landed",
+		{"seed": state.seed})
+	return true
+
+
+## The internal retry, driven by the tick and RATE LIMITED.
+func _retry_pending_outcome_persistence() -> void:
+	if not _outcome_pending_persist:
+		return
+	var now: int = Time.get_ticks_msec()
+	if now < _outcome_retry_after_ms:
+		return
+	_outcome_retry_after_ms = now + OUTCOME_RETRY_INTERVAL_MS
+	retry_outcome_persistence()
 
 
 ## Applies the outcome of the finished battle and writes the
@@ -1111,7 +1178,14 @@ func _write_outcome() -> bool:
 	var written: bool = bool(report.checkpoint_committed)
 	if written:
 		_battle_outcome_applied = true
+		_outcome_pending_persist = false
 	else:
+		# H-05: the outcome IS applied to the live state -- the win
+		# counter, the gold, the round, the loot and the offer are
+		# already there. Only the WRITE failed, so the outcome is
+		# PENDING, not lost and not reapplicable.
+		_outcome_pending_persist = true
+		_outcome_retry_after_ms = 0
 		GameLog.error("run", "the outcome checkpoint failed to write",
 			{"seed": state.seed})
 	return written
@@ -1142,6 +1216,10 @@ func _reset_transient_runtime() -> void:
 	ctx = null
 	_battle_participants = null
 	_battle_outcome_applied = false
+	# H-05: a fresh battle has no pending outcome, and a fresh run
+	# has no stale pending persistence.
+	_outcome_pending_persist = false
+	_outcome_retry_after_ms = 0
 
 ## Grants an item to the run.
 ##

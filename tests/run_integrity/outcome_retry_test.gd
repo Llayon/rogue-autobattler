@@ -258,15 +258,16 @@ func _test_F_the_retry_is_reachable_from_the_tick() -> void:
 
 	# The write is recovered, and the ORDINARY tick retries it.
 	ops.fail_methods = {}
-	var reader: RefCounted = RunSaveRepositoryScript.new(ISOLATED_DIR)
-	var count_before: int = reader.get_save_count()
+	# The counter is read from the SAME repository that performs the
+	# write: a fresh repository has its own counter, starting at zero.
+	var count_before: int = ctrl.save_repository.get_save_count()
 	ctrl.tick_battle(0.016)
 	await process_frame
 	_assert(not bool(ctrl.outcome_persistence_pending()),
 		"the ordinary tick cleared the pending state")
-	_assert(reader.get_save_count() == count_before + 1,
+	_assert(ctrl.save_repository.get_save_count() == count_before + 1,
 		"the ordinary tick wrote the checkpoint exactly once (it was %d, it is %d)"
-			% [reader.get_save_count(), count_before])
+			% [ctrl.save_repository.get_save_count(), count_before])
 
 
 # ----------------------------------------------------------------
@@ -297,8 +298,12 @@ func _make_controller(seed_value: int, meta_ok: bool) -> Node:
 class _MetaWriter:
 	extends RefCounted
 
+	var fail: bool = false
+	var writes: int = 0
+
 	func write_meta(profile: Object) -> bool:
-		return true
+		writes += 1
+		return not fail
 
 
 func _assert(cond: bool, label: String) -> void:
