@@ -21,9 +21,25 @@ var _discount: float = BalanceScript.MAP_MERCHANT_DISCOUNT
 ## into its checkpoint, and it broke the determinism of the checkpoint
 ## for a fixed seed.
 func reset_offer() -> void:
-	# Only the offer is run-scoped. The discount is the balance
-	# constant, so it stays.
+	# Only the offer is reset here: the caller that starts a new run
+	# resets the discount separately, because the discount is
+	# run-scoped too -- the v5 checkpoint PERSISTS it, so a resumed
+	# run installs a non-default one.
 	_offered_item_ids.clear()
+
+
+## Resets the discount to the balance constant.
+##
+## H-02: the discount is RUN-SCOPED, exactly like the offer. The v5
+## checkpoint persists it, so `restore_snapshot()` installs whatever
+## the resumed run had. Without this reset the next independent run
+## inherited the previous run's discount, and its merchant priced the
+## items with it.
+##
+## The offer list is NOT touched: the offer and the discount are
+## reset independently.
+func reset_discount() -> void:
+	_discount = BalanceScript.MAP_MERCHANT_DISCOUNT
 
 
 func refresh(_unlocked_units: Array = []) -> void:

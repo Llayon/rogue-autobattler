@@ -1040,6 +1040,11 @@ func _reset_transient_runtime() -> void:
 	# checkpoint, and it broke the determinism of the checkpoint for a
 	# fixed seed.
 	merchant_shop.reset_offer()
+	# H-02: the merchant discount is run-scoped as well. The v5
+	# checkpoint persists it, so a resumed run installs a non-default
+	# one; without this reset the next independent run inherited it and
+	# priced its merchant items with the previous run's discount.
+	merchant_shop.reset_discount()
 	runner = null
 	ctx = null
 	_battle_participants = null
