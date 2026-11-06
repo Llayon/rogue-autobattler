@@ -281,8 +281,8 @@
     "merge_base": "d6df480b5de4427858f37e4fa9d1f8ab75ad7287",
     "merge_commit": "8b06503",
     "conflict_resolution": "db2a1c6",
-    "final_sha": "faefeabfbd1441fc6bac8ae164be20cd0c800adf",
-    "commits_ahead_of_baseline": 22,
+    "final_sha": "96ed7b1c5f61ce2ccd11d0cf165137c25fec8ee9",
+    "commits_ahead_of_baseline": 23,
     "production_files_touched": [
       "core/progression/run_controller.gd (+19/-1)",
       "core/progression/run_domain_state.gd (+78/-14)",
@@ -336,6 +336,12 @@
       "high_findings": "HIGH-1: the two packages hardened different halves of the same identity contract, and the merge reconciled only the grant half. A checkpoint that passed EVERY v5 gate produced a live inventory in which the ENTIRE item subsystem failed closed forever -- grant, equip, unequip AND remove -- and the poison was re-written unchanged on every save.",
       "minor_findings": "MINOR-1 (a content-orphaned item is permanently un-equippable but still removable and discardable), MINOR-2 (the global and the typed content lookups are used side by side), MINOR-3 (equip_item_at runs a redundant second phase guard), MINOR-4 (create_item validates the inventory twice), MINOR-5 (grant_item checks the empty id twice)",
       "semantic_conflicts_reviewed": 6
-    }
+    },
+    "notes": [
+      {
+        "note": "The ledger was EMPTIED once, by a bug in the implementer's own line-ending normalization: io.open(p,'wb').write(io.open(p,'rb').read()...) truncates the file when the OUTER open happens. The empty ledger passed every gate -- git status was clean, diff --check was clean and the runner was GREEN -- because the ledger is not part of any test. It was restored from 4a4e016 and the write now verifies the size and the content afterwards. All 35 tracked JSON/MD artifacts were compared against their committed sizes: no other file was affected.",
+        "detected_by": "the implementer, while reviewing a late background notification"
+      }
+    ]
   }
 }
