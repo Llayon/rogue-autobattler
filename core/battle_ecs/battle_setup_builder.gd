@@ -52,6 +52,24 @@ static func build(
 		p_round_index: int,
 		p_grid_width: int = 7,
 		p_grid_height: int = 4) -> BattleSetupScript:
+	# H-11: the TRUST BOUNDARY. The builder reads the owner projection
+	# of the inventory, so an inconsistent inventory would produce a
+	# battle setup with a wrong item bonus -- applied twice for a
+	# duplicated logical item, or to the wrong unit for a broken
+	# mirrored ownership.
+	#
+	# The check is the FIRST statement: the rejected build consumes no
+	# RNG, allocates nothing and mutates nothing.
+	#
+	# `BattleSetup.validate()` keeps its own job -- it validates the
+	# STRUCTURE of the finished snapshot. This check validates the
+	# DOMAIN the snapshot is built from.
+	if p_state == null:
+		return null
+	if not p_state.is_inventory_valid():
+		GameLog.error("battle", "the battle setup is refused: the inventory is invalid",
+			{"seed": int(p_seed)})
+		return null
 	var player_units: Array = []
 	var board_units: Array = p_state.get_board_units()
 	var total_atk_bonus: int = int(p_state.meta_modifiers.get("rest_attack_bonus", 0)) + \
