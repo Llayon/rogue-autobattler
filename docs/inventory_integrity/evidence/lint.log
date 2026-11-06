@@ -1,0 +1,14 @@
+
+=== Lint Results (132 files scanned) ===
+
+  Errors:   0
+  Warnings: 5
+  Info:     315
+
+=== WARNINGS ===
+
+  [no-classification-flags] core/balance.gd:175: Classification flag 'is_X: bool' forbidden. Use ZST marker component or enum.
+  [no-classification-flags] core/balance.gd:198: Classification flag 'is_X: bool' forbidden. Use ZST marker component or enum.
+  [no-classification-flags] core/balance.gd:252: Classification flag 'is_X: bool' forbidden. Use ZST marker component or enum.
+  [no-classification-flags] core/balance.gd:259: Classification flag 'is_X: bool' forbidden. Use ZST marker component or enum.
+  [no-classification-flags] scenes/main_menu/main_menu.gd:200: Classification flag 'is_X: bool' forbidden. Use ZST marker component or enum.

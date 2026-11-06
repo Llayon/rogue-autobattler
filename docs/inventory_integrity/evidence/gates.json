@@ -1,0 +1,182 @@
+[
+  {
+    "suite": "tests/inventory_integrity/allocator_boundary_test.gd",
+    "rc": 0,
+    "script_errors": 0,
+    "parse_errors": 0,
+    "summaries": [
+      "=== allocator boundary: 7 passed, 0 failed ==="
+    ]
+  },
+  {
+    "suite": "tests/inventory_integrity/battle_inventory_boundary_test.gd",
+    "rc": 0,
+    "script_errors": 0,
+    "parse_errors": 0,
+    "summaries": [
+      "=== battle inventory boundary: 5 passed, 0 failed ==="
+    ]
+  },
+  {
+    "suite": "tests/inventory_integrity/controller_inventory_test.gd",
+    "rc": 0,
+    "script_errors": 0,
+    "parse_errors": 0,
+    "summaries": [
+      "=== controller inventory: 6 passed, 0 failed ==="
+    ]
+  },
+  {
+    "suite": "tests/inventory_integrity/inventory_integrity_test.gd",
+    "rc": 0,
+    "script_errors": 0,
+    "parse_errors": 0,
+    "summaries": [
+      "=== inventory integrity: 35 passed, 0 failed ==="
+    ]
+  },
+  {
+    "suite": "tests/inventory_integrity/negative_control_test.gd",
+    "rc": 0,
+    "script_errors": 0,
+    "parse_errors": 0,
+    "summaries": [
+      "=== inventory negative probes: 7 passed, 0 failed ==="
+    ]
+  },
+  {
+    "suite": "tests/run_tests.gd",
+    "rc": 0,
+    "script_errors": 0,
+    "parse_errors": 0,
+    "summaries": [
+      "=== Result: 524 passed, 0 failed ==="
+    ]
+  },
+  {
+    "suite": "tests/run_domain/legacy_battle_participant_map_test.gd",
+    "rc": 0,
+    "script_errors": 0,
+    "parse_errors": 0,
+    "summaries": [
+      "=== legacy battle participant map: 50 passed, 0 failed ==="
+    ]
+  },
+  {
+    "suite": "tests/run_domain/run_controller_stable_identity_test.gd",
+    "rc": 0,
+    "script_errors": 0,
+    "parse_errors": 0,
+    "summaries": [
+      "=== run controller stable identity: 152 passed, 0 failed ==="
+    ]
+  },
+  {
+    "suite": "tests/run_domain/run_domain_state_test.gd",
+    "rc": 0,
+    "script_errors": 0,
+    "parse_errors": 0,
+    "summaries": [
+      "=== run domain state: 182 passed, 0 failed ==="
+    ]
+  },
+  {
+    "suite": "tests/run_domain/run_state_v4_mapper_test.gd",
+    "rc": 0,
+    "script_errors": 0,
+    "parse_errors": 0,
+    "summaries": [
+      "=== run state v4 mapper: 69 passed, 0 failed ==="
+    ]
+  },
+  {
+    "suite": "tests/run_domain/save_service_v4_test.gd",
+    "rc": 0,
+    "script_errors": 0,
+    "parse_errors": 0,
+    "summaries": [
+      "=== save service v4 facade: 29 passed, 0 failed ==="
+    ]
+  },
+  {
+    "suite": "tests/run_domain/ui_stable_identity_test.gd",
+    "rc": 0,
+    "script_errors": 0,
+    "parse_errors": 0,
+    "summaries": [
+      "=== ui stable identity: 13 passed, 0 failed ==="
+    ]
+  },
+  {
+    "suite": "tests/run_integrity/sequence_cursor_contract_test.gd",
+    "rc": 0,
+    "script_errors": 0,
+    "parse_errors": 0,
+    "summaries": [
+      "=== STAGE 3E: SEQUENCE CURSOR CONTRACT: 15 pass / 0 fail ==="
+    ]
+  },
+  {
+    "suite": "tests/legacy_characterization/legacy_characterization_test.gd",
+    "rc": 0,
+    "script_errors": 0,
+    "parse_errors": 0,
+    "summaries": [
+      "=== Legacy characterization: 25 passed, 0 failed ==="
+    ]
+  },
+  {
+    "suite": "tests/legacy_save_fixtures/loader_test.gd",
+    "rc": 0,
+    "script_errors": 0,
+    "parse_errors": 0,
+    "summaries": [
+      "=== legacy save loader: 60 passed, 0 failed ==="
+    ]
+  },
+  {
+    "suite": "tests/save_schema_v4/save_schema_v4_test.gd",
+    "rc": 0,
+    "script_errors": 0,
+    "parse_errors": 0,
+    "summaries": [
+      "=== save schema v4 + migrator: 146 passed, 0 failed ==="
+    ]
+  },
+  {
+    "suite": "tests/save_schema_v4/byte_for_byte_determinism_test.gd",
+    "rc": 0,
+    "script_errors": 0,
+    "parse_errors": 0,
+    "summaries": [
+      "=== byte-for-byte determinism: 31 passed, 0 failed ==="
+    ]
+  },
+  {
+    "suite": "tests/save_repository/save_repository_test.gd",
+    "rc": 0,
+    "script_errors": 0,
+    "parse_errors": 0,
+    "summaries": [
+      "=== production save repository: 152 passed, 0 failed ==="
+    ]
+  },
+  {
+    "suite": "tests/save_repository/run_save_file_ops_test.gd",
+    "rc": 0,
+    "script_errors": 0,
+    "parse_errors": 0,
+    "summaries": [
+      "=== run save file ops: 17 passed, 0 failed ==="
+    ]
+  },
+  {
+    "suite": "tests/progression/run_unit_test.gd",
+    "rc": 0,
+    "script_errors": 0,
+    "parse_errors": 0,
+    "summaries": [
+      "=== run unit is_alive: 5 passed, 0 failed ==="
+    ]
+  }
+]

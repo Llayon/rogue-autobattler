@@ -1,0 +1,8 @@
+=== A-H SEMANTIC DIFFERENTIAL ===
+baseline  : C:\Users\user\Documents\GodotProjects\rogue-autobattler-inventory\artifacts\inventory-baseline
+candidate : C:\Users\user\Documents\GodotProjects\rogue-autobattler-inventory
+
+baseline fixtures  : 8 (rc=0)
+candidate fixtures : 8 (rc=0)
+
+A-H SEMANTIC DIFFERENTIAL: PASS (8 fixtures, legacy-projected traces + world + rng + emitter + result all identical)
