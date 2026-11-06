@@ -538,6 +538,11 @@ func buy_item(slot: int) -> bool:
 		return false
 	state.gold -= price
 	GameBus.emit_gold_changed(state.gold)
+	# H-06: the purchase is persisted. The write happens AFTER the
+	# mutation, so a failed write leaves a STALE checkpoint with the
+	# PRE-purchase state: the item is not duplicated and the gold is
+	# not charged twice.
+	save_now()
 	GameLog.info("run", "Shop buy",
 		{"id": id, "price": price, "gold_left": state.gold})
 	return true
@@ -545,10 +550,19 @@ func buy_item(slot: int) -> bool:
 
 ## S7.4: выходит из shop/MERCHANT в MAP phase (используется shop_scene Close).
 func exit_shop_to_map() -> void:
+	# H-06: the exit requires a REAL merchant context. The phase
+	# alone is not enough: without the merchant flag the exit was
+	# reachable from an ordinary PREP, which is not a shop.
 	if phase != Phase.PREP:
+		return
+	if state == null or not state.just_visited_merchant:
+		GameLog.warn("run", "the shop exit needs a real merchant context")
 		return
 	state.just_visited_merchant = false
 	_set_phase(Phase.MAP)
+	# H-06: the exit is persisted, so the merchant context does not
+	# survive a Continue.
+	save_now()
 
 
 ## Empties the legacy reaction registry at a battle boundary.

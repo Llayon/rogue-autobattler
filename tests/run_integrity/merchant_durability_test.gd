@@ -180,6 +180,9 @@ func _test_F_an_insufficient_gold_writes_nothing() -> void:
 func _test_G_a_write_failure_duplicates_neither_the_item_nor_the_charge() -> void:
 	var ctrl: Node = await _make_controller(670711)
 	await _enter_merchant(ctrl)
+	# The gold of the LAST SUCCESSFUL WRITE: the merchant entry wrote
+	# the checkpoint, and everything after that fails.
+	var gold_at_last_write: int = ctrl.state.gold
 	ctrl.state.gold = 1000
 	var ops: RefCounted = FaultOps.new()
 	ops.fail_methods = {&"write_bytes_and_flush": true}
@@ -191,8 +194,9 @@ func _test_G_a_write_failure_duplicates_neither_the_item_nor_the_charge() -> voi
 	var loaded: RefCounted = reader.load_run(670711)
 	if loaded != null and loaded.is_ok():
 		var dto: Dictionary = loaded.data
-		_assert(int(dto.get("gold", 0)) == 1000,
-			"the stale checkpoint holds the gold BEFORE the purchase")
+		_assert(int(dto.get("gold", 0)) == gold_at_last_write,
+			"the stale checkpoint holds the gold of the LAST WRITE (got %d, it is %d)"
+				% [int(dto.get("gold", 0)), gold_at_last_write])
 		_assert((dto.get("items", []) as Array).size() == 0,
 			"the stale checkpoint holds no item")
 	else:
