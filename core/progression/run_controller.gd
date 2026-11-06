@@ -36,6 +36,7 @@ const ShopScreenScript = preload("res://core/progression/shop_screen.gd")
 const RunDomainStateScript = preload("res://core/progression/run_domain_state.gd")
 const RunStateV4MapperScript = preload("res://core/progression/run_state_v4_mapper.gd")
 const RunCheckpointV5MapperScript = preload("res://core/progression/run_checkpoint_v5_mapper.gd")
+const RunSaveReportScript = preload("res://core/progression/run_save_report.gd")
 const SaveSchemaV5Script = preload("res://core/save/save_schema_v5.gd")
 const RngServiceScript = preload("res://core/utils/rng_service.gd")
 const LegacyBattleParticipantMapScript = preload("res://core/battle/legacy_battle_participant_map.gd")
@@ -950,13 +951,40 @@ func build_checkpoint_dto() -> Dictionary:
 
 
 func save_now() -> bool:
+	# The boolean contract is kept for the existing callers: a COMPLETE
+	# success. A partial success (the checkpoint landed, the meta
+	# pointer did not) is NOT a complete success, so it is reported as
+	# false -- and the checkpoint itself stays valid on the disk.
+	#
+	# H-08: the outcome latch is bound to the CHECKPOINT, not to this
+	# boolean, so a meta failure can never make the outcome
+	# reapplicable. See `_write_outcome`.
+	return save_now_report().is_complete()
+
+
+## The structured result of a checkpoint attempt.
+##
+## H-08: the checkpoint commit and the meta pointer commit are TWO
+## separate writes, so they are reported separately:
+##
+##   checkpoint success + meta success -> complete success
+##   checkpoint success + meta failure -> a PARTIAL success: the
+##                                      checkpoint stays VALID, the
+##                                      status reports the partial
+##                                      failure, no false run_saved
+##                                      success is emitted, and only
+##                                      the META publication is
+##                                      retried
+##   checkpoint failure               -> no claim of a persisted
+##                                      checkpoint
+func save_now_report() -> RefCounted:
 	if state == null or state.seed == 0:
 		GameLog.warn("run", "save_now: no active state")
-		return false
+		return RunSaveReportScript.failed(0, 0, "no active state")
 	var dto: Dictionary = build_checkpoint_dto()
 	if dto.is_empty():
 		GameLog.error("run", "save_now: the checkpoint DTO is empty")
-		return false
+		return RunSaveReportScript.failed(state.seed, 0, "the checkpoint DTO is empty")
 	var result: RefCounted = _save_run_v5(state.seed, dto)
 	if result == null or not result.is_ok():
 		var err: String = "unknown"
@@ -972,13 +1000,70 @@ func save_now() -> bool:
 						"context": str(d.context)})
 		GameLog.error("run", "save_now failed",
 			{"seed": state.seed, "status": err, "context": ctx_msg})
-		return false
+		return RunSaveReportScript.failed(state.seed, 0, "the checkpoint write failed")
+	# The CHECKPOINT landed. The meta pointer is a SECOND, separate
+	# write.
 	if profile != null:
 		profile.current_run_seed = state.seed
-		_save_meta(profile)
+		if not _save_meta(profile):
+			# The checkpoint is valid and stays on the disk, but the
+			# pointer that makes Continue discoverable was not
+			# published. This is a PARTIAL success, NOT a complete
+			# one: no `run_saved` is emitted, because the caller would
+			# believe the run is discoverable.
+			GameLog.error("run",
+				"the checkpoint landed but the meta pointer did not: a partial success",
+				{"seed": state.seed})
+			return RunSaveReportScript.checkpoint_only(state.seed, 0,
+				"the meta pointer write failed")
 		GameBus.emit_run_saved(state.seed)
-		GameLog.info("run", "Run saved", {"seed": state.seed, "round": state.round_index})
+	GameLog.info("run", "Run saved", {"seed": state.seed, "round": state.round_index})
+	return RunSaveReportScript.complete(state.seed)
+
+
+## Retries ONLY the meta publication.
+##
+## H-08: the meta pointer is a separate write from the checkpoint, so
+## it gets its own retry. The retry writes ONLY the meta: it never
+## replays the gameplay outcome, never touches the checkpoint and never
+## draws from the gameplay RNG.
+func retry_meta_publication() -> bool:
+	if profile == null or state == null:
+		return false
+	profile.current_run_seed = state.seed
+	if not _save_meta(profile):
+		GameLog.error("run", "the meta publication retry failed",
+			{"seed": state.seed})
+		return false
+	GameBus.emit_run_saved(state.seed)
+	GameLog.info("run", "Run meta published",
+		{"seed": state.seed, "round": state.round_index})
 	return true
+
+
+## The checkpoints that are on the disk and can be recovered.
+##
+## H-08: when the meta pointer is stale or zero, the committed
+## checkpoint must still be DISCOVERABLE, so the Continue path can
+## find it.
+##
+## The controller does NOT choose one of the candidates silently: the
+## list is returned, and the caller decides. The active run is never
+## switched by this call.
+func recoverable_checkpoints() -> Array[int]:
+	var seeds: Array[int] = []
+	if save_repository != null and save_repository.has_method("list_saved_seeds"):
+		var listed: Variant = save_repository.list_saved_seeds()
+		if listed is Array:
+			for s in listed:
+				seeds.append(int(s))
+		return seeds
+	# The production path: the service lists the run files.
+	var listed_service: Variant = SaveService.list_runs()
+	if listed_service is Array:
+		for s in listed_service:
+			seeds.append(int(s))
+	return seeds
 
 
 ## S3.3: сбрасывает active run marker. Вызывается при _end_run.
@@ -1015,7 +1100,15 @@ func _delete_run_file() -> void:
 ## persistable: the latch would otherwise make the outcome
 ## unrecoverable, because every later attempt would return early.
 func _write_outcome() -> bool:
-	var written: bool = save_now()
+	# H-08: the latch is bound to the CHECKPOINT commit, NOT to the
+	# complete success. The checkpoint and the meta pointer are two
+	# separate writes: if the checkpoint landed and the meta pointer
+	# failed, the outcome IS persisted and the latch MUST be
+	# consumed. Binding the latch to the complete success would make
+	# the outcome reapplicable -- and a second application repeats the
+	# win counter, the gold, the round, the loot and the reward offer.
+	var report: RefCounted = save_now_report()
+	var written: bool = bool(report.checkpoint_committed)
 	if written:
 		_battle_outcome_applied = true
 	else:

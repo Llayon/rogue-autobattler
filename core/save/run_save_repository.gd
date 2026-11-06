@@ -1147,6 +1147,30 @@ func get_save_count() -> int:
 	return _save_count
 
 
+## The seeds of the runs that are on the disk in THIS repository.
+##
+## H-08: the discovery path for the Continue flow. When the meta
+## pointer is stale or zero, the committed checkpoint must still be
+## findable -- through the SAME seam as the save and the load, so an
+## injected repository sees its own runs and the production runs are
+## not touched.
+func list_saved_seeds() -> Array[int]:
+	var seeds: Array[int] = []
+	var dir_path: String = ProjectSettings.globalize_path(runs_dir)
+	var dir: DirAccess = DirAccess.open(dir_path)
+	if dir == null:
+		return seeds
+	for fname in dir.get_files():
+		if not fname.begins_with("run_") or not fname.ends_with(".tres"):
+			continue
+		# run_<seed>.tres -> seed
+		var seed_str: String = fname.substr(4, fname.length() - 9)
+		if seed_str.is_valid_int():
+			seeds.append(int(seed_str))
+	seeds.sort()
+	return seeds
+
+
 ## Removes the run file of a finished run.
 ##
 ## The repository owns the run files, so the removal belongs here: the
