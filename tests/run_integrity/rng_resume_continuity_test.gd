@@ -39,6 +39,7 @@ func _initialize() -> void:
 	await _test_A_red_6_resumed_reward_offer_matches_uninterrupted()
 	await _test_B_red_6_resumed_shop_offer_matches_uninterrupted()
 	await _test_C_red_6_rng_continuation_across_several_seeds()
+	await _test_a_consumer_before_the_restore_does_not_drift()
 	print("")
 	print("=== STAGE 3A: RNG CONTINUATION (RED) ===")
 	print("\n=== STAGE 3A: RNG CONTINUATION (RED): %d pass / %d fail ===\n"
@@ -260,6 +261,30 @@ class _MetaWriter:
 		# The suites never need a persisted profile, so nothing is
 		# written: the production `user://saves/meta.tres` stays intact.
 		return true
+
+
+## A consumer that runs BETWEEN the seed and the restore must not
+## change the restored position.
+##
+## The restore writes the captured machine state, so a consumer that
+## runs in between is overwritten by the restore -- the continuation
+## stays exact. If the restore were skipped, the consumer would have
+## moved the stream and the continuation would drift.
+func _test_a_consumer_before_the_restore_does_not_drift() -> void:
+	var stream: Dictionary = RngServiceScript.snapshot()
+	# Advance the stream, then restore it.
+	RngServiceScript.randf()
+	RngServiceScript.randf()
+	var restored: Dictionary = RngServiceScript.snapshot()
+	# A consumer runs between the seed and the restore.
+	RngServiceScript.randf()
+	# The restore puts the captured position back.
+	RngServiceScript.restore(restored)
+	var after: Dictionary = RngServiceScript.snapshot()
+	_assert(int(after.get("state", 0)) == int(restored.get("state", 0)),
+		"the restore overwrites the consumer that ran before it")
+	_assert(int(after.get("state", 0)) != int(stream.get("state", 0)),
+		"the restored position is the captured one, not the older one")
 
 
 func _assert(cond: bool, label: String) -> void:
