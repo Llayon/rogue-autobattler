@@ -188,10 +188,6 @@ func _save_canonical(seed_value: int, data: Dictionary, format: String) -> RefCo
 			for d in v.get("diagnostics", []):
 				r.add_diagnostic(d)
 			return r
-	# The counter moves where the checkpoint actually lands, so a
-	# REJECTED write is not counted: the RI-09 and RI-10 suites use it
-	# as the "no checkpoint was written" observable.
-	_save_count += 1
 	var temp: String = target + TEMP_SUFFIX
 	var bytes: PackedByteArray = serialize_canonical_bytes(data)
 	if not _ops.write_bytes_and_flush(temp, bytes):
@@ -204,6 +200,19 @@ func _save_canonical(seed_value: int, data: Dictionary, format: String) -> RefCo
 	if not _commit_verified_temp(temp, target, seed_value):
 		return _error(SaveLoadResultScript.ERROR_ATOMIC_REPLACE_FAILED, format,
 			"commit swap failed: %s" % target)
+	# The counter moves ONLY where the checkpoint actually lands.
+	#
+	# H-01: the increment used to sit BEFORE the temp write, so a
+	# failed save inflated the counter of successful saves. The
+	# counter is the observable that the RI-09 and the RI-10 suites
+	# use for "no checkpoint was written", so it must move exactly
+	# once per COMMITTED checkpoint and never for a failed one.
+	#
+	# `_commit_verified_temp()` is the whole transaction: the swap, the
+	# post-commit validation and the cleanup of the previous
+	# generation. A single successful `rename()` is not a committed
+	# checkpoint.
+	_save_count += 1
 	var ok: RefCounted = SaveLoadResultScript.ok()
 	ok.source_format = format
 	ok.source_path = target

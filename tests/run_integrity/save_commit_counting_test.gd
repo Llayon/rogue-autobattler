@@ -101,15 +101,17 @@ func _test_D_the_failure_matrix_counts_nothing() -> void:
 	for entry in failures:
 		var key: StringName = StringName(entry[0])
 		var label: String = String(entry[1])
-		var repo: RefCounted = _make_repo()
+		# ONE repository, so the counter delta is measured on the same
+		# counter: the faulty repository is a different object with a
+		# different counter.
+		var ops: RefCounted = FaultOps.new()
+		var repo: RefCounted = RunSaveRepositoryScript.new(ISOLATED_DIR, ops)
 		# A first, successful save: the previous generation.
 		_assert(repo.save_run_v5(670104, _v5_dto(670104)).is_ok(),
 			"the first save succeeds for %s" % label)
 		var before: int = repo.get_save_count()
 		# The fault is injected for the SECOND save.
-		var ops: RefCounted = FaultOps.new()
 		ops.fail_methods = {key: true}
-		repo = RunSaveRepositoryScript.new(ISOLATED_DIR, ops)
 		var result: RefCounted = repo.save_run_v5(670104, _v5_dto(670104))
 		_assert(result != null and not result.is_ok(),
 			"the save fails when %s" % label)
