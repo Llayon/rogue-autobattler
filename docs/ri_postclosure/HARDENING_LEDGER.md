@@ -19,6 +19,7 @@ new findings below are tracked separately.
 ## FINDINGS
 
 ### H-01 — Save Repository: `_save_count` counts attempts, not commits
+**[FIXED]** — `5048c9d` (RED) → `5695085` (FIX) → `1084de2` (v4 coverage)
 
 - **Area:** `core/save/run_save_repository.gd`
 - **Baseline behavior:** `_save_count += 1` at line 194, BEFORE
@@ -37,6 +38,7 @@ new findings below are tracked separately.
 - **Status:** CONFIRMED IN BASELINE — to fix.
 
 ### H-02 — Merchant: the discount leaks between independent runs
+**[FIXED]** — `8a17df2` (RED) → `8f4e680` (FIX)
 
 - **Area:** `core/progression/shop_screen.gd`, `core/progression/run_controller.gd`
 - **Baseline behavior:** `reset_offer()` (line 23) clears ONLY
@@ -53,6 +55,7 @@ new findings below are tracked separately.
 - **Status:** CONFIRMED IN BASELINE — to fix.
 
 ### H-03 — Map checkpoint: COMBAT persists as MAP; the service path saves twice
+**[FIXED]** — `3c85fef` (RED) → `bc3365e` (FIX)
 
 - **Area:** `core/progression/run_controller.gd`
 - **Baseline behavior:**
@@ -86,6 +89,10 @@ new findings below are tracked separately.
   path, the RNG parity) are still to be verified.
 
 ### H-05 — Outcome transaction: a failed outcome write has no safe retry
+**[CONFIRMED]** — the retry path is UNREACHABLE today: `tick_battle` only
+calls `_on_battle_ended()` while the runner is ENDED, and the first
+application sets the runner to APPLIED. A manual re-call would re-apply
+the gameplay mutation. To fix.
 
 - **Area:** `core/progression/run_controller.gd`
 - **Baseline behavior:** `_write_outcome()` (line 1017) calls `save_now()` and
@@ -104,6 +111,8 @@ new findings below are tracked separately.
 - **Status:** CONFIRMED IN BASELINE — to fix.
 
 ### H-06 — Merchant persistence: the purchase and the exit are not saved
+**[CONFIRMED]** — `buy_item:510` and `exit_shop_to_map:535` never call
+`save_now()`; the exit accepts any PREP phase as a merchant context. To fix.
 
 - **Area:** `core/progression/run_controller.gd`
 - **Baseline behavior:**
@@ -119,6 +128,10 @@ new findings below are tracked separately.
 - **Status:** CONFIRMED IN BASELINE — to fix.
 
 ### H-07 — Boss termination: a service dead end gives a false victory
+**[FIXED]** — `a9635ef` (RED) → `4a34d93` (FIX). The measured RED:
+`the phase is 3`, `run_ended [true]`, the total runs and wins changed,
+and a meta unit was unlocked. The fix uses `EncounterMap.is_valid()`,
+so a corrupted map becomes a CONTROLLED FAILURE.
 
 - **Area:** `core/progression/run_controller.gd`,
   `tests/run_integrity/boss_reachability_test.gd`
@@ -138,6 +151,10 @@ new findings below are tracked separately.
 - **Status:** CONFIRMED IN BASELINE — to fix.
 
 ### H-08 — Meta persistence: a `_save_meta()` failure is ignored
+**[FIXED]** — `6ea0bc3` (RED) → `88ed22c` (FIX). The checkpoint commit and
+the meta pointer commit are reported separately. The outcome latch is
+bound to the CHECKPOINT, not to the complete success, so a meta failure
+can never make the outcome reapplicable.
 
 - **Area:** `core/progression/run_controller.gd`
 - **Baseline behavior:** `save_now()` (lines 976-981) sets
@@ -152,6 +169,8 @@ new findings below are tracked separately.
 - **Status:** CONFIRMED IN BASELINE — to fix.
 
 ### H-09 — Equipment persistence: equip/unequip are not saved
+**[CONFIRMED]** — four methods mutate the live state and never call
+`save_now()`. To fix.
 
 - **Area:** `core/progression/run_controller.gd`
 - **Baseline behavior:** `equip_item_by_id` (line 328), `unequip_item_by_id`
@@ -168,6 +187,8 @@ new findings below are tracked separately.
 - **Status:** CONFIRMED IN BASELINE — to fix.
 
 ### H-10 — Ledger integrity: CI does not detect a destroyed ledger
+**[CONFIRMED]** — no validator exists and the workflow has no step for
+it. To fix.
 
 - **Area:** `.github/workflows/test.yml`, `.hermes/plans/run_integrity_ledger.json`
 - **Baseline behavior:** the workflow has no step that validates the ledger.
@@ -183,6 +204,11 @@ new findings below are tracked separately.
 - **Status:** CONFIRMED IN BASELINE — to fix.
 
 ### H-11 — ECS boundary: `BattleSetupBuilder` accepts an inconsistent inventory
+**[FIXED]** — `c204be3` (RED) → `a74e58d` (FIX). The previous
+characterization test asserted the defect as an acceptable "known
+boundary" and was REPLACED. The builder now refuses an invalid
+inventory, and the check is the FIRST statement: no RNG, no
+allocation, no mutation.
 
 - **Area:** `core/battle_ecs/battle_setup_builder.gd`,
   `tests/inventory_integrity/battle_inventory_boundary_test.gd`
@@ -237,16 +263,22 @@ finding as the packages land.
 
 ## STATUS
 
-| ID | Disposition | Commit |
+| ID | Disposition | Commits |
 |---|---|---|
-| H-01 | CONFIRMED — to fix | |
-| H-02 | CONFIRMED — to fix | |
-| H-03 | CONFIRMED — to fix | |
-| H-04 | ALREADY FIXED — to verify | |
+| H-01 | FIXED | `5048c9d` `5695085` `1084de2` |
+| H-02 | FIXED | `8a17df2` `8f4e680` |
+| H-03 | FIXED | `3c85fef` `bc3365e` |
+| H-04 | ALREADY FIXED — to verify | published integration |
 | H-05 | CONFIRMED — to fix | |
 | H-06 | CONFIRMED — to fix | |
-| H-07 | CONFIRMED — to fix | |
-| H-08 | CONFIRMED — to fix | |
+| H-07 | FIXED | `a9635ef` `4a34d93` |
+| H-08 | FIXED | `6ea0bc3` `88ed22c` |
 | H-09 | CONFIRMED — to fix | |
 | H-10 | CONFIRMED — to fix | |
-| H-11 | CONFIRMED — to fix | |
+| H-11 | FIXED | `c204be3` `a74e58d` |
+
+**Progress: 6 of 11 fixed (H-01, H-02, H-03, H-07, H-08, H-11), 1 already
+fixed (H-04), 4 to fix (H-05, H-06, H-09, H-10).**
+
+**Runner after the fixed packages:** 111 suites / 8868 assertions /
+0 fail / 0 unparsed, CI gates 10/10 clean.
