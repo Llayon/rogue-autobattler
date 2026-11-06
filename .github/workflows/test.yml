@@ -161,6 +161,9 @@ jobs:
             --godot godot
           git worktree remove --force /tmp/ah-baseline
 
+      - name: Validate the Run Integrity ledger
+        run: python tools/validate_run_integrity_ledger.py
+
       - name: Audit the standalone harness exit contract
         run: python tools/audit_test_exit_contract.py
 
