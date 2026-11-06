@@ -288,7 +288,13 @@ func _process(delta: float) -> void:
 	if run_controller == null:
 		return
 	# Обновляем battle_view когда ctx меняется (новый бой).
-	if run_controller.ctx != null and battle_view._ctx != run_controller.ctx:
+	#
+	# H-04: the NULL case matters. After a successful resume the
+	# controller has NO context, and the view must not keep drawing
+	# the combatants of the battle that is gone. The condition used
+	# to require a non-null context, so the stale visual context
+	# survived the resume.
+	if battle_view != null and battle_view._ctx != run_controller.ctx:
 		battle_view.set_context(run_controller.ctx)
 	if ui_overlay != null and ui_overlay._ctx != run_controller.ctx:
 		ui_overlay.set_context(run_controller.ctx)
