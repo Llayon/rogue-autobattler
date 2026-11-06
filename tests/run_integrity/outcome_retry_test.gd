@@ -235,9 +235,15 @@ func _test_E_a_successful_outcome_is_not_retryable() -> void:
 		"the retry of a persisted outcome wrote nothing")
 
 
-## F. The retry is REACHABLE from the normal tick: the controller
+## F. The retry is REACHABLE from the ordinary frame: the controller
 ## retries the pending persistence without a manual call, and it does
 ## not write on every frame.
+##
+## The retry driver is the controller's OWN `_process`, not
+## `tick_battle`: the only caller of `tick_battle` is the battle
+## scene, and it calls it ONLY while the phase is BATTLE. After the
+## outcome was applied the phase is REWARD or PREP, so a tick-driven
+## retry would never run in production.
 func _test_F_the_retry_is_reachable_from_the_tick() -> void:
 	var ctrl: Node = await _make_controller(670606, true)
 	ctrl._enter_map()
@@ -261,13 +267,37 @@ func _test_F_the_retry_is_reachable_from_the_tick() -> void:
 	# The counter is read from the SAME repository that performs the
 	# write: a fresh repository has its own counter, starting at zero.
 	var count_before: int = ctrl.save_repository.get_save_count()
-	ctrl.tick_battle(0.016)
+	# The REAL per-frame hook of the controller. It runs in EVERY
+	# phase -- the battle scene only calls `tick_battle` while the
+	# phase is BATTLE, so the tick is NOT the retry driver.
+	#
+	# The failed attempt set the rate limit, so the first frame is
+	# deliberately a NO-OP: the retry waits for the interval. That is
+	# the intended behaviour -- a persistent filesystem failure must
+	# not become a write on every frame.
+	ctrl._process(0.016)
+	await process_frame
+	_assert(bool(ctrl.outcome_persistence_pending()),
+		"the first frame after the failure respects the rate limit")
+	_assert(ctrl.save_repository.get_save_count() == count_before,
+		"the first frame after the failure wrote nothing (it was %d, it is %d)"
+			% [ctrl.save_repository.get_save_count(), count_before])
+
+	# The window is crossed: the retry lands.
+	ctrl._outcome_retry_after_ms = 0
+	ctrl._process(0.016)
 	await process_frame
 	_assert(not bool(ctrl.outcome_persistence_pending()),
-		"the ordinary tick cleared the pending state")
+		"the ordinary frame cleared the pending state")
 	_assert(ctrl.save_repository.get_save_count() == count_before + 1,
-		"the ordinary tick wrote the checkpoint exactly once (it was %d, it is %d)"
+		"the ordinary frame wrote the checkpoint exactly once (it was %d, it is %d)"
 			% [ctrl.save_repository.get_save_count(), count_before])
+
+	# The controller is a Node in the scene tree, so its `_process` is
+	# part of the ordinary game loop: the retry is reachable in
+	# production and not a dead method.
+	_assert(ctrl.is_inside_tree(),
+		"the controller is in the scene tree, so its _process runs")
 
 
 # ----------------------------------------------------------------

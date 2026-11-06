@@ -838,12 +838,23 @@ func start_battle() -> bool:
 
 
 ## Тикает бой. Вызывай из сцены каждый кадр с учётом speed.
-func tick_battle(dt: float) -> void:
-	# H-05: the pending outcome is recovered by the ORDINARY game
-	# loop, so the retry is REACHABLE and not a dead method without a
-	# caller. It is rate limited, so a persistent filesystem failure
-	# does not become a write on every frame.
+## The per-frame hook of the controller.
+##
+## H-05: the pending outcome is recovered HERE, and not in
+## `tick_battle`. The only caller of `tick_battle` is the battle
+## scene, and it calls it ONLY while the phase is BATTLE -- so after
+## the outcome was applied (the phase is REWARD or PREP) the tick
+## stopped and the pending outcome was never retried.
+##
+## The controller's own `_process` runs in EVERY phase, so the retry
+## is reachable in production. It is rate limited to one attempt per
+## second, so a persistent filesystem failure does not become a write
+## on every frame.
+func _process(_delta: float) -> void:
 	_retry_pending_outcome_persistence()
+
+
+func tick_battle(dt: float) -> void:
 	if runner == null:
 		return
 	runner.step(dt)
