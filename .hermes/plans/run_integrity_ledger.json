@@ -1,0 +1,341 @@
+{
+  "gauntlet": "RUN INTEGRITY & PERSISTENCE",
+  "baseline": {
+    "head": "dcab44ea4cab83471eb53c3c49cd5c606264badb",
+    "canonical_phase3": "dcab44ea4cab83471eb53c3c49cd5c606264badb",
+    "canonical_master": "02fe83ef378d13965184c6224a512a91ae6263a1",
+    "origin_master": "ba0fd818f552b47ca7e9db61d2d793ce0a85230d",
+    "phase3_ci": "success (run 41820309414, A-H EXECUTED against bc504ac, PASS)",
+    "ahead_behind": "0/0",
+    "worktree": "clean (0 tracked)"
+  },
+  "findings": [
+    {
+      "id": "RI-01",
+      "title": "Continue starts a new run",
+      "status": "CLOSED",
+      "evidence": "CLOSED in 8dd3469/7f7162f/5ea09eb: explicit RunLaunchRequest (NEW_RUN/CONTINUE), the Continue path calls resume_run(), a failed Continue creates no replacement run and never overwrites the save. Suite: tests/run_integrity/continue_routing_test.gd (16/0).",
+      "closed": true
+    },
+    {
+      "id": "RI-02",
+      "title": "save DTO does not represent the actual checkpoint",
+      "status": "CLOSED",
+      "evidence": "CLOSED in 952b0e5: core/save/save_schema_v5.gd is the canonical checkpoint schema. The v4 hardcodes (phase=prep, shop/map/rewards={}) are gone; the wire phase is prep/map/reward/merchant. Suite: tests/run_integrity/checkpoint_roundtrip_test.gd (41/0).",
+      "closed": true
+    },
+    {
+      "id": "RI-03",
+      "title": "resume reconstructs random state instead of restoring it",
+      "status": "CLOSED",
+      "evidence": "CLOSED in bf2a157 + 03e7992: the subsystems have exact snapshot/restore (EncounterMap, Shop, ShopScreen merchant, RewardScreen), the resume restores instead of regenerating, and the v5 load path applies the semantic gate. Suite: tests/run_integrity/subsystem_snapshot_test.gd (37/0), checkpoint_roundtrip_test.gd (41/0).",
+      "closed": true
+    },
+    {
+      "id": "RI-04",
+      "title": "RNG continuation is not persisted",
+      "status": "CLOSED",
+      "evidence": "CLOSED in 952b0e5 + 3752907 + 48a08d8: rng.state is persisted as a lossless decimal string (the machine state is NOT an IEEE-754 safe integer) and the machine state is ALWAYS restored, before the live commit. Suite: tests/run_integrity/rng_wire_precision_test.gd (64/0), rng_resume_continuity_test.gd (10/0).",
+      "closed": true
+    },
+    {
+      "id": "RI-05",
+      "title": "battle result is saved before it is applied",
+      "status": "CLOSED",
+      "evidence": "CLOSED in f525693 + dfa26d6 + 1b4c58a + 5a804ac. The outcome of a finished battle is now ONE transaction: the outcome is applied first and written after it, in a single write that carries the reward offer, the shop offer and the stream position. The loss branch writes too, after the shop refresh. A finished run removes its file, so it can never be resumed past MAX_ROUND. The idempotence is a one-shot latch in the controller, so even a reset of the runner phase cannot re-apply the outcome. Suite: tests/run_integrity/battle_outcome_transaction_test.gd (9 cases). Negative controls NC-18..NC-24 are honest REDs.",
+      "closed": true
+    },
+    {
+      "id": "RI-06",
+      "title": "pending reward is not actually persisted",
+      "status": "CLOSED",
+      "evidence": "CLOSED in 952b0e5: the reward offer is part of the v5 checkpoint (offered ids + order + round index) and is restored, not regenerated. Suite: tests/run_integrity/checkpoint_roundtrip_test.gd (41/0).",
+      "closed": true
+    },
+    {
+      "id": "RI-07",
+      "title": "new run may retain old runtime objects",
+      "status": "CLOSED",
+      "evidence": "CLOSED in 314ef75. start_run created a fresh state and refreshed the shop, but it never reset the transient runtime: encounter_map, reward, runner, ctx and _battle_participants. The map is created LAZILY in _enter_map, so the new run inherited the PREVIOUS run's map -- the visited nodes and the current node -- and continued in the middle of the old map instead of at its start. The reward offer survived as well. The transient runtime now belongs to the run: _reset_transient_runtime clears it before the new state is built, and RewardScreen.reset_offer was added for it. Suite: tests/run_integrity/new_run_isolation_test.gd (4 cases). The second independent review found the fix INCOMPLETE: the merchant offer was the one run-scoped transient left behind. `ShopScreen.reset_offer` was added and the offer is now reset with the rest of the transient runtime. Measured before the fix: a new run that never visited a merchant carried the previous offer, `buy_item` succeeded in it, and the checkpoint of a fixed seed depended on the controller's history (911 bytes clean vs 957 dirty). Measured after: no leak, no purchase, and the checkpoint of the seed is identical in both cases.",
+      "closed": true
+    },
+    {
+      "id": "RI-08",
+      "title": "final boss termination depends only on battle count",
+      "status": "CLOSED",
+      "evidence": "CLOSED in b33406c. The run terminated only on `state.round_index > MAX_ROUND` -- the number of WON BATTLES -- and the boss node did not drive the completion. The two counters are different: the round grows by one per won battle, while the map has 10 layers with 2..4 nodes each and the BOSS is on layer 10. Measured: the run ended on round 11 after a victory over a node of the FIRST layer, with the boss never fought. The completion is now the BOSS: `_is_boss_encounter` decides, and the round counter is no longer the completion condition. Suite: tests/run_integrity/boss_termination_test.gd (4 cases). The two protected tests that asserted the old count semantics modelled a state the game cannot reach (ten wins WITHOUT a map) and were migrated to the semantic equivalent: the run is on the map and the encounter is the boss, and they still check the round counter, the win counter, the GAMEOVER phase and the run_ended(true) signal.",
+      "closed": true
+    },
+    {
+      "id": "RI-09",
+      "title": "command/domain guards are incomplete",
+      "status": "CLOSED",
+      "evidence": "CLOSED in ed71b8c + 3eccaa2. The guards are DERIVED from one table (RunController.COMMAND_PHASES), the machine-readable form of docs/ri09_command_phase_matrix.md, so they cannot become a scatter of ad-hoc conditions that drift apart. A refusal is logged and changes NOTHING: the guard is the FIRST statement of the command, so no gold, no inventory, no unit, no map/reward state, no RNG draw, no event and no checkpoint can be touched. A command that is not in the table is refused too. The matrix was corrected against the CODE before it was implemented: the inventory is an overlay inside the battle scene and is reachable in every phase, and the equipment bonuses are read once at the start of a battle, so the equipment commands are allowed in every live phase -- a naive PREP-only guard would have broken the inventory UI. Suite: tests/run_integrity/command_phase_guard_test.gd (5 cases). Negative controls NC-28..NC-31 are honest REDs.",
+      "closed": true
+    },
+    {
+      "id": "RI-10",
+      "title": "bench capacity / purchase atomicity",
+      "status": "CLOSED",
+      "evidence": "CLOSED in 50c199c. buy_unit checked the phase, the offer and the gold, then mutated the gold, created the unit on the bench and took the offer -- it never consulted MAX_BENCH_UNITS. Measured: with a bench of 4 (the capacity) the purchase still went through and the bench grew to 5: the gold was spent, the unit was created and the offer was taken. The capacity check is now BEFORE any mutation, so a refused purchase changes nothing. Suite: tests/run_integrity/bench_capacity_test.gd (4 cases).",
+      "closed": true
+    },
+    {
+      "id": "RI-11",
+      "title": "no run-integrity test suite exists",
+      "status": "CLOSED",
+      "evidence": "CLOSED by the run-integrity effort itself: tests/run_integrity/ now holds 17 suites that assert the checkpoint round trip, the RNG continuation, the RNG wire contract, the battle outcome transaction, the transaction atomicity, the command phase guards, the bench capacity, the semantic gate parity, the sequence cursor contract, the subsystem snapshot, the v4 migration, the v5 gate symmetry, the continue routing, the malformed file diagnostics, the checkpoint determinism and the critic findings. The original finding was that NO such suite existed; the suites are the fix.",
+      "closed": true
+    },
+    {
+      "id": "RI-12",
+      "title": "schema v5 does not exist",
+      "status": "CLOSED",
+      "evidence": "CLOSED in 952b0e5: core/save/save_schema_v5.gd is the canonical checkpoint-capable schema, with a pure mapper (core/progression/run_checkpoint_v5_mapper.gd) and the v4->v5 migration path. Suite: tests/run_integrity/v4_migration_test.gd (9/0), checkpoint_determinism_test.gd (9/0).",
+      "closed": true
+    }
+  ],
+  "out_of_scope": [
+    "RunSession extraction",
+    "RunFlow class extraction",
+    "BattleResultApplier architectural extraction",
+    "BattleBackend interface",
+    "Legacy/ECS backend switch",
+    "Ability Execution Bridge",
+    "Battle Presenter",
+    "legacy battle removal",
+    "large GameBus rewrite"
+  ],
+  "verdict": "IN PROGRESS",
+  "notes": "All twelve source-confirmed findings were re-audited on the actual HEAD dcab44e. Every one of them is still present. The battle backend, the save repository hardening and the battle content are NOT touched by this gauntlet.",
+  "critic_rounds": [
+    {
+      "round": 1,
+      "findings": "H-1 (a v4 save taken after the map was entered could never be continued), m-1 (the encounter-map overlay reseeded the global run RNG), m-2 (the v5 load path had no semantic validation)",
+      "fixes": "ad9d46b, 326c6a9, 7f6fdbc"
+    },
+    {
+      "round": 2,
+      "findings": "HIGH-1 (the extracted validator was weaker than the original v4 gate: the bidirectional equipment consistency was missing), HIGH-2 (the v5 load path CRASHED on a shape-invalid file: a Dictionary was passed to add_diagnostic), MINOR-1 (the seed-0 guard skipped the stream restore), MINOR-2 (the v4 migration did not state the map fallback consequence)",
+      "fixes": "17a5a7d, f7f727b, 48a08d8, 7420885, 0abb48c"
+    },
+    {
+      "round": 3,
+      "findings": "M-1 (the v5 canonical LOAD path did not run the semantic gate), M-2 (the v5 SAVE path applied only validate_shape, so the real gate fired after the commit and a fresh slot kept the invalid file), MINOR-1 (the sequence cursor rule rejected a legal live state after a removal), MINOR-2 (the RNG restore happened after the live commit), MINOR-3 (the mapper accepted a lossy numeric rng state)",
+      "fixes": "03e7992, e0f1e6f, 272292b, d6df480, c2db5d9"
+    },
+    {
+      "round": 4,
+      "scope": "RI-05 battle outcome transaction + idempotence",
+      "findings": "M1 (the win path was two writes, so the reward offer was lost on a crash between them), M2 (the continuing-loss checkpoint was written before the shop refresh, so it carried a stale shop offer and a stale RNG position), M3 (the game-over path left a resumable 'prep' checkpoint at a finished round), m1..m7 (the magic phase numbers in the runner, the APPLIED doc comment, the state-based idempotence guard, the participant-bridge rationale, the test coverage, the write-failure behaviour)",
+      "fixes": "dfa26d6, 1b4c58a, 5a804ac",
+      "all_reproduced": true
+    },
+    {
+      "round": 5,
+      "scope": "RI-05, third review",
+      "findings": "H1 (the MAX_ROUND win wrote a resumable checkpoint and removed it afterwards, so a crash in the window resurrected a finished run past MAX_ROUND), M1 (delete_run left the .commit-old behind and the recovery path resurrected the deleted slot), M2 (the delete result was discarded, so a failed removal was silent), M3 (the idempotence latch was consumed before the write, so a failed write stranded the outcome with no retry), m1 (get_save_count counts attempts, not successful writes), m2 (a dead reward offer at MAX_ROUND), m3 (resume_run bypassed the meta seam)",
+      "fixes": "ff604b8, 38396ab",
+      "all_reproduced": true
+    },
+    {
+      "round": 6,
+      "scope": "RI-09 phase guards",
+      "findings": "no critic: the thirteen unguarded commands were already confirmed in the ledger, and the matrix was derived from the CODE rather than from the finding, which corrected the ledger: the equipment commands are legal in every live phase because the inventory overlay is reachable at any time and the equipment bonuses are read once, at the start of a battle",
+      "fixes": "ed71b8c, 3eccaa2"
+    },
+    {
+      "round": 7,
+      "scope": "RI-09 phase guards, independent review",
+      "findings": "HIGH-1 (the TREASURE item grant happens in the MAP phase and the guarded command refused it), HIGH-2 (the post-victory combat drop happens in the BATTLE phase and the guarded command refused it), MAJOR-1 (the package's own suite asserted the broken behaviour), MAJOR-2 (the index pair and the by-id pair of the equipment commands had different phase sets), MAJOR-3 (the matrix document was stale against the code on every row and contradicted itself), MINOR-1..4",
+      "fixes": "5aef1a8, 44611eb",
+      "all_reproduced": true,
+      "measured": "0/20 combat drops and 0/20 treasure drops before the fix"
+    },
+    {
+      "round": 8,
+      "scope": "RI-07 + RI-09 + RI-10, second independent review",
+      "findings": "HIGH: NONE -- the two HIGH defects of the first critic (the TREASURE item grant and the combat drop) are genuinely closed, and the reviewer exercised all 15 guarded commands over all 6 phases (90 combinations) with zero failures. MAJOR-1: the merchant offer survived start_run -- a run-scoped, RNG-derived object like the reward offer and the map, but ShopScreen had no way to clear it. Measured: a new run that never visited a merchant carried the previous offer, buy_item succeeded in it, and the checkpoint of a fixed seed depended on the controller's HISTORY (911 bytes clean vs 957 dirty), so the v5 checkpoint was not a pure function of (seed, profile). MINOR-1: get_save_count counted ATTEMPTS, not successful writes, which made the 'no checkpoint was written' observable of the RI-09 and RI-10 suites weaker than claimed (a defect the third RI-05 critic had already found and that was not fixed). MINOR-2: the matrix document cited a stale line number.",
+      "fixes": "ac464ba",
+      "all_reproduced": true,
+      "measured": "the offer leaked, buy_item succeeded in a fresh run, and the checkpoint of seed 790009 differed between a clean and a dirty controller"
+    }
+  ],
+  "cursor_contract": {
+    "decision": "the project owner chose the monotonic-cursor rule",
+    "rule": "next_seq > max_live_id AND next_seq >= 1",
+    "reason": "the allocator never reuses or wraps a consumed id and a removal does not roll the cursor back, so a gap is normal and valid; tombstones are NOT introduced",
+    "gates_changed": "core/save/legacy_save_v1_to_v4_migrator.gd and core/save/run_domain_semantic_validator.gd (both, so they keep agreeing)",
+    "suite": "tests/run_integrity/sequence_cursor_contract_test.gd"
+  },
+  "final_state": {
+    "head": "d0026b880aa278ba15b004cc644ba240c8a35dfb",
+    "published": "canonical/phase3/effect-status-trigger-gauntlet == d0026b8",
+    "pushes": [
+      "dcab44e..f9cf076 (the package; CI FAILED on battle-ecs)",
+      "f9cf076..d0026b8 (the CI fix; CI GREEN)"
+    ],
+    "ahead_behind": "0/0",
+    "worktree": "clean (0 tracked)",
+    "canonical_master": "02fe83ef378d13965184c6224a512a91ae6263a1 (untouched)",
+    "origin_master": "ba0fd818f552b47ca7e9db61d2d793ce0a85230d (untouched)",
+    "ci_run": "42000985398 (success: battle-ecs + save-battle-migration)",
+    "a_h_in_ci": "EXECUTED and PASS (8 fixtures per side, both rc=0)",
+    "runner": "90 suites / 8389 assertions / 0 fail / 0 unparsed",
+    "ci_gates": "10/10 clean",
+    "error_scan": "90 suites, 0 markers",
+    "inventory_worktree": "kept, untouched (4986157, feat/inventory-integrity)",
+    "temp_worktrees": "ri35-final and ri35-ah removed after the green CI"
+  },
+  "ci_defect_found_after_the_first_push": {
+    "summary": "the isolation seam broke the READ path: the suites wrote through the injected repository but read through the production SaveService, so the read found nothing",
+    "why_the_local_gate_missed_it": "the local box kept the files of the earlier runs in user://, so the production read found a stale file; the CI box is always clean",
+    "fix": "the read uses the same repository as the write, through the SaveService._load_run_v4_with_repository seam; every suite now has its OWN isolated directory",
+    "lesson": "a gate that runs against a dirty state is weaker than the CI. The clean-state run is the honest one, and it must be the default: the suites now clean their own directory.",
+    "commit": "d0026b8"
+  },
+  "stage_status": {
+    "run_checkpoint_rng_continuity": "CLOSED",
+    "next": "RI-05 battle outcome transaction + idempotence (a separate package, without the inventory integration mixed in)"
+  },
+  "ri05": {
+    "baseline": "bdaffc8",
+    "head": "38396ab",
+    "commits": [
+      "c199f65 test(run): characterize the battle outcome transaction gap",
+      "7f74dc8 test(run): characterize the battle outcome transaction",
+      "e8200f3 test(run): drop the duplicate battle transaction suite",
+      "f525693 fix(run): make the battle outcome a transaction and idempotent",
+      "2ee17ea test(run): cover the continuing loss branch of the outcome",
+      "dfa26d6 fix(run): close the three findings of the independent critic",
+      "1b4c58a fix(run): make the outcome idempotence a one-shot latch",
+      "5a804ac fix(run): restore the one-shot latch of the battle outcome",
+      "156507c test(run): characterize the atomicity of the outcome transaction",
+      "ff604b8 fix(run): make the outcome transaction atomic",
+      "38396ab fix(run): write the meta through the seam on the resume path"
+    ],
+    "suite": "tests/run_integrity/battle_outcome_transaction_test.gd (9 cases) + tests/run_integrity/outcome_transaction_atomicity_test.gd (4 cases)",
+    "negative_controls": "NC-18..NC-27, all honest RED",
+    "verification": {
+      "runner": "92 suites / 8430 assertions / 0 fail / 0 unparsed",
+      "ci_gates": "10/10 clean",
+      "a_h": "PASS (8 fixtures per side)",
+      "lint": "0 errors, 5 warnings (baseline)",
+      "editor_parse": "0 errors",
+      "production_saves": "untouched by the suites"
+    },
+    "push": "NOT performed (no explicit permission)",
+    "lesson": "a mutation run must not share the working tree with a commit: the commit 1b4c58a captured a mutated file, and the suite caught it immediately"
+  },
+  "ri09": {
+    "baseline": "9b4dab4",
+    "head": "ac464ba",
+    "matrix": "docs/ri09_command_phase_matrix.md",
+    "suite": "tests/run_integrity/command_phase_guard_test.gd (6 cases) + tests/run_integrity/item_reward_delivery_test.gd (27 assertions)",
+    "negative_controls": "NC-28..NC-31, NC-32..NC-34, all honest RED",
+    "verification": {
+      "runner": "96 suites / 8522 assertions / 0 fail / 0 unparsed",
+      "ci_gates": "10/10 clean",
+      "a_h": "PASS (8 fixtures per side)",
+      "lint": "0 errors, 5 warnings (baseline)",
+      "editor_parse": "0 errors"
+    },
+    "push": "NOT performed (no explicit permission)",
+    "commits": [
+      "cdb83d8 docs(run): record the ri-09 command phase matrix",
+      "cbcf9be test(run): characterize the missing command phase guards",
+      "ed71b8c fix(run): derive the command phase guards from one matrix",
+      "3eccaa2 test(run): make the buy_item phase refusal observable",
+      "5aef1a8 test(run): characterize the delivery of the item rewards",
+      "44611eb fix(run): keep the item rewards out of the phase-guarded command"
+    ],
+    "critic": "The independent critic found two HIGH defects in the matrix: the TREASURE item grant (MAP) and the post-victory combat drop (BATTLE) both go through the guarded `grant_item` command, so both rewards were dead -- 0/20 drops through the real battle path. The fix separates the PLAYER-FACING command (still PREP-only) from the INTERNAL reward delivery (`_grant_reward_item`, no phase guard). The critic also found that the index pair of the equipment commands and the by-id pair had different phase sets, and that the matrix document was stale against the code on every row."
+  },
+  "ri10": {
+    "baseline": "ead6d1f",
+    "head": "ac464ba",
+    "suite": "tests/run_integrity/bench_capacity_test.gd (4 cases)",
+    "verification": {
+      "runner": "93 suites / 8461 assertions / 0 fail / 0 unparsed",
+      "ci_gates": "10/10 clean",
+      "lint": "0 errors, 5 warnings (baseline)"
+    },
+    "push": "NOT performed (no explicit permission)"
+  },
+  "ri07": {
+    "baseline": "e7135d3",
+    "head": "ac464ba",
+    "suite": "tests/run_integrity/new_run_isolation_test.gd (5 cases, including the merchant offer)",
+    "push": "NOT performed (no explicit permission)"
+  },
+  "ri08": {
+    "baseline": "34c694e",
+    "head": "b33406c",
+    "suite": "tests/run_integrity/boss_termination_test.gd (4 cases)",
+    "push": "NOT performed (no explicit permission)"
+  },
+  "integration": {
+    "branch": "integration/inventory-run-integrity",
+    "baseline_sha": "b0e315e7ba38f5cba5c9cde1a345fe5c579a458a",
+    "inventory_sha": "4986157bb30be4955ab8998f9d146c16f4d32d58",
+    "merge_base": "d6df480b5de4427858f37e4fa9d1f8ab75ad7287",
+    "merge_commit": "8b06503",
+    "conflict_resolution": "db2a1c6",
+    "final_sha": "faefeabfbd1441fc6bac8ae164be20cd0c800adf",
+    "commits_ahead_of_baseline": 22,
+    "production_files_touched": [
+      "core/progression/run_controller.gd (+19/-1)",
+      "core/progression/run_domain_state.gd (+78/-14)",
+      "core/save/run_domain_semantic_validator.gd (the canonical id form)"
+    ],
+    "semantic_conflicts": 3,
+    "semantic_conflict_report": [
+      {
+        "site": "core/progression/run_controller.gd, grant_item",
+        "run_integrity_side": "the body calls the internal _grant_reward_item, because the reward delivery happens in the MAP and the BATTLE phase, where a guarded command is refused -- without that split the TREASURE node's item and the post-victory combat drop were dead",
+        "inventory_side": "the body is hardened with a content check and with the create_item null check",
+        "resolution": "both properties survive: the internal helper takes the content check and honours the null return of create_item, so a caller is never told it granted an item that was never created"
+      },
+      {
+        "site": "the item identity contract, across the two packages",
+        "run_integrity_side": "the persistence gate was lenient: it checked the prefix and that the remainder was a valid integer, so \"item_1\", \"item_-5\" and \"item_abc\" passed it",
+        "inventory_side": "the live gate was strict: the id must be the canonical \"item_%06d\" form",
+        "resolution": "the persistence gate now requires the canonical form, mirroring the live gate, and the repair path (remove_item_force / remove_item_force_at) is separate from the strict removal, so the INVENTORY package's atomicity contract is intact and the player is never locked out of their inventory"
+      },
+      {
+        "site": "the battle runtime across resume_run",
+        "found_by": "the independent critic left the lead INCONCLUSIVE; the implementer executed the probe and it was a real defect",
+        "defect": "resume_run replaced the domain state, the shop, the merchant, the reward and the map, but NOT runner and _battle_participants. A stale runner survived the resume: tick_battle advances it unconditionally, and when it ENDS, _on_battle_ended() applies the OLD battle's outcome to the NEW state. Measured before the fix: the gold went from 10 to 16, the round from 1 to 2, the phase left the resumed phase.",
+        "impact": "a violation of the RI-05 outcome transaction (the outcome of a battle the resumed run never fought) and of the RI-07 isolation",
+        "resolution": "the resume calls _reset_transient_runtime() before the new state is installed; the helper already cleared the runner, the participants and the outcome latch, and start_run already used it for exactly this purpose",
+        "regression": "tests/run_integrity/stale_battle_resume_test.gd, 16 assertions over three cases"
+      }
+    ],
+    "untouched": [
+      "core/battle_ecs/ (Battle ECS)",
+      "the clock policy",
+      "content/ and the .tres files (shipping content)",
+      "core/balance.gd"
+    ],
+    "verification": {
+      "runner": "106 suites / 8735 assertions / 0 fail / 0 unparsed",
+      "ci_gates": "10/10 clean",
+      "a_h": "PASS (8 fixtures per side)",
+      "lint": "0 errors, 5 warnings (baseline)",
+      "editor_parse": "0 errors",
+      "diff_check": "CLEAN",
+      "inventory_suites": "35/0 + 7/0 + 5/0 + 6/0",
+      "merge_invariants": "tests/run_integrity/merge_invariants_test.gd, 8 cases, 55 assertions",
+      "identity_gates": "tests/run_integrity/identity_gate_agreement_test.gd, 19 assertions",
+      "stale_battle": "tests/run_integrity/stale_battle_resume_test.gd, 16 assertions over three cases",
+      "negative_controls": "NC-01..NC-43: 43 controls, all honest RED on the final HEAD, no SKIP and no INVALID. Eleven anchors had decayed and were retargeted at the current code. Three controls exposed real COVERAGE GAPS and were closed with new assertions: the v4 map GRAPH, the diagnostic SEVERITY, and the consumer that runs before the rng restore. One control was removed after the measurement showed the mutation is harmless."
+    },
+    "push": "NOT performed (no explicit permission)",
+    "critic": {
+      "verdict": "HOLD on HIGH-1, PASS after the fix",
+      "high_findings": "HIGH-1: the two packages hardened different halves of the same identity contract, and the merge reconciled only the grant half. A checkpoint that passed EVERY v5 gate produced a live inventory in which the ENTIRE item subsystem failed closed forever -- grant, equip, unequip AND remove -- and the poison was re-written unchanged on every save.",
+      "minor_findings": "MINOR-1 (a content-orphaned item is permanently un-equippable but still removable and discardable), MINOR-2 (the global and the typed content lookups are used side by side), MINOR-3 (equip_item_at runs a redundant second phase guard), MINOR-4 (create_item validates the inventory twice), MINOR-5 (grant_item checks the empty id twice)",
+      "semantic_conflicts_reviewed": 6
+    }
+  }
+}
