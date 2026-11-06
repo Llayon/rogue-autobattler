@@ -186,6 +186,53 @@ const COMMAND_PHASES: Dictionary = {
 }
 
 
+## Whether the current phase may persist a checkpoint.
+##
+## H-09: the equipment commands are allowed in every live phase, but
+## a checkpoint is only STABLE in the phases the v5 format can
+## describe. The BATTLE phase is excluded on purpose: the v5 format
+## does not persist the battle simulation runtime, and
+## `wire_phase_for()` maps the BATTLE phase to PREP -- so a write
+## during a battle would produce a checkpoint with a FALSE phase and
+## a stale battle state.
+##
+## The GAMEOVER phase is excluded too: a finished run must not stay
+## resumable.
+func _phase_may_persist() -> bool:
+	match phase:
+		Phase.PREP, Phase.MAP, Phase.REWARD, Phase.SERVICE:
+			return true
+		_:
+			return false
+
+
+## Persists the equipment change, but only a REAL one.
+##
+## H-09: `RunDomainState.equip_item()` returns TRUE for an already
+## equipped item WITHOUT changing anything, and
+## `unequip_item()` returns the result of the reference purge. So
+## "the operation returned true" is NOT "the state changed", and a
+## naive save-after-return would write a redundant checkpoint on
+## every idempotent repeat.
+##
+## The ownership BEFORE and AFTER the call is what decides.
+func _persist_equipment_change(item_instance_id: String,
+		owner_before: String) -> void:
+	if state == null:
+		return
+	var item: RunItem = state.get_item(item_instance_id)
+	var owner_after: String = "" if item == null else String(item.owner_unit_id)
+	if owner_after == owner_before:
+		# A no-op: the ownership did not change, so nothing is
+		# persisted.
+		return
+	if not _phase_may_persist():
+		# The BATTLE phase: the live inventory changes, but the
+		# checkpoint waits for the next correct boundary.
+		return
+	save_now()
+
+
 ## Answers whether a command may run in the current phase.
 ##
 ## A refusal is logged and changes NOTHING: the guard is the FIRST
@@ -346,7 +393,13 @@ func equip_item_by_id(item_instance_id: String,
 	var item: RunItem = state.get_item(item_instance_id)
 	if item == null or ContentDB_static.get_by_id_for_type("items", item.definition_id) == null:
 		return false
-	return state.equip_item(item_instance_id, target_unit_instance_id)
+	var owner_before: String = String(item.owner_unit_id)
+	var ok: bool = state.equip_item(item_instance_id, target_unit_instance_id)
+	if ok:
+		# H-09: the equipment change is persisted, but only a REAL
+		# one and only in a phase the checkpoint can describe.
+		_persist_equipment_change(item_instance_id, owner_before)
+	return ok
 
 
 ## Unequip a RunItem by `instance_id`. The item lands in
@@ -356,7 +409,16 @@ func unequip_item_by_id(item_instance_id: String) -> bool:
 		return false
 	if item_instance_id == "":
 		return false
-	return state.unequip_item(item_instance_id)
+	var item: RunItem = state.get_item(item_instance_id)
+	if item == null:
+		return false
+	var owner_before: String = String(item.owner_unit_id)
+	var ok: bool = state.unequip_item(item_instance_id)
+	if ok:
+		# H-09: the equipment change is persisted, but only a REAL
+		# one and only in a phase the checkpoint can describe.
+		_persist_equipment_change(item_instance_id, owner_before)
+	return ok
 
 
 ## Перемещает юнита со скамейки на доску (cell).
@@ -457,7 +519,10 @@ func unequip_item_at(item_idx: int) -> bool:
 	if item_idx < 0 or item_idx >= state.items.size():
 		return false
 	var item: RunItem = state.items[item_idx]
-	return state.unequip_item(item.instance_id)
+	# H-09: the index pair routes through the by-id path, so it gets
+	# the same persistence contract. Two commands that mean the same
+	# thing must not behave differently.
+	return unequip_item_by_id(item.instance_id)
 
 
 ## Возвращает board_idx куда эипится item, или -1 если в инвентаре.
