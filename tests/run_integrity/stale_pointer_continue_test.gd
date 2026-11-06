@@ -141,10 +141,16 @@ func _test_D_the_menu_asks_when_there_are_several_candidates() -> void:
 	first.save_now_report()
 	var second: Node = await _make_controller(672106)
 	second.save_now_report()
+	# The pointer is STALE -- the H-08 scenario: the meta write
+	# failed, so the pointer that is on the disk is zero. The fresh
+	# pointer would win, and that is the contract, so the ambiguity
+	# case needs the stale one.
+	var stale_profile: MetaProfileScript = MetaProfileScript.new()
+	stale_profile.current_run_seed = 0
 	var menu: Node = MainMenuScript.new()
 	get_root().add_child(menu)
 	await process_frame
-	menu.set_profile_for_test(first.profile)
+	menu.set_profile_for_test(stale_profile)
 	menu.set_save_repository_for_test(first.save_repository)
 	menu._refresh()
 	await process_frame
@@ -152,6 +158,9 @@ func _test_D_the_menu_asks_when_there_are_several_candidates() -> void:
 		"the menu asks when there are several candidates")
 	_assert(not menu.continue_is_silent(),
 		"the menu does not resolve the ambiguity silently")
+	_assert(menu.continue_seed() == 0,
+		"the menu offers NO seed when the choice is ambiguous (got %d)"
+			% menu.continue_seed())
 
 
 # ----------------------------------------------------------------

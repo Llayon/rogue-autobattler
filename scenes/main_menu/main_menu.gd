@@ -28,6 +28,15 @@ var _settings_panel: PanelContainer = null
 var _speed_1_button: Button = null
 var _speed_2_button: Button = null
 var _speed_4_button: Button = null
+## R-04: the repository seam for the checkpoint discovery. The menu
+## uses the SAME seam as the save and the load, so an injected
+## repository sees its own runs and the production runs are not
+## touched.
+var _save_repository: Object = null
+## R-04: the seed the Continue button would restore, and whether the
+## choice needs the player.
+var _continue_seed_value: int = 0
+var _continue_needs_a_choice: bool = false
 
 
 func _ready() -> void:
@@ -102,8 +111,9 @@ func _refresh() -> void:
         _stats_label.text = "Runs: %d  Wins: %d  Best round: %d  Souls: %d" % [
             _profile.total_runs, _profile.total_wins, _profile.best_round, _profile.soul_currency
         ]
+    _refresh_continue_target()
     if _continue_button != null:
-        _continue_button.visible = (_profile.current_run_seed != 0)
+        _continue_button.visible = (_continue_seed_value != 0)
 
 
 func _on_new_run_pressed() -> void:
@@ -112,9 +122,88 @@ func _on_new_run_pressed() -> void:
 
 
 func _on_continue_pressed() -> void:
-    if _profile == null or _profile.current_run_seed == 0:
+    # R-04: the seed is resolved by `_refresh_continue_target()`, which
+    # also knows whether the choice needs the player. The ambiguity of
+    # SEVERAL checkpoints is NOT resolved silently.
+    if _continue_seed_value == 0:
         return
-    _start_battle_scene(RunLaunchRequestScript.continue_run(_profile.current_run_seed))
+    if _continue_needs_a_choice:
+        # The player has to pick: there is more than one committed
+        # checkpoint and the pointer is stale. Continuing with an
+        # arbitrary one could restore the WRONG run.
+        GameLog.warn("ui", "the continue target is ambiguous: a choice is needed",
+            {"candidates": _continue_candidates().size()})
+        return
+    _start_battle_scene(RunLaunchRequestScript.continue_run(_continue_seed_value))
+
+
+## Resolves the seed the Continue button would restore.
+##
+## R-04: the fresh pointer wins. When the pointer is stale, the
+## committed checkpoints are discovered through the SAME seam as the
+## save and the load:
+##
+##   exactly ONE candidate -> that one is offered
+##   SEVERAL candidates    -> the ambiguity is reported, and no seed
+##                            is offered silently
+func _refresh_continue_target() -> void:
+    _continue_seed_value = 0
+    _continue_needs_a_choice = false
+    if _profile == null:
+        return
+    if _profile.current_run_seed != 0:
+        _continue_seed_value = _profile.current_run_seed
+        return
+    var candidates: Array[int] = _continue_candidates()
+    if candidates.size() == 1:
+        # The pointer is stale, but there is exactly ONE committed
+        # checkpoint: the run is still recoverable.
+        _continue_seed_value = candidates[0]
+    elif candidates.size() > 1:
+        # Several candidates: the player must choose. The menu does
+        # NOT pick one silently.
+        _continue_needs_a_choice = true
+
+
+## The committed checkpoints that could be continued.
+func _continue_candidates() -> Array[int]:
+    var seeds: Array[int] = []
+    if _save_repository != null and _save_repository.has_method("list_saved_seeds"):
+        var listed: Variant = _save_repository.list_saved_seeds()
+        if listed is Array:
+            for s in listed:
+                seeds.append(int(s))
+        return seeds
+    var listed_service: Variant = SaveService.list_runs()
+    if listed_service is Array:
+        for s in listed_service:
+            seeds.append(int(s))
+    return seeds
+
+
+## The seed the Continue button would restore, or 0.
+func continue_seed() -> int:
+    return _continue_seed_value
+
+
+## Whether the Continue button needs the player to pick a run.
+func continue_needs_choice() -> bool:
+    return _continue_needs_a_choice
+
+
+## Whether the ambiguity is resolved silently. It never is.
+func continue_is_silent() -> bool:
+    return false
+
+
+## The test seam: the profile the menu reads.
+func set_profile_for_test(profile: Object) -> void:
+    _profile = profile
+
+
+## The test seam: the repository the menu discovers the checkpoints in.
+func set_save_repository_for_test(repository: Object) -> void:
+    _save_repository = repository
 
 
 func _on_settings_pressed() -> void:
