@@ -1379,13 +1379,23 @@ func _on_node_selected(node_id: int) -> void:
 	# S6.2: combat → PREP (placement screen перед боем), не BATTLE напрямую.
 	# Игрок расставляет юнитов, нажимает Ready → start_battle().
 	# S5.4: combat -> battle, save happens в _on_battle_ended (before phase transition).
-	save_now()
+	#
+	# H-03: the save happens AFTER the transition, never before it.
+	# The baseline saved while the phase was still MAP, so the
+	# checkpoint described the MAP phase with the combat node already
+	# selected -- and after Continue the player could select the NEXT
+	# node and skip the battle.
+	#
+	# The service path persists ITS OWN authoritative checkpoint, after
+	# the effect and after the final stable phase is known, so the
+	# transaction is written ONCE and it describes a stable phase.
 	if node.is_combat():
 		_set_phase(Phase.PREP)
+		# The TRANSACTION: the selected combat and the PREP phase are
+		# on the disk in ONE write.
+		save_now()
 	else:
 		_apply_service_effect(node)
-		# S5.4: atomic save AFTER service effect.
-		save_now()
 
 
 ## S5.3: применяет service-эффект выбранного нода (HEAL/TREASURE/MERCHANT/REST/SHRINE).
@@ -1411,11 +1421,17 @@ func _apply_service_effect(node) -> void:
 			_apply_shrine_effect()
 		_:
 			GameLog.warn("run", "Unknown service kind", {"kind": kind})
-	# S5.4: atomic save — guarantees save file содержит post-effect state
-	# (включая rest_attack_bonus после REST, gold_after_treasure, и т.д.).
-	save_now()
 	# После service-эффекта — обратно в MAP (если эффект не оставил нас в другой фазе).
+	#
+	# H-03: the save comes AFTER the final phase is known, so the
+	# checkpoint describes a STABLE phase and the transaction is
+	# written ONCE. The baseline saved three times: before the effect,
+	# inside the handler and after it -- an intermediate checkpoint
+	# could describe a phase the run never rested in.
 	if stay_in_current_phase:
+		# The MERCHANT stays in PREP: the checkpoint describes the
+		# merchant context.
+		save_now()
 		return
 	if encounter_map == null:
 		return
@@ -1447,6 +1463,11 @@ func _apply_service_effect(node) -> void:
 		_end_run(true)
 		return
 	_set_phase(Phase.MAP)
+	# S5.4: atomic save AFTER the service effect and AFTER the final
+	# phase is known — guarantees the save file contains the
+	# post-effect state (including the rest_attack_bonus after REST
+	# and the gold after TREASURE) in a stable phase.
+	save_now()
 
 
 # === S5.3: service effect implementations ===
