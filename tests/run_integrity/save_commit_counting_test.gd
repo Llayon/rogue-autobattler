@@ -41,6 +41,7 @@ func _initialize() -> void:
 	await _test_D_the_failure_matrix_counts_nothing()
 	await _test_E_a_failed_save_keeps_the_previous_generation()
 	await _test_F_the_recovery_after_an_injected_failure()
+	await _test_G_the_v4_path_counts_commits_too()
 	print("")
 	print("=== STAGE H01: THE SAVE COUNTER COUNTS COMMITS: %d pass / %d fail ==="
 		% [_passed, _failed])
@@ -163,6 +164,32 @@ func _test_F_the_recovery_after_an_injected_failure() -> void:
 			% failing.get_save_count())
 
 
+## G. The v4 path has the SAME contract: it goes through the same
+## `_save_canonical()`, so a successful v4 save counts once and a
+## failed one counts nothing.
+func _test_G_the_v4_path_counts_commits_too() -> void:
+	var repo: RefCounted = _make_repo()
+	var before: int = repo.get_save_count()
+	var result: RefCounted = repo.save_run(670107, _v4_dto(670107))
+	_assert(result != null and result.is_ok(), "the fresh v4 save succeeds")
+	_assert(repo.get_save_count() == before + 1,
+		"a successful v4 save counts once (got %d, it was %d)"
+			% [repo.get_save_count(), before])
+
+	# The failure matrix on the v4 path.
+	var ops: RefCounted = FaultOps.new()
+	var failing: RefCounted = RunSaveRepositoryScript.new(ISOLATED_DIR, ops)
+	_assert(failing.save_run(670107, _v4_dto(670107)).is_ok(),
+		"the first v4 save succeeds")
+	var before_fail: int = failing.get_save_count()
+	ops.fail_methods = {&"write_bytes_and_flush": true}
+	var failed: RefCounted = failing.save_run(670107, _v4_dto(670107))
+	_assert(failed != null and not failed.is_ok(), "the failed v4 save fails")
+	_assert(failing.get_save_count() == before_fail,
+		"a failed v4 save counts nothing (got %d, it was %d)"
+			% [failing.get_save_count(), before_fail])
+
+
 # ----------------------------------------------------------------
 
 
@@ -188,6 +215,37 @@ func _v5_dto(seed_value: int) -> Dictionary:
 		"map": {},
 		"rewards": {},
 		"rng": {"seed": seed_value, "state": "1234567890123456789"},
+		"wins": 0,
+		"losses": 0,
+		"units_killed": 0,
+		"lives": 1,
+		"xp": 0,
+		"level": 1,
+		"current_encounter_id": -1,
+		"encounter_visited_ids": [],
+		"meta_modifiers": {},
+		"just_visited_merchant": false,
+	}
+
+
+## A minimal valid v4 DTO for the given seed.
+func _v4_dto(seed_value: int) -> Dictionary:
+	return {
+		"schema_version": 4,
+		"game_build": "",
+		"run_id": "run_%d" % seed_value,
+		"seed": seed_value,
+		"round_index": 1,
+		"phase": "prep",
+		"gold": 10,
+		"units": [],
+		"items": [],
+		"next_unit_instance_seq": 1,
+		"next_item_instance_seq": 1,
+		"shop": {},
+		"map": {},
+		"rewards": {},
+		"rng": {},
 		"wins": 0,
 		"losses": 0,
 		"units_killed": 0,
