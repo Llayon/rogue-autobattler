@@ -246,6 +246,15 @@ func _test_H_an_invalid_command_writes_nothing() -> void:
 ## I. A BATTLE equip writes NO checkpoint: the v5 format does not
 ## persist the battle runtime, so a checkpoint there would carry a
 ## FALSE phase.
+##
+## The mutation must be REAL: the SAME item equipped again is a NO-OP,
+## and the no-op guard returns BEFORE the phase guard -- so a no-op
+## case could never catch the removal of the phase guard. Two items
+## are granted and the SECOND one is equipped during the battle.
+##
+## The negative control NC-H09C proved this: with the old no-op case
+## the removal of the phase guard was MISSED (the suite stayed green
+## with the guard removed).
 func _test_I_a_battle_equip_writes_no_checkpoint() -> void:
 	var ctrl: Node = await _make_controller(670814)
 	await _prepare_equipment(ctrl)
@@ -256,6 +265,18 @@ func _test_I_a_battle_equip_writes_no_checkpoint() -> void:
 	if item_id == "" or unit_id == "":
 		return
 	_assert(ctrl.equip_item_by_id(item_id, unit_id), "the equip succeeds")
+	# A SECOND item, so the battle equip can be a REAL mutation.
+	var second_def: Resource = ContentDB_static.get_by_id_for_type("items",
+		&"potion_haste")
+	if second_def == null:
+		second_def = ContentDB_static.get_by_id_for_type("items",
+			&"potion_strength")
+	if second_def == null:
+		return
+	var second: Object = ctrl.state.create_item(second_def.id)
+	if second == null:
+		return
+	var second_id: String = String(second.instance_id)
 	ctrl.save_now()
 	await process_frame
 	# The battle starts.
@@ -263,9 +284,12 @@ func _test_I_a_battle_equip_writes_no_checkpoint() -> void:
 	await process_frame
 	_assert(int(ctrl.phase) == 1, "the phase is BATTLE")
 	var count_before: int = ctrl.save_repository.get_save_count()
-	# The equipment changes DURING the battle.
-	var again: bool = ctrl.equip_item_by_id(item_id, unit_id)
-	_assert(again, "the battle equip is allowed")
+	# The equipment REALLY changes DURING the battle: the second item
+	# is equipped to the unit.
+	var changed: bool = ctrl.equip_item_by_id(second_id, unit_id)
+	_assert(changed, "the battle equip is allowed")
+	_assert(_owner_of(ctrl, second_id) == unit_id,
+		"the live inventory changed during the battle")
 	_assert(ctrl.save_repository.get_save_count() == count_before,
 		"the battle equip wrote NO checkpoint (it was %d, it is %d)"
 			% [ctrl.save_repository.get_save_count(), count_before])
