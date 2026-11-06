@@ -164,6 +164,14 @@ jobs:
       - name: Validate the Run Integrity ledger
         run: python tools/validate_run_integrity_ledger.py
 
+      # R-03: the validator above only proves that the REAL ledger
+      # passes. Without the controls, a validator that accepted
+      # EVERYTHING would keep CI green forever -- which is exactly the
+      # H-10 failure mode. The controls run on temporary copies, so
+      # the production ledger is never touched.
+      - name: Check the Run Integrity ledger validator
+        run: python tests/ci/ledger_validator_test.py
+
       - name: Audit the standalone harness exit contract
         run: python tools/audit_test_exit_contract.py
 
