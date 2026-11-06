@@ -281,8 +281,8 @@
     "merge_base": "d6df480b5de4427858f37e4fa9d1f8ab75ad7287",
     "merge_commit": "8b06503",
     "conflict_resolution": "db2a1c6",
-    "final_sha": "28d5a7336c4f84e227a198549fc85c9ca453c5f8",
-    "commits_ahead_of_baseline": 13,
+    "final_sha": "0f02d90c42d3c8cd38033cf6ff735e0957fea8e4",
+    "commits_ahead_of_baseline": 18,
     "production_files_touched": [
       "core/progression/run_controller.gd (+19/-1)",
       "core/progression/run_domain_state.gd (+78/-14)",
@@ -310,15 +310,16 @@
       "core/balance.gd"
     ],
     "verification": {
-      "runner": "105 suites / 8713 assertions / 0 fail / 0 unparsed",
+      "runner": "105 suites / 8719 assertions / 0 fail / 0 unparsed",
       "ci_gates": "10/10 clean",
       "a_h": "PASS (8 fixtures per side)",
       "lint": "0 errors, 5 warnings (baseline)",
       "editor_parse": "0 errors",
+      "diff_check": "CLEAN",
       "inventory_suites": "35/0 + 7/0 + 5/0 + 6/0",
       "merge_invariants": "tests/run_integrity/merge_invariants_test.gd, 8 cases, 55 assertions",
       "identity_gates": "tests/run_integrity/identity_gate_agreement_test.gd, 19 assertions",
-      "negative_controls": "NC-18..NC-43: 26 honest REDs (NC-18/19/20 had to be retargeted at the current code: their anchors had decayed, and a stale anchor proves nothing)"
+      "negative_controls": "NC-01..NC-43: every control is an honest RED on the final HEAD. Eleven anchors had decayed and were retargeted at the current code (a stale anchor silently SKIPs and proves nothing). Three controls exposed real COVERAGE GAPS and were closed with new assertions: the v4 map GRAPH (the node ids are positional, so the current-node assertion could not tell a reconstructed graph from a wrong one), the diagnostic SEVERITY, and the consumer that runs before the rng restore. One control (NC-7-equivalent) was removed after the measurement showed the mutation is harmless: the restore overwrites the consumer, so the control could never fail."
     },
     "push": "NOT performed (no explicit permission)",
     "critic": {
