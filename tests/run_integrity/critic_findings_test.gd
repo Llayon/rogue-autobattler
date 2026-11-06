@@ -45,6 +45,23 @@ func _initialize() -> void:
 	quit(0)
 
 
+## A signature of the map GRAPH: every node with its type and its
+## outgoing links. The node ids are positional, so the ids alone
+## cannot distinguish two maps generated from different seeds -- the
+## links and the types can.
+func _map_graph_signature(map: Object) -> String:
+	if map == null:
+		return ""
+	var parts: Array[String] = []
+	for node in map.get_all_nodes():
+		var links: Array = []
+		for link_id in node.child_ids:
+			links.append(str(link_id))
+		parts.append("%d:%d:%s" % [int(node.id), int(node.type),
+			",".join(links)])
+	return "|".join(parts)
+
+
 func _make_controller(seed_value: int) -> Node:
 	var ctrl: Node = RunControllerScript.new()
 	_isolate_saves(ctrl)
@@ -71,8 +88,16 @@ func _test_H1_a_v4_map_save_can_still_be_continued() -> void:
 	var ctrl: Node = await _make_controller(seed_value)
 
 	# Enter the map: the domain state now references a node.
+	#
+	# The reference graph is built the way the production builds it:
+	# the stream is seeded FIRST, because the node types are drawn
+	# from the global stream. A reference generated after `start_run`
+	# has already moved the stream carries different node types, and
+	# it is not the graph the v4 run actually had.
+	RngServiceScript.seed_run(seed_value)
 	ctrl.encounter_map = EncounterMapScript.new()
 	ctrl.encounter_map.generate(seed_value)
+	ctrl.encounter_map.start_run()
 	ctrl.encounter_map.start_run()
 	ctrl.state.current_encounter_id = ctrl.encounter_map.get_current_node_id()
 	ctrl._set_phase(ctrl.Phase.MAP)
@@ -87,6 +112,7 @@ func _test_H1_a_v4_map_save_can_still_be_continued() -> void:
 	# The values are captured BEFORE the controller is freed.
 	var saved_gold: int = ctrl.state.gold
 	var saved_node: int = ctrl.state.current_encounter_id
+	var saved_graph_signature: String = _map_graph_signature(ctrl.encounter_map)
 	ctrl.queue_free()
 	await process_frame
 
@@ -107,6 +133,13 @@ func _test_H1_a_v4_map_save_can_still_be_continued() -> void:
 		if resumed_ctrl.encounter_map != null:
 			_assert(resumed_ctrl.encounter_map.get_current_node_id() == saved_node,
 				"the continued v4 run keeps the saved current node")
+			# The GRAPH must be the same graph, not only the same node
+			# id: the ids are positional, so a map generated from a
+			# different seed carries the same ids and the node
+			# assertion above cannot tell them apart.
+			_assert(_map_graph_signature(resumed_ctrl.encounter_map)
+					== saved_graph_signature,
+				"the continued v4 run has the SAME map graph")
 		_assert(resumed_ctrl.state.gold == saved_gold,
 			"the continued v4 run keeps the domain state")
 	resumed_ctrl.queue_free()
