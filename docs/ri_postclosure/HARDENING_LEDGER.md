@@ -89,10 +89,10 @@ new findings below are tracked separately.
   path, the RNG parity) are still to be verified.
 
 ### H-05 — Outcome transaction: a failed outcome write has no safe retry
-**[CONFIRMED]** — the retry path is UNREACHABLE today: `tick_battle` only
-calls `_on_battle_ended()` while the runner is ENDED, and the first
-application sets the runner to APPLIED. A manual re-call would re-apply
-the gameplay mutation. To fix.
+**[FIXED]** — `8a73743` (RED) → `022ec47` (FIX). The third state
+`OUTCOME_APPLIED_PENDING_PERSIST` was introduced. The retry writes the
+CURRENT live state, so it cannot re-apply anything. It is reachable
+from `tick_battle` and rate limited to one attempt per second.
 
 - **Area:** `core/progression/run_controller.gd`
 - **Baseline behavior:** `_write_outcome()` (line 1017) calls `save_now()` and
@@ -111,8 +111,9 @@ the gameplay mutation. To fix.
 - **Status:** CONFIRMED IN BASELINE — to fix.
 
 ### H-06 — Merchant persistence: the purchase and the exit are not saved
-**[CONFIRMED]** — `buy_item:510` and `exit_shop_to_map:535` never call
-`save_now()`; the exit accepts any PREP phase as a merchant context. To fix.
+**[FIXED]** — `858cf70` (RED) → `4ee9feb` (FIX). The purchase and the exit
+are persisted after the mutation, and the exit now requires a REAL
+merchant context (`just_visited_merchant`), not merely the PREP phase.
 
 - **Area:** `core/progression/run_controller.gd`
 - **Baseline behavior:**
@@ -169,8 +170,11 @@ can never make the outcome reapplicable.
 - **Status:** CONFIRMED IN BASELINE — to fix.
 
 ### H-09 — Equipment persistence: equip/unequip are not saved
-**[CONFIRMED]** — four methods mutate the live state and never call
-`save_now()`. To fix.
+**[FIXED]** — `e0db30f` (RED) → `b07b209` (FIX). A REAL mutation is
+persisted in the stable phases; a NO-OP is not (the ownership before
+and after the call decides); the BATTLE phase writes NOTHING, because
+the v5 format does not persist the battle runtime and `wire_phase_for()`
+maps BATTLE to PREP. The index pair now routes through the by-id path.
 
 - **Area:** `core/progression/run_controller.gd`
 - **Baseline behavior:** `equip_item_by_id` (line 328), `unequip_item_by_id`
@@ -187,8 +191,11 @@ can never make the outcome reapplicable.
 - **Status:** CONFIRMED IN BASELINE — to fix.
 
 ### H-10 — Ledger integrity: CI does not detect a destroyed ledger
-**[CONFIRMED]** — no validator exists and the workflow has no step for
-it. To fix.
+**[FIXED]** — `8633fe4` (the validator and the negative controls) →
+`793aebc` (the CI step). The validator checks the structure and the
+minimal mandatory fields, and deliberately does NOT require a fixed
+size, a fixed findings count or `final_sha == HEAD`. The controls run
+on temporary copies: 7/7 RED.
 
 - **Area:** `.github/workflows/test.yml`, `.hermes/plans/run_integrity_ledger.json`
 - **Baseline behavior:** the workflow has no step that validates the ledger.
@@ -269,16 +276,16 @@ finding as the packages land.
 | H-02 | FIXED | `8a17df2` `8f4e680` |
 | H-03 | FIXED | `3c85fef` `bc3365e` |
 | H-04 | ALREADY FIXED — to verify | published integration |
-| H-05 | CONFIRMED — to fix | |
-| H-06 | CONFIRMED — to fix | |
+| H-05 | FIXED | `8a73743` `022ec47` |
+| H-06 | FIXED | `858cf70` `4ee9feb` |
 | H-07 | FIXED | `a9635ef` `4a34d93` |
 | H-08 | FIXED | `6ea0bc3` `88ed22c` |
-| H-09 | CONFIRMED — to fix | |
-| H-10 | CONFIRMED — to fix | |
+| H-09 | FIXED | `e0db30f` `b07b209` |
+| H-10 | FIXED | `8633fe4` `793aebc` |
 | H-11 | FIXED | `c204be3` `a74e58d` |
 
-**Progress: 6 of 11 fixed (H-01, H-02, H-03, H-07, H-08, H-11), 1 already
-fixed (H-04), 4 to fix (H-05, H-06, H-09, H-10).**
+**Progress: 9 of 11 fixed (H-01, H-02, H-03, H-05, H-06, H-07, H-08,
+H-09, H-10), 1 already fixed (H-04, to verify), 1 to verify (H-04).
 
-**Runner after the fixed packages:** 111 suites / 8868 assertions /
+**Runner after the fixed packages:** 114 suites / 8967 assertions /
 0 fail / 0 unparsed, CI gates 10/10 clean.
