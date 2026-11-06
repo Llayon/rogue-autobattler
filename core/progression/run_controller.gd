@@ -1222,6 +1222,17 @@ func resume_run(seed_value: int) -> bool:
 	# including 0.
 	RngServiceScript.restore(rng_snapshot)
 
+	# The BATTLE runtime is cleared before the new state is installed.
+	#
+	# The resume replaces the domain state, the shop, the merchant, the
+	# reward and the map -- but it must also clear the battle
+	# runtime. A stale runner survives otherwise: `tick_battle`
+	# advances it unconditionally, and when it ENDS,
+	# `_on_battle_ended()` applies the OLD battle's outcome to the NEW
+	# state -- the round grows, the gold changes and the phase leaves
+	# the resumed phase.
+	_reset_transient_runtime()
+
 	state = loaded_state
 	shop = new_shop
 	merchant_shop = new_merchant
