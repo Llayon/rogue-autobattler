@@ -6,8 +6,12 @@ import subprocess
 import sys
 import tempfile
 
-REPO = r"C:\Users\user\AppData\Local\Temp\ri-hardening"
-VALIDATOR = os.path.join("tools", "validate_run_integrity_ledger.py")
+# The repository root is derived from THIS script's own location, so the
+# controls work in a checkout, in a worktree and on a CI runner. A
+# hard-coded absolute path would only work on one machine.
+REPO = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                    "..", ".."))
+VALIDATOR = os.path.join(REPO, "tools", "validate_run_integrity_ledger.py")
 LEDGER = os.path.join(".hermes", "plans", "run_integrity_ledger.json")
 
 
