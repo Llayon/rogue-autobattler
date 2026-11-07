@@ -135,6 +135,24 @@ def release_decision(workflow_text, test_text, jobs, artifact_ok,
     if not artifact_ok:
         return "DENY", "the artifact did not pass the validation"
 
+    # --- the concurrency protection, AS THE WORKFLOW EXPRESSES IT ---
+    # The group must be per BRANCH: a run of another branch must not
+    # cancel this one.
+    if "group: pages-" not in workflow_text:
+        return "DENY", "the concurrency group does not separate the branches"
+    if "github.ref" not in workflow_text:
+        return "DENY", "the concurrency group is not per ref"
+    # With cancel-in-progress: true the OLDER run of the same branch
+    # is cancelled by the newer one. The cancelled run never reaches
+    # the deploy job, so the stale publication cannot happen through
+    # it -- but the ALREADY RUNNING deployment is not guaranteed to be
+    # cancelled, which is exactly why the tip check exists as well.
+    cancelling = "cancel-in-progress: true" in workflow_text
+    if cancelling and built_sha != branch_tip:
+        # The run is the older one and it was NOT cancelled: it is
+        # about to publish a SHA that is no longer the tip.
+        return "DENY", "the cancelled older run would publish a stale SHA"
+
     # --- the SHA identity, AS THE WORKFLOW EXPRESSES IT -------------
     # The workflow compares the published SHA with the branch tip. If
     # that comparison is gone, a stale publication is allowed.
@@ -234,7 +252,13 @@ MUTATIONS = [
      [("concurrency:\n  group: pages-${{ github.ref }}\n"
        "  cancel-in-progress: false",
        "concurrency:\n  group: pages-${{ github.ref }}\n"
-       "  cancel-in-progress: true")]),
+       "  cancel-in-progress: true"),
+      ('          if [ -n "$TIP" ] && [ "$TIP" != "${{ github.sha }}" ]; then\n'
+       '            echo "HOLD: ${{ github.sha }} is not the tip of ${GITHUB_REF_NAME} ($TIP is)."\n'
+       '            echo "A stale deployment must not supersede a newer commit."\n'
+       '            exit 1\n'
+       '          fi',
+       '          echo "the tip check is gone"')]),
 ]
 
 
@@ -354,8 +378,14 @@ def run_control(name, description, target, edits):
                 failures.append("the mutation did not open the gate: %s"
                                 % "; ".join(problems))
         elif name == "NC-REL-07":
-            # The concurrency group no longer cancels the older run, so
-            # a stale deployment can supersede a newer commit.
+            # The older run of the branch is no longer cancelled, and
+            # it is about to publish a SHA that is no longer the tip.
+            # The mutated gate must ALLOW that: if it still DENYS, the
+            # mutation changed nothing.
+            #
+            # The tip check is part of the workflow, so the mutation
+            # ALSO removes it: without either mechanism the stale
+            # publication goes through.
             verdict, reason = workflow_verdict(
                 release_text, test_text,
                 jobs={"save-battle-migration": "success",
