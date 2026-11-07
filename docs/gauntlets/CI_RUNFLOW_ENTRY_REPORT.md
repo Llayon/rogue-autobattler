@@ -277,7 +277,40 @@ anchors were re-targeted WITHOUT changing the semantic mutation.
 
 ## L. FULL REGRESSION
 
-See the final report section below.
+Every gate was executed; none of them was taken on trust.
+
+| Gate | Suites | Assertions | Failures | Unparsed | rc |
+|---|---|---|---|---|---|
+| the standalone runner | 120 | 9148 | 0 | 0 | 0 |
+| the legacy characterization | — | — | 0 | — | 0 (identical across 3 runs) |
+| the lint | — | — | 0 errors, 5 warnings | — | 0 |
+| the editor parse | — | — | 0 parse errors, 0 script errors | — | 0 |
+| the CI gates | 10 | — | 0 | — | 0 |
+| the A-H differential | 8 + 8 fixtures | — | 0 | 0 | 0 on both sides |
+| the test reachability audit | 180 declared | — | 0 dead | — | 0 |
+| the test exit-contract audit | 125 suites | — | 0 unsafe exit paths | — | 0 |
+| the standalone runner self-tests | 13 | — | 0 | — | 0 |
+| the A-H comparator self-tests | 20 | — | 0 | — | 0 |
+| the NC-CI01 controls | 3 | — | 0 | 0 | 0 |
+| the NC-AH controls | 5 | — | 0 | 0 | 0 |
+| the NC-ENTRY controls | 5 | — | 0 | 0 | 0 |
+| the historical NC-01..NC-43 | 44 | — | 0 | 0 | 0 |
+| the hardening NC-H01..NC-H12 | 14 | — | 0 | 0 | 0 |
+| the ledger controls | 7 | — | 0 | 0 | 0 |
+| the ledger validator | — | — | 0 | — | 0 (VALID) |
+
+The A-H differential on the final tree:
+
+```
+baseline fixtures  : 8 (rc=0)
+candidate fixtures : 8 (rc=0)
+PASS (8 fixtures, legacy-projected traces + world + rng + emitter + result all identical)
+baseline fixture ids  == candidate fixture ids
+```
+
+The historical baseline worktree was CLEAN after the run: the probe is
+copied into an isolated COPY, so the tracked file of the historical
+baseline is never written to.
 
 ---
 
@@ -312,7 +345,26 @@ eight fixtures.
 
 ## P. ACTUAL COMMIT GRAPH
 
-See the final report section below.
+```
+e9d4e4e  the published Run Integrity hardening (the base)
+  |
+  +-- 194ba3f  test(ci): characterize the empty standalone suite behavior
+  +-- 0a1fbd4  fix(ci): reject empty and zero-assertion suites
+  +-- 33df14f  test(ah): characterize incomplete and failed probes
+  +-- b96e42e  fix(ah): enforce the strict differential contract
+  +-- 8a21079  test(run): characterize the invalid battle entry
+  +-- f458f26  fix(run): enforce the legal battle entry
+  +-- d9bc3e0  test(ui): verify the merchant SPACE and ESC handling
+  +-- 508c76f  test(run): rebuild the battle fixtures on the production paths
+  +-- 7fe8cca  test(run): reach the battle contexts the way the player does
+  +-- cc31042  test(gauntlet): prove the negative controls
+  +-- a193cbd  test(ah): check the runner contract behaviourally
+  +-- e2fddb7  chore(ci): run the new contract checks on the runner and the guard
+  +-- f32934a  docs(gauntlet): write the CI and runflow entry report
+```
+
+Each RED/FIX pair is two commits: the characterisation, then the fix.
+The production change of the battle entry is a SINGLE commit.
 
 ---
 
