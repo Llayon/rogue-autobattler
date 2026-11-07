@@ -281,7 +281,7 @@ Every gate was executed; none of them was taken on trust.
 
 | Gate | Suites | Assertions | Failures | Unparsed | rc |
 |---|---|---|---|---|---|
-| the standalone runner | 120 | 9148 | 0 | 0 | 0 |
+| the standalone runner | 120 | 9165 | 0 | 0 | 0 |
 | the legacy characterization | — | — | 0 | — | 0 (identical across 3 runs) |
 | the lint | — | — | 0 errors, 5 warnings | — | 0 |
 | the editor parse | — | — | 0 parse errors, 0 script errors | — | 0 |
@@ -433,7 +433,12 @@ e9d4e4e  the published Run Integrity hardening (the base)
   +-- f32934a  docs(gauntlet): write the CI and runflow entry report
   +-- bbcb827  docs(gauntlet): record the measured regression results
   +-- 3481725  fix(gauntlet): close the critic findings
+  +-- 16fc150  fix(gauntlet): make the post-defeat cases degrade gracefully
 ```
+
+Sixteen commits over the base. Each RED/FIX pair is two commits: the
+characterisation, then the fix. The production change of the battle
+entry is a SINGLE commit.
 
 Each RED/FIX pair is two commits: the characterisation, then the fix.
 The production change of the battle entry is a SINGLE commit.
