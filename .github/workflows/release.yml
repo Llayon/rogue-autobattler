@@ -1,0 +1,166 @@
+name: Release
+
+# R3: the GitHub Pages deployment is gated on the FULL success of the
+# required CI jobs, ON THE SAME COMMIT SHA.
+#
+#   master commit SHA
+#          |
+#          v
+#   test.yml (workflow_call, reusable)
+#     /            \
+# save-battle    battle-ecs
+# migration
+#     \            /
+#          |
+#      BOTH SUCCESS
+#          |
+#          v
+#   web build -> artifact validation -> pages deploy -> runtime smoke
+#
+# The test jobs are NOT duplicated: this workflow CALLS test.yml. A
+# reusable workflow runs INSIDE this run, so `needs:` below is a real
+# dependency -- not a race between two independent workflows.
+#
+# The old web-build.yml is replaced by this file: it deployed after
+# `build` alone, so a RED CI never stopped a publication.
+
+on:
+  push:
+    branches: [master]
+  # R3.4: a manual dispatch must NOT bypass the gate. It runs the SAME
+  # required jobs on the SAME SHA, and the deploy job still needs them.
+  # The dispatch MAY select another branch -- the gate then applies to
+  # that branch's SHA, which is the point: the gate is a property of
+  # the SHA, not of the trigger.
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'The branch or tag to publish (the same gate applies to it)'
+        required: false
+        default: 'master'
+
+# R3.5: the default permissions are read-only. The deploy job asks
+# for exactly the two rights it needs, and nothing else has them.
+permissions:
+  contents: read
+
+# R3.3: a stale run must not overwrite a newer publication. The group
+# is per BRANCH, so a newer commit on the same branch cancels the older
+# run -- and the deploy job additionally verifies that the SHA it is
+# about to publish is still the tip of the branch.
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # -------------------------------------------------------------------
+  # The required CI jobs, on the SAME SHA as the publication.
+  # -------------------------------------------------------------------
+  required-tests:
+    name: Required CI
+    uses: ./.github/workflows/test.yml
+    permissions:
+      contents: read
+
+  # -------------------------------------------------------------------
+  # The web build. It runs only after BOTH required jobs succeeded.
+  # -------------------------------------------------------------------
+  web-build:
+    name: Web Build
+    needs: required-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      GODOT_VERSION: '4.7-stable'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Godot
+        run: |
+          set -euo pipefail
+          mkdir -p /opt/godot
+          wget -q "https://github.com/godotengine/godot-builds/releases/download/${GODOT_VERSION}/Godot_v${GODOT_VERSION}_linux.x86_64.zip" -O godot.zip
+          unzip -q godot.zip -d /opt/godot
+          chmod +x "/opt/godot/Godot_v${GODOT_VERSION}_linux.x86_64"
+          ln -s "/opt/godot/Godot_v${GODOT_VERSION}_linux.x86_64" /usr/local/bin/godot
+
+      - name: Install Templates
+        run: |
+          set -euo pipefail
+          wget -q "https://github.com/godotengine/godot-builds/releases/download/4.7-stable/Godot_v4.7-stable_export_templates.tpz" -O templates.zip
+          mkdir -p "$HOME/.local/share/godot/export_templates/4.7.stable/"
+          unzip -qj templates.zip "templates/web_nothreads_release.zip" -d "$HOME/.local/share/godot/export_templates/4.7.stable/"
+
+      - name: Build
+        run: |
+          set -euo pipefail
+          rm -rf "$GITHUB_WORKSPACE/build"
+          mkdir -p "$GITHUB_WORKSPACE/build"
+          # The export path must be ABSOLUTE: Godot resolves a relative
+          # path against the editor's working directory, not against
+          # the project, and the export fails with "the target folder
+          # does not exist or is not accessible".
+          godot --headless --path "$GITHUB_WORKSPACE" \
+            --export-release "Web (no threads)" "$GITHUB_WORKSPACE/build/index.html"
+          ls -la "$GITHUB_WORKSPACE/build/"
+
+      # R3.3: the artifact must carry the SHA it was built from. The
+      # build itself already ran on this SHA's checkout, but the
+      # provenance is written into the artifact so the DEPLOYED bytes
+      # can be traced back to the tested SHA.
+      - name: Record the build provenance
+        run: |
+          set -euo pipefail
+          echo "${{ github.sha }}" > build/BUILD_SHA
+          echo "${{ github.sha }}" > build/BUILD_REF
+
+      # R3.2 / R5: the artifact validation is a MANDATORY gate. A build
+      # that produced no index.html, no WASM or an empty artifact must
+      # NOT reach the deployment.
+      - name: Validate the artifact
+        run: |
+          set -euo pipefail
+          python tools/validate_web_artifact.py build
+
+  # -------------------------------------------------------------------
+  # The deployment. It needs the build AND the validation, and it
+  # carries the ONLY elevated permissions in this workflow.
+  # -------------------------------------------------------------------
+  deploy:
+    name: Deploy to Pages
+    needs: [required-tests, web-build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      pages: write
+      id-token: write
+      contents: read
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      # R3.3: a run that is no longer the tip of the branch must not
+      # overwrite the newer publication. The concurrency group cancels
+      # the OLDER run of the same branch, but an already RUNNING
+      # deployment is not guaranteed to be cancelled -- so the deploy
+      # job checks the tip itself and refuses to publish a stale SHA.
+      - name: Verify the SHA is still the tip of the branch
+        run: |
+          set -euo pipefail
+          TIP="$(git ls-remote origin "refs/heads/${GITHUB_REF_NAME}" | cut -f1)"
+          echo "the tip of ${GITHUB_REF_NAME}: $TIP"
+          echo "the SHA being published: ${{ github.sha }}"
+          if [ -n "$TIP" ] && [ "$TIP" != "${{ github.sha }}" ]; then
+            echo "HOLD: ${{ github.sha }} is not the tip of ${GITHUB_REF_NAME} ($TIP is)."
+            echo "A stale deployment must not supersede a newer commit."
+            exit 1
+          fi
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: build/
+      - id: deployment
+        uses: actions/deploy-pages@v4

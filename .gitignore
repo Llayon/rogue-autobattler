@@ -27,7 +27,12 @@ desktop.ini
 *.swp
 *~
 # Build artifacts (templates, intermediate files).
-# Note: docs/build/** IS committed (it's the GitHub Pages artifact).
+# The web export output. The GitHub Pages artifact is NOT committed:
+# the release workflow builds it from the tested SHA and publishes it
+# through actions/upload-pages-artifact, so a committed copy could only
+# ever be a STALE one.
+build/
+docs/build/
 /tmp/godot*
 *.tpz
 android_build/  # if you ever build for Android

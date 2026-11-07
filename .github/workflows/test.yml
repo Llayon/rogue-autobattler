@@ -129,32 +129,43 @@ jobs:
       - name: Run the A-H semantic differential
         run: |
           set -euo pipefail
-          # The A-H differential compares the candidate against its
-          # PREDECESSOR commit: the parent of the pushed commit.
+          # The A-H differential compares the candidate against a
+          # BASELINE COMMIT.
           #
-          # The predecessor is derived from the commit itself
-          # (HEAD^), not from a remote ref: after the push the remote
-          # ref points AT the candidate, so comparing against it would
-          # be the identity. GitHub does not expose the replaced
-          # commit of a push event, and the checkout is shallow
-          # (depth 1), so the parent has to be fetched explicitly.
-          # The checkout is shallow (depth 1): the parent commit is
-          # NOT in the local history, so `git rev-parse HEAD^` cannot
-          # resolve it. The parent has to be FETCHED first, and its
-          # SHA taken from the fetched object.
-          PARENT_SHA="$(git rev-parse HEAD^ 2>/dev/null || true)"
-          if ! git cat-file -e "${PARENT_SHA}^{commit}" 2>/dev/null; then
-            echo "the parent commit is not in the shallow history; fetching the branch"
-            git fetch --no-tags --depth=2 origin "$GITHUB_SHA"
-            PARENT_SHA="$(git rev-parse HEAD^ 2>/dev/null || true)"
+          # R3.6: the baseline used to be HEAD^, the predecessor of the
+          # pushed commit. That is WRONG for the release: after Phase 3
+          # is merged into master, HEAD^ is the previous MASTER commit,
+          # which predates the A-H probe entirely -- the probe does not
+          # exist there, so the differential would compare nothing and
+          # "pass" over an empty comparison.
+          #
+          # The baseline is therefore PINNED to the published Phase 3
+          # commit, the last state in which the A-H fixtures are known
+          # to exist and to be meaningful. A pinned baseline is also
+          # stable: every release compares against the same known-good
+          # reference instead of drifting with the branch.
+          #
+          # When the baseline cannot be fetched, the step HOLDs. It does
+          # NOT skip and it does NOT pass: an unavailable mandatory
+          # baseline is a HOLD, never a GREEN.
+          AH_BASELINE_SHA="${AH_BASELINE_SHA:-4316a32e210b8660b77a6eda916fb28c4f3bcb8a}"
+          echo "the pinned A-H baseline: $AH_BASELINE_SHA"
+          if ! git cat-file -e "${AH_BASELINE_SHA}^{commit}" 2>/dev/null; then
+            echo "the pinned A-H baseline is not in the shallow history; fetching it"
+            git fetch --no-tags --depth=1 origin "$AH_BASELINE_SHA"
           fi
-          if [ -z "$PARENT_SHA" ] || [ "$PARENT_SHA" = "HEAD^" ]; then
-            echo "no predecessor commit (the branch has one commit); skipping the differential"
-            exit 0
+          if ! git cat-file -e "${AH_BASELINE_SHA}^{commit}" 2>/dev/null; then
+            echo "HOLD: the pinned A-H baseline $AH_BASELINE_SHA could not be fetched."
+            echo "An unavailable mandatory baseline is a HOLD, never a GREEN."
+            exit 1
           fi
-          echo "baseline commit: $PARENT_SHA"
-          git fetch --no-tags --depth=1 origin "$PARENT_SHA"
-          git worktree add --detach /tmp/ah-baseline "$PARENT_SHA"
+          # The baseline must really carry the probe: an empty baseline
+          # would make the comparison vacuous.
+          if ! git cat-file -e "${AH_BASELINE_SHA}:tests/battle_ecs/effects/b64c_ah_diff_probe.gd" 2>/dev/null; then
+            echo "HOLD: the pinned A-H baseline carries no A-H probe."
+            exit 1
+          fi
+          git worktree add --detach /tmp/ah-baseline "$AH_BASELINE_SHA"
           python tools/run_ah_semantic_differential.py \
             --baseline /tmp/ah-baseline \
             --candidate "$GITHUB_WORKSPACE" \
