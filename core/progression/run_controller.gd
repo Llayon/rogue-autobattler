@@ -706,8 +706,61 @@ static func _make_legacy_shield_block_view() -> Resource:
 
 
 ## Запускает бой текущего раунда.
+## Whether the run is READY to start a battle.
+##
+## RUN-ENTRY-01: the phase alone is not a readiness proof.
+##
+##   - a PREP can be the INITIAL PREPARATION, a selected COMBAT, a
+##     MERCHANT visit or a post-defeat preparation;
+##   - a MAP means "the player must SELECT a node", and the current
+##     encounter may be a COMPLETED one: the reward flow returns to the
+##     map with the finished encounter still current, so a battle there
+##     would REPEAT a resolved encounter.
+##
+## The readiness is derived from the state that already exists -- the
+## phase, the merchant context and the encounter map -- so there is no
+## new runtime flag to lose by a Continue, and the v4/v5 checkpoints
+## are untouched.
+func _battle_entry_ready() -> bool:
+	# The battle context is the PREP phase. The MAP phase is a browsing
+	# phase, the REWARD phase shows the offer and GAMEOVER is over.
+	if phase != Phase.PREP:
+		return false
+	# A MERCHANT visit is not a battle context: the phase is PREP, but
+	# the player is in the shop. The flag is persisted independently
+	# of the encounter id, so the context is checked on its own.
+	if state != null and state.just_visited_merchant:
+		return false
+	# The initial preparation has no encounter yet: the first battle of
+	# a run starts from the PREP phase without a selected node.
+	if state == null or state.current_encounter_id == -1:
+		return true
+	# Otherwise the current encounter must be a COMBAT one: a service
+	# encounter (the merchant, the heal, the treasure) is not a battle
+	# context, and a completed combat is refused by the phase check
+	# above, because the reward flow leaves PREP.
+	return _current_encounter_is_combat()
+
+
+## Whether the current encounter is a COMBAT node of the map.
+##
+## COMBAT, ELITE and BOSS are the combat kinds; a service node is not.
+## A missing map or an unknown node is NOT a combat node: the refusal
+## must fail closed.
+func _current_encounter_is_combat() -> bool:
+	if state == null or encounter_map == null:
+		return false
+	var node: EncounterNode = encounter_map.get_node(state.current_encounter_id)
+	if node == null:
+		return false
+	return node.is_combat()
+
+
 func start_battle() -> bool:
-	if phase != Phase.PREP and phase != Phase.MAP:
+	# RUN-ENTRY-01: the phase alone is not a readiness proof, so the
+	# battle context is checked BEFORE anything is created or
+	# consumed.
+	if not _battle_entry_ready():
 		return false
 	if state.get_board_units().is_empty():
 		GameLog.warn("run", "No units on board")

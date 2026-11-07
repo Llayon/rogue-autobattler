@@ -136,11 +136,12 @@ func _test_F_a_selected_combat_starts_the_battle() -> void:
 	var ctrl: Node = await _make_controller(670106)
 	ctrl._enter_map()
 	await process_frame
-	var node_id: int = _first_combat_node(ctrl)
+	var node_id: int = await _walk_to_a_combat(ctrl)
+	# The case must NOT be vacuous: a map without a reachable combat
+	# node would make the assertions below unreachable.
+	_assert(node_id >= 0, "the map offers a reachable combat node")
 	if node_id < 0:
 		return
-	ctrl._on_node_selected(node_id)
-	await process_frame
 	_assert(int(ctrl.phase) == 0, "the phase is PREP after the selection")
 	_assert(ctrl.state.current_encounter_id == node_id,
 		"the selected combat is the current encounter")
@@ -154,6 +155,11 @@ func _test_G_a_selected_elite_or_boss_starts_the_battle() -> void:
 	ctrl._enter_map()
 	await process_frame
 	var node_id: int = _first_elite_or_boss_node(ctrl)
+	# The case must NOT be vacuous. An ELITE/BOSS may not be offered
+	# by this seed, and that is a fact about the map, not a reason to
+	# skip the case: the boss is ALWAYS in the map (layer 10), so the
+	# search must find it.
+	_assert(node_id >= 0, "the map has an elite or boss node")
 	if node_id < 0:
 		return
 	# The selection goes through the production path, so the phase
@@ -170,14 +176,17 @@ func _test_H_a_continue_after_a_selection_starts_the_battle() -> void:
 	var ctrl: Node = await _make_controller(670108)
 	ctrl._enter_map()
 	await process_frame
-	var node_id: int = _first_combat_node(ctrl)
+	var node_id: int = await _walk_to_a_combat(ctrl)
+	_assert(node_id >= 0, "the map offers a reachable combat node")
 	if node_id < 0:
 		return
-	ctrl._on_node_selected(node_id)
-	await process_frame
+	_assert(int(ctrl.phase) == 0, "the phase is PREP after the selection")
 	ctrl.save_now_report()
-	# A FRESH controller continues the run.
-	var other: Node = await _make_controller(670108)
+	await process_frame
+	# A FRESH controller continues the run. It must NOT start a run:
+	# `start_run()` writes a checkpoint of its own and would overwrite
+	# the one the resume is supposed to read.
+	var other: Node = await _make_empty_controller()
 	other.profile = ctrl.profile
 	var resumed: bool = other.resume_run(670108)
 	_assert(resumed, "the run resumes")
@@ -209,14 +218,21 @@ func _test_I_the_refusal_changes_nothing() -> void:
 
 
 func _make_controller(seed_value: int) -> Node:
+	var ctrl: Node = await _make_empty_controller()
+	ctrl.start_run(seed_value)
+	await process_frame
+	return ctrl
+
+
+## A controller with an EMPTY runtime: it has not started a run, so it
+## does not write a checkpoint of its own.
+func _make_empty_controller() -> Node:
 	var ctrl: Node = RunControllerScript.new()
 	ctrl.save_repository = RunSaveRepositoryScript.new(ISOLATED_DIR)
 	get_root().add_child(ctrl)
 	await process_frame
 	ctrl.profile = MetaProfileScript.new()
 	ctrl.profile.unlocked_units = [&"warrior", &"archer"] as Array[StringName]
-	ctrl.start_run(seed_value)
-	await process_frame
 	return ctrl
 
 
@@ -254,23 +270,76 @@ func _equal(a: Dictionary, b: Dictionary) -> bool:
 	return true
 
 
-## The first COMBAT node of the available ones.
+## The first COMBAT node the player may select.
+##
+## The map's `start_run()` puts the player on a layer-1 node and marks
+## it visited, so the selectable nodes are the CHILDREN of the current
+## node -- `get_available_next_ids()`. The kind of a child is drawn,
+## so a seed can offer a SERVICE node there.
 func _first_combat_node(ctrl: Node) -> int:
-	return _first_node_of_kind(ctrl, [&"combat"])
+	return _first_selectable_of_kind(ctrl, [&"combat"])
 
 
-## The first ELITE or BOSS node of the available ones.
-func _first_elite_or_boss_node(ctrl: Node) -> int:
-	return _first_node_of_kind(ctrl, [&"elite", &"boss"])
+## Walks the run to a REACHABLE combat node, the way the player does.
+##
+## Every step goes through `_on_node_selected`, so the phase, the
+## state and the checkpoint are the real ones. The returned id is the
+## combat node the run now stands on, or -1 when the graph has no
+## reachable combat node.
+func _walk_to_a_combat(ctrl: Node) -> int:
+	var map: Object = ctrl.get_encounter_map()
+	if map == null:
+		return -1
+	# The layer-1 node the run starts on is a COMBAT node, but it is
+	# already visited, so the player cannot select it again: the
+	# battle of the layer-1 node is the INITIAL preparation.
+	var walked: Dictionary = {}
+	for _step in range(12):
+		var current: int = int(ctrl.state.current_encounter_id)
+		if walked.has(current):
+			break
+		walked[current] = true
+		for node_id in map.get_available_next_ids():
+			var node: Object = map.get_node(int(node_id))
+			if node == null:
+				continue
+			if not node.is_combat():
+				continue
+			ctrl._on_node_selected(int(node_id))
+			await process_frame
+			return int(node_id)
+		# No combat child: the current node has no reachable combat
+		# below it, so the walk stops. Stepping through a SERVICE node
+		# would leave the run in PREP with a service encounter current,
+		# which is not a battle context.
+		break
+	return -1
 
 
-## The first SERVICE node of the available ones.
+## The first SERVICE node the player may select.
 func _first_service_node(ctrl: Node) -> int:
-	return _first_node_of_kind(ctrl, [&"heal", &"treasure", &"merchant",
+	return _first_selectable_of_kind(ctrl, [&"heal", &"treasure", &"merchant",
 		&"rest", &"shrine"])
 
 
-func _first_node_of_kind(ctrl: Node, kinds: Array) -> int:
+## An ELITE or BOSS node of the map.
+##
+## The boss is ALWAYS in the map (layer 10), so this search is over
+## the WHOLE map: an elite may not be offered by this seed, but the
+## boss is guaranteed to exist.
+func _first_elite_or_boss_node(ctrl: Node) -> int:
+	var map: Object = ctrl.get_encounter_map()
+	if map == null:
+		return -1
+	for node in map.get_all_nodes():
+		var kind_name: String = _kind_name(int(node.type))
+		if kind_name == "elite" or kind_name == "boss":
+			return int(node.id)
+	return -1
+
+
+## The first selectable node of the given kinds.
+func _first_selectable_of_kind(ctrl: Node, kinds: Array) -> int:
 	var map: Object = ctrl.get_encounter_map()
 	if map == null:
 		return -1
