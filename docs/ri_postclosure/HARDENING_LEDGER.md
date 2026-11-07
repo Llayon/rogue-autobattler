@@ -319,6 +319,34 @@ finding as the packages land.
 | NC-H10A | a zero-byte ledger | H-10 | semantic RED |
 | NC-H10B | a malformed JSON ledger | H-10 | semantic RED |
 | NC-H10C | a removed mandatory section | H-10 | semantic RED |
+| NC-H11B | accept a duplicate ownership silently | H-11 | semantic RED |
+| NC-H03 | restore the save-before-PREP | H-03 | semantic RED |
+| NC-H05A | remove the outcome retry | H-05 | semantic RED |
+| NC-H05B | re-apply the outcome on a retry | H-05 | semantic RED |
+| NC-H06A | remove the purchase save | H-06 | semantic RED |
+| NC-H06C | remove the merchant exit guard | H-06 | semantic RED |
+| NC-H07A | restore the service dead-end = victory | H-07 | semantic RED |
+| NC-H09A | remove the equip no-op guard | H-09 | semantic RED |
+| NC-H09C | remove the battle phase guard | H-09 | semantic RED |
+| NC-H12 | the terminal outcome does not consume the latch | H-12 | semantic RED |
+
+### The controls that found their own gaps
+
+Two controls were MISSED at first, and both misses were REAL coverage
+gaps rather than broken mutations:
+
+- **NC-H09C** -- the battle equip case was a NO-OP, and the no-op guard
+  returns BEFORE the phase guard, so the case never reached the
+  contract it claimed to cover. The case now makes a REAL mutation.
+- **NC-H11B** -- its anchor had drifted, so it was SKIPPED for a long
+  time. A SKIP is not evidence. Re-aimed, it turned out to be MISSED:
+  TWO units listing the same item is ALSO caught by the mirrored
+  ownership check, so only the shape where the SAME unit lists the SAME
+  item TWICE is caught by the duplicate ownership check alone. The
+  suite gained both cases.
+
+A control that cannot fail is not a control. Both gaps were found by
+RUNNING the controls, not by reading them.
 | NC-H11A | remove the inventory validation | H-11 | semantic RED |
 | NC-H11B | accept a duplicate ownership silently | H-11 | semantic RED |
 | NC-H12 | the terminal outcome does not consume the latch | H-12 | semantic RED |
