@@ -332,7 +332,7 @@ the rewritten control is RED.
 Measured on the final hardening HEAD:
 
 ```
-runner       118 suites / 9082 assertions / 0 fail / 0 unparsed   GREEN
+runner       118 suites / 9092 assertions / 0 fail / 0 unparsed   GREEN
 CI gates     10/10 clean
 lint         0 errors / 5 warnings (baseline)
 parse        0 errors
@@ -439,6 +439,11 @@ Both the validator and its controls run in CI
 (`chore(ci): validate the Run Integrity ledger` and
 `chore(ci): run the ledger validator controls in CI`).
 
+The negative controls of the hardening are reproducible from
+`tools/negative_controls.py`: every control mutates ONE production
+decision, runs the suite that must catch it, and restores the original
+file. The current matrix is 14/14 honest RED.
+
 ## U. ACTUAL COMMIT GRAPH
 
 38 commits over the base `15628b8`, every package a separate logical
@@ -509,7 +514,7 @@ The evidence for the verdict:
   graph;
 - 14/14 new negative controls are honest RED (no SKIP, no INVALID),
   and the 7 ledger-validator controls are 7/7 RED;
-- the full standalone regression is GREEN: 118 suites / 9082
+- the full standalone regression is GREEN: 118 suites / 9092
   assertions / 0 fail / 0 unparsed, the CI gates are 10/10 clean, and
   the A-H semantic differential is PASS with all 16 fixtures executed
   on both sides;
@@ -529,7 +534,7 @@ git status              clean
 changed production files 9 (+649 / -37)
 changed test files      14 (+3659 / -18)
 suites                  118
-assertions              9082 pass / 0 fail
+assertions              9092 pass / 0 fail
 failures                0
 unparsed                0
 A-H result              PASS (8 + 8 fixtures, both sides rc=0)
