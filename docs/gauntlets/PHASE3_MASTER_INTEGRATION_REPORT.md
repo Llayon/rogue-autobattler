@@ -314,6 +314,25 @@ the browser smoke       16 of 18 PASS, 2 NOT REACHED
     first attempt at the commit message, which is how the length rule
     surfaced.
 
+    ### The artifact never reached the deploy job
+
+    Reading the workflow the way GitHub would execute it exposed
+    THREE defects that a YAML parse does not catch:
+
+      1. The deploy job had NO checkout, so its `git ls-remote` had no
+         remote to ask: the tip check compared against nothing.
+      2. The deploy job had its own `upload-pages-artifact` with
+         `path: build/`, and there is no `build/` in that job: the
+         artifact lives in the web-build job.
+      3. The web-build job never uploaded the artifact at all.
+
+    **Closed.** The deploy job checks out the repository, and an
+    UNREADABLE tip is a HOLD rather than a silent pass. The job that
+    BUILDS the artifact uploads it, so the published bytes are exactly
+    the validated bytes, and the deploy job publishes the uploaded
+    artifact instead of a directory that does not exist there. The
+    decision function now requires the tip check to be READABLE.
+
     ### What the critic confirmed clean
 
     The critic ran the full regression itself: 120 suites, 9174
@@ -354,7 +373,13 @@ the browser smoke       16 of 18 PASS, 2 NOT REACHED
    |     +-- 23e96e1  fix(repo): restore the reusable trigger and split
    |     |            the release controls
    |     +-- 66515d4  fix(repo): read the concurrency protection in the
-   |                  release decision
+   |     |            release decision
+   |     +-- 4b39876  docs(repo): record the critic findings and the final
+   |     |            verdict
+   |     +-- c8185ec  docs(repo): add the critic findings to the risk
+   |     |            register
+   |     +-- ef1ccd0  fix(repo): pass the artifact from the build job to
+   |                  the deploy job
 ```
 
     Four commits on top of the published Phase 3: the release gate,
