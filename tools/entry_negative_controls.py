@@ -23,14 +23,30 @@ Usage:
 
 import io
 import os
+import shutil
 import subprocess
 import sys
 
 REPO = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                     ".."))
-GODOT = os.environ.get("GODOT",
-                       r"D:\Programms\Max\Godot_v4.7-stable_win64.exe"
-                       r"\Godot_v4.7-stable_win64_console.exe")
+def _find_godot():
+    """The Godot binary: the environment, then the PATH, then the
+    development machine's known location."""
+    from_env = os.environ.get("GODOT", "")
+    if from_env:
+        return from_env
+    found = shutil.which("godot")
+    if found:
+        return found
+    known = os.path.join(
+        r"D:\Programms\Max\Godot_v4.7-stable_win64.exe",
+        "Godot_v4.7-stable_win64_console.exe")
+    if os.path.isfile(known):
+        return known
+    return "godot"
+
+
+GODOT = _find_godot()
 
 CONTROLLER = os.path.join(REPO, "core", "progression", "run_controller.gd")
 ENTRY_SUITE = "res://tests/run_integrity/battle_entry_guard_test.gd"

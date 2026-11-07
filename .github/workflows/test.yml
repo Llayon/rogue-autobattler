@@ -172,6 +172,21 @@ jobs:
       - name: Check the Run Integrity ledger validator
         run: python tests/ci/ledger_validator_test.py
 
+      - name: Check the standalone runner contract
+        run: python tests/ci/standalone_runner_test.py
+
+      - name: Check the A-H differential contract
+        run: python tests/ci/ah_differential_test.py
+
+      - name: Check the standalone runner negative controls
+        run: python tools/ci_negative_controls.py
+
+      - name: Check the A-H differential negative controls
+        run: python tools/ah_negative_controls.py
+
+      - name: Check the battle entry negative controls
+        run: python tools/entry_negative_controls.py
+
       - name: Audit the standalone harness exit contract
         run: python tools/audit_test_exit_contract.py
 
