@@ -26,6 +26,7 @@ extends SceneTree
 
 const RunControllerScript = preload("res://core/progression/run_controller.gd")
 const RunSaveRepositoryScript = preload("res://core/save/run_save_repository.gd")
+const BattleEntryFixturesScript = preload("res://tests/run_integrity/battle_entry_fixtures.gd")
 const MetaProfileScript = preload("res://core/progression/meta_profile.gd")
 const SaveServiceScript = preload("res://core/save/save_service.gd")
 const BalanceScript = preload("res://core/balance.gd")
@@ -64,7 +65,11 @@ func _test_A_the_max_round_win_writes_nothing() -> void:
 	var ctrl: Node = await _make_controller(560001)
 	ctrl.state.round_index = BalanceScript.MAX_ROUND
 	ctrl._enter_map()
-	ctrl.state.current_encounter_id = _boss_node_id(ctrl)
+	# RUN-ENTRY-01: the battle entry is guarded, so the boss is
+	# REACHED through the map: the walk leaves the run in PREP with
+	# the boss current, which is the battle context.
+	_assert(BattleEntryFixturesScript.select_the_boss(ctrl)
+		== _boss_node_id(ctrl), "the boss is the current encounter")
 	var writes_before: int = ctrl.save_repository.get_save_count()
 	await _finish_battle(ctrl, 0)
 	var writes_after: int = ctrl.save_repository.get_save_count()
@@ -152,6 +157,12 @@ func _make_controller(seed_value: int) -> Node:
 
 
 func _finish_battle(ctrl: Node, winner: int) -> void:
+	# RUN-ENTRY-01: the battle entry is guarded, so the encounter must
+	# already be a real battle context. The case that fights the BOSS
+	# (RI-08: the boss is the terminator) reaches it through
+	# `BattleEntryFixturesScript.select_the_boss()`, which leaves the
+	# run in PREP with the boss current. The loss cases fight the
+	# first battle of the run, the initial preparation.
 	ctrl.start_battle()
 	await process_frame
 	var losing_team: int = 1 if winner == 0 else 0

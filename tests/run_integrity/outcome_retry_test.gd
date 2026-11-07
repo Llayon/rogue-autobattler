@@ -81,7 +81,10 @@ func _initialize() -> void:
 ## A. A failed outcome write leaves the outcome PENDING, not lost.
 func _test_A_a_failed_outcome_write_is_retryable() -> void:
 	var ctrl: Node = await _make_controller(670601, true)
-	ctrl._enter_map()
+	# RUN-ENTRY-01: the battle entry is guarded, so a battle may only
+	# start from a real battle context. The case needs a STARTED
+	# BATTLE, not the map: the first battle of the run -- the initial
+	# preparation -- is the production way to one.
 	await process_frame
 	# A fight that is won.
 	ctrl.start_battle()
@@ -107,7 +110,10 @@ func _test_A_a_failed_outcome_write_is_retryable() -> void:
 ## re-apply it.
 func _test_B_the_retry_preserves_the_applied_outcome() -> void:
 	var ctrl: Node = await _make_controller(670602, true)
-	ctrl._enter_map()
+	# RUN-ENTRY-01: the battle entry is guarded, so a battle may only
+	# start from a real battle context. The case needs a STARTED
+	# BATTLE, not the map: the first battle of the run -- the initial
+	# preparation -- is the production way to one.
 	await process_frame
 	ctrl.start_battle()
 	await process_frame
@@ -160,7 +166,10 @@ func _test_B_the_retry_preserves_the_applied_outcome() -> void:
 ## C. The retry makes NO extra gameplay RNG draw.
 func _test_C_the_retry_makes_no_extra_gameplay_rng_draw() -> void:
 	var ctrl: Node = await _make_controller(670603, true)
-	ctrl._enter_map()
+	# RUN-ENTRY-01: the battle entry is guarded, so a battle may only
+	# start from a real battle context. The case needs a STARTED
+	# BATTLE, not the map: the first battle of the run -- the initial
+	# preparation -- is the production way to one.
 	await process_frame
 	ctrl.start_battle()
 	await process_frame
@@ -186,7 +195,10 @@ func _test_C_the_retry_makes_no_extra_gameplay_rng_draw() -> void:
 ## D. The retry does not regenerate the reward offer.
 func _test_D_the_retry_does_not_regenerate_the_reward_offer() -> void:
 	var ctrl: Node = await _make_controller(670604, true)
-	ctrl._enter_map()
+	# RUN-ENTRY-01: the battle entry is guarded, so a battle may only
+	# start from a real battle context. The case needs a STARTED
+	# BATTLE, not the map: the first battle of the run -- the initial
+	# preparation -- is the production way to one.
 	await process_frame
 	ctrl.start_battle()
 	await process_frame
@@ -215,7 +227,10 @@ func _test_D_the_retry_does_not_regenerate_the_reward_offer() -> void:
 ## a second checkpoint.
 func _test_E_a_successful_outcome_is_not_retryable() -> void:
 	var ctrl: Node = await _make_controller(670605, true)
-	ctrl._enter_map()
+	# RUN-ENTRY-01: the battle entry is guarded, so a battle may only
+	# start from a real battle context. The case needs a STARTED
+	# BATTLE, not the map: the first battle of the run -- the initial
+	# preparation -- is the production way to one.
 	await process_frame
 	ctrl.start_battle()
 	await process_frame
@@ -246,7 +261,10 @@ func _test_E_a_successful_outcome_is_not_retryable() -> void:
 ## retry would never run in production.
 func _test_F_the_retry_is_reachable_from_the_tick() -> void:
 	var ctrl: Node = await _make_controller(670606, true)
-	ctrl._enter_map()
+	# RUN-ENTRY-01: the battle entry is guarded, so a battle may only
+	# start from a real battle context. The case needs a STARTED
+	# BATTLE, not the map: the first battle of the run -- the initial
+	# preparation -- is the production way to one.
 	await process_frame
 	ctrl.start_battle()
 	await process_frame

@@ -36,6 +36,7 @@ extends SceneTree
 
 const RunControllerScript = preload("res://core/progression/run_controller.gd")
 const RunSaveRepositoryScript = preload("res://core/save/run_save_repository.gd")
+const BattleEntryFixturesScript = preload("res://tests/run_integrity/battle_entry_fixtures.gd")
 const MetaProfileScript = preload("res://core/progression/meta_profile.gd")
 const EncounterTypeScript = preload("res://core/encounter/encounter_type.gd")
 const SaveSchemaV5Script = preload("res://core/save/save_schema_v5.gd")
@@ -136,7 +137,10 @@ func _test_G2_the_service_is_applied_once() -> void:
 ## G3. The outcome retry restores the exact state.
 func _test_G3_the_outcome_retry_restores_the_exact_state() -> void:
 	var ctrl: Node = await _make_controller(671005)
-	ctrl._enter_map()
+	# RUN-ENTRY-01: the battle entry is guarded, so a battle may
+	# only start from a real battle context. The case needs a
+	# STARTED BATTLE, not the map: the first battle of the run --
+	# the initial preparation -- is the production way to one.
 	await process_frame
 	_assert(ctrl.start_battle(), "the battle starts")
 	await process_frame
@@ -257,7 +261,10 @@ func _test_G6_the_equipment_ownership_is_bidirectional() -> void:
 func _test_G7_the_mid_battle_equipment_writes_no_invalid_checkpoint() -> void:
 	var ctrl: Node = await _make_controller(671013)
 	await _prepare_equipment(ctrl)
-	ctrl._enter_map()
+	# RUN-ENTRY-01: the battle entry is guarded, so a battle may only
+	# start from a real battle context. The case needs a STARTED
+	# BATTLE, not the map: the first battle of the run -- the initial
+	# preparation -- is the production way to one.
 	await process_frame
 	var item_id: String = _first_item_id(ctrl)
 	var unit_id: String = _first_unit_id(ctrl)
@@ -265,6 +272,10 @@ func _test_G7_the_mid_battle_equipment_writes_no_invalid_checkpoint() -> void:
 		return
 	_assert(ctrl.equip_item_by_id(item_id, unit_id), "the equip succeeds")
 	ctrl.save_now()
+	# RUN-ENTRY-01: the battle entry is guarded, so a battle may
+	# only start from a real battle context. The case needs a
+	# STARTED BATTLE, not the map: the first battle of the run --
+	# the initial preparation -- is the production way to one.
 	await process_frame
 	_assert(ctrl.start_battle(), "the battle starts")
 	await process_frame
@@ -347,17 +358,21 @@ func _test_G9_the_boss_dead_end_is_not_a_victory() -> void:
 ## G10. The terminal failure does not duplicate the rewards.
 func _test_G10_the_terminal_failure_does_not_duplicate_the_rewards() -> void:
 	var ctrl: Node = await _make_controller(671018)
+	# RUN-ENTRY-01: the battle entry is guarded, so a battle may only
+	# start from a real battle context. The case fights the BOSS, so
+	# the run walks the map to the boss: the walk leaves the run in
+	# PREP with the boss current, which is the battle context.
 	ctrl._enter_map()
 	await process_frame
+	var boss_id: int = _boss_id(ctrl.encounter_map)
+	if boss_id < 0:
+		return
+	_assert(BattleEntryFixturesScript.select_the_boss(ctrl) == boss_id,
+		"the boss is the current encounter")
 	_assert(ctrl.start_battle(), "the battle starts")
 	await process_frame
 	if ctrl.runner == null:
 		return
-	# The boss is the current encounter, and the battle is won.
-	var boss_id: int = _boss_id(ctrl.encounter_map)
-	if boss_id < 0:
-		return
-	ctrl.state.current_encounter_id = boss_id
 	ctrl.runner.state.winner_team = 0
 	ctrl.runner.state.phase = 6
 	var total_runs_before: int = ctrl.profile.total_runs

@@ -77,6 +77,7 @@ const BattleSceneScript = preload("res://scenes/battle/battle_scene.gd")
 const BattleViewScript = preload("res://scenes/battle/battle_view.gd")
 # S5.1: encounter map
 const EncounterTypeScript = preload("res://core/encounter/encounter_type.gd")
+const BattleEntryFixturesScript = preload("res://tests/run_integrity/battle_entry_fixtures.gd")
 const EncounterNodeScript = preload("res://core/encounter/encounter_node.gd")
 const EncounterMapScript = preload("res://core/encounter/encounter_map.gd")
 # S6.2: PrepScene
@@ -1730,7 +1731,11 @@ func _test_run_controller_win_at_max_round() -> void:
 		if boss_id >= 0:
 			break
 	_assert(boss_id >= 0, "the map has a boss node")
-	ctrl.state.current_encounter_id = boss_id
+	# RUN-ENTRY-01: the battle entry is guarded, so the boss is
+	# REACHED through the map instead of being written into the state
+	# by hand: the walk leaves the run in PREP with the boss current.
+	_assert(BattleEntryFixturesScript.select_the_boss(ctrl) == boss_id,
+		"the boss is the current encounter")
 	# Ловим сигнал run_ended.
 	var won_flag: Array = [null]  # boxed, чтобы lambda видела
 	ctrl.run_ended.connect(func(w: bool) -> void: won_flag[0] = w)
@@ -1959,7 +1964,10 @@ func _test_run_controller_max_round_no_reward() -> void:
 		if boss_id >= 0:
 			break
 	_assert(boss_id >= 0, "the map has a boss node")
-	ctrl.state.current_encounter_id = boss_id
+	# RUN-ENTRY-01: see the case above -- the boss is reached through
+	# the map, which leaves the run in PREP with the boss current.
+	_assert(BattleEntryFixturesScript.select_the_boss(ctrl) == boss_id,
+		"the boss is the current encounter")
 	ctrl.start_battle()
 	ctrl.runner.state.phase = BattleStateScriptForCtrl.Phase.ENDED
 	ctrl.runner.state.winner_team = 0

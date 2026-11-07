@@ -20,6 +20,7 @@ extends SceneTree
 
 const RunControllerScript = preload("res://core/progression/run_controller.gd")
 const RunSaveRepositoryScript = preload("res://core/save/run_save_repository.gd")
+const BattleEntryFixturesScript = preload("res://tests/run_integrity/battle_entry_fixtures.gd")
 const MetaProfileScript = preload("res://core/progression/meta_profile.gd")
 const EncounterTypeScript = preload("res://core/encounter/encounter_type.gd")
 const BalanceScript = preload("res://core/balance.gd")
@@ -103,7 +104,11 @@ func _test_C_the_boss_victory_ends_the_run_once() -> void:
 	ctrl._enter_map()
 	var boss_id: int = _boss_id(ctrl.encounter_map)
 	_assert(boss_id >= 0, "the map has a boss")
-	ctrl.state.current_encounter_id = boss_id
+	# RUN-ENTRY-01: the battle entry is guarded, so the boss is
+	# REACHED through the map: the walk leaves the run in PREP with
+	# the boss current, which is the battle context.
+	_assert(BattleEntryFixturesScript.select_the_boss(ctrl) == boss_id,
+		"the boss is the current encounter")
 	var endings: Array = [0]
 	ctrl.run_ended.connect(func(_won: bool) -> void: endings[0] = int(endings[0]) + 1)
 	await _finish_battle(ctrl, 0)
@@ -232,6 +237,11 @@ func _reaches_boss(map: Object, from_id: int, boss_id: int) -> bool:
 
 ## Fights a battle and applies the outcome, the way the scene does.
 func _finish_battle(ctrl: Node, winner: int) -> void:
+	# RUN-ENTRY-01: the battle entry is guarded, so the encounter must
+	# already be a real battle context. The cases that fight the boss
+	# reach it through `BattleEntryFixturesScript.select_the_boss()`,
+	# which leaves the run in PREP with the boss current; the cases
+	# that fight an ordinary opponent select their node themselves.
 	ctrl.start_battle()
 	await process_frame
 	var losing_team: int = 1 if winner == 0 else 0

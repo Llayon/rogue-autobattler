@@ -26,6 +26,7 @@ extends SceneTree
 
 const RunControllerScript = preload("res://core/progression/run_controller.gd")
 const RunSaveRepositoryScript = preload("res://core/save/run_save_repository.gd")
+const BattleEntryFixturesScript = preload("res://tests/run_integrity/battle_entry_fixtures.gd")
 const MetaProfileScript = preload("res://core/progression/meta_profile.gd")
 const EncounterMapScript = preload("res://core/encounter/encounter_map.gd")
 const EncounterTypeScript = preload("res://core/encounter/encounter_type.gd")
@@ -148,7 +149,11 @@ func _test_D_a_boss_victory_still_ends_the_run() -> void:
 	var boss_id: int = _boss_id(map)
 	_assert(boss_id >= 0, "the map has a boss")
 	# The boss is the current encounter, and the battle is won.
-	ctrl.state.current_encounter_id = boss_id
+	# RUN-ENTRY-01: the battle entry is guarded, so the run walks the
+	# map to the boss -- the production path leaves the run in PREP
+	# with the boss current, which is the battle context.
+	var selected: int = BattleEntryFixturesScript.select_the_boss(ctrl)
+	_assert(selected == boss_id, "the boss is the current encounter")
 	var ended: Array = []
 	ctrl.run_ended.connect(func(won: bool) -> void: ended.append(won))
 	ctrl.start_battle()

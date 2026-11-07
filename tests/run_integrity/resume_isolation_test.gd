@@ -60,7 +60,11 @@ func _initialize() -> void:
 ## A. The CORE runtime is cleared by a successful resume.
 func _test_A_the_core_runtime_is_cleared() -> void:
 	var ctrl: Node = await _make_controller(670901)
-	ctrl._enter_map()
+	# RUN-ENTRY-01: the battle entry is guarded, so the battle must
+	# start from a real battle context. The case is about the RESUME
+	# isolation, not about the map, so the first battle of the run --
+	# the initial preparation -- is the production way to a started
+	# battle.
 	await process_frame
 	_assert(ctrl.start_battle(), "the battle starts")
 	await process_frame
@@ -89,7 +93,8 @@ func _test_A_the_core_runtime_is_cleared() -> void:
 ## resume is transactional.
 func _test_B_the_failed_resume_keeps_the_old_runtime() -> void:
 	var ctrl: Node = await _make_controller(670903)
-	ctrl._enter_map()
+	# RUN-ENTRY-01: see the case A -- the battle starts from the
+	# initial preparation, a real battle context.
 	await process_frame
 	_assert(ctrl.start_battle(), "the battle starts")
 	await process_frame
@@ -113,7 +118,8 @@ func _test_B_the_failed_resume_keeps_the_old_runtime() -> void:
 ## C. The resume preserves the RNG exactly.
 func _test_C_the_resume_preserves_the_rng_exactly() -> void:
 	var ctrl: Node = await _make_controller(670904)
-	ctrl._enter_map()
+	# RUN-ENTRY-01: see the case A -- the battle starts from the
+	# initial preparation, a real battle context.
 	await process_frame
 	ctrl.start_battle()
 	await process_frame
@@ -136,7 +142,8 @@ func _test_C_the_resume_preserves_the_rng_exactly() -> void:
 ## previous battle.
 func _test_D_the_stale_visual_context_is_cleared() -> void:
 	var ctrl: Node = await _make_controller(670906)
-	ctrl._enter_map()
+	# RUN-ENTRY-01: see the case A -- the battle starts from the
+	# initial preparation, a real battle context.
 	await process_frame
 	_assert(ctrl.start_battle(), "the battle starts")
 	await process_frame

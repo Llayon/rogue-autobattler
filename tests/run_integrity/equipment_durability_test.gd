@@ -69,7 +69,10 @@ func _initialize() -> void:
 func _test_A_a_map_equip_survives_a_resume() -> void:
 	var ctrl: Node = await _make_controller(670801)
 	await _prepare_equipment(ctrl)
-	ctrl._enter_map()
+	# RUN-ENTRY-01: the battle entry is guarded, so a battle may only
+	# start from a real battle context. The case needs a STARTED
+	# BATTLE, not the map: the first battle of the run -- the initial
+	# preparation -- is the production way to one.
 	await process_frame
 	var item_id: String = _first_item_id(ctrl)
 	var unit_id: String = _first_unit_id(ctrl)
@@ -95,7 +98,10 @@ func _test_A_a_map_equip_survives_a_resume() -> void:
 func _test_B_a_map_unequip_survives_a_resume() -> void:
 	var ctrl: Node = await _make_controller(670803)
 	await _prepare_equipment(ctrl)
-	ctrl._enter_map()
+	# RUN-ENTRY-01: the battle entry is guarded, so a battle may only
+	# start from a real battle context. The case needs a STARTED
+	# BATTLE, not the map: the first battle of the run -- the initial
+	# preparation -- is the production way to one.
 	await process_frame
 	var item_id: String = _first_item_id(ctrl)
 	var unit_id: String = _first_unit_id(ctrl)
@@ -186,7 +192,10 @@ func _test_E_an_index_unequip_survives_a_resume() -> void:
 func _test_F_an_already_equipped_item_writes_nothing() -> void:
 	var ctrl: Node = await _make_controller(670811)
 	await _prepare_equipment(ctrl)
-	ctrl._enter_map()
+	# RUN-ENTRY-01: the battle entry is guarded, so a battle may only
+	# start from a real battle context. The case needs a STARTED
+	# BATTLE, not the map: the first battle of the run -- the initial
+	# preparation -- is the production way to one.
 	await process_frame
 	var item_id: String = _first_item_id(ctrl)
 	var unit_id: String = _first_unit_id(ctrl)
@@ -258,7 +267,10 @@ func _test_H_an_invalid_command_writes_nothing() -> void:
 func _test_I_a_battle_equip_writes_no_checkpoint() -> void:
 	var ctrl: Node = await _make_controller(670814)
 	await _prepare_equipment(ctrl)
-	ctrl._enter_map()
+	# RUN-ENTRY-01: the battle entry is guarded, so a battle may only
+	# start from a real battle context. The case needs a STARTED
+	# BATTLE, not the map: the first battle of the run -- the initial
+	# preparation -- is the production way to one.
 	await process_frame
 	var item_id: String = _first_item_id(ctrl)
 	var unit_id: String = _first_unit_id(ctrl)
@@ -308,7 +320,10 @@ func _test_I_a_battle_equip_writes_no_checkpoint() -> void:
 func _test_J_a_battle_equip_reaches_the_next_checkpoint() -> void:
 	var ctrl: Node = await _make_controller(670815)
 	await _prepare_equipment(ctrl)
-	ctrl._enter_map()
+	# RUN-ENTRY-01: the battle entry is guarded, so a battle may only
+	# start from a real battle context. The case needs a STARTED
+	# BATTLE, not the map: the first battle of the run -- the initial
+	# preparation -- is the production way to one.
 	await process_frame
 	var item_id: String = _first_item_id(ctrl)
 	var unit_id: String = _first_unit_id(ctrl)
