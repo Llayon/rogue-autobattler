@@ -14,6 +14,5 @@ effect_kind = 5
 owner_selector = 2
 target_selector = 0
 range_cells = 1
-melee_only = true
 output_tag = &"attack_of_opportunity"
 excluded_trigger_tags = Array[StringName]([&"attack_of_opportunity"])

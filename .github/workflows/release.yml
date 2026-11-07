@@ -29,15 +29,13 @@ on:
     branches: [master]
   # R3.4: a manual dispatch must NOT bypass the gate. It runs the SAME
   # required jobs on the SAME SHA, and the deploy job still needs them.
-  # The dispatch MAY select another branch -- the gate then applies to
-  # that branch's SHA, which is the point: the gate is a property of
-  # the SHA, not of the trigger.
+  #
+  # There is deliberately NO input here. A dispatch already selects the
+  # ref it runs on, and the gate applies to that ref's SHA: the gate is
+  # a property of the SHA, not of the trigger. An input that looked
+  # like a way to choose the target and did nothing would mislead an
+  # operator into believing they controlled something they did not.
   workflow_dispatch:
-    inputs:
-      ref:
-        description: 'The branch or tag to publish (the same gate applies to it)'
-        required: false
-        default: 'master'
 
 # R3.5: the default permissions are read-only. The deploy job asks
 # for exactly the two rights it needs, and nothing else has them.
