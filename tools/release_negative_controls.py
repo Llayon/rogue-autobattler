@@ -157,6 +157,12 @@ def release_decision(workflow_text, test_text, jobs, artifact_ok,
     # The workflow compares the published SHA with the branch tip. If
     # that comparison is gone, a stale publication is allowed.
     if '!= "${{ github.sha }}"' in workflow_text:
+        # The check has to be READABLE: the deploy job needs a
+        # repository, or `git ls-remote` has no remote to ask and the
+        # comparison is made against nothing.
+        if "actions/checkout@v4" not in workflow_text:
+            return "DENY", "the deploy job has no checkout: the tip "\
+                           "check cannot read a remote"
         if built_sha != branch_tip:
             return "DENY", "the published SHA %s is not the tip %s" % (
                 built_sha, branch_tip)
@@ -224,7 +230,7 @@ MUTATIONS = [
     ("NC-REL-04",
      "remove the SHA identity check",
      "release.yml",
-     [('          if [ -n "$TIP" ] && [ "$TIP" != "${{ github.sha }}" ]; then\n'
+     [('          if [ "$TIP" != "${{ github.sha }}" ]; then\n'
        '            echo "HOLD: ${{ github.sha }} is not the tip of ${GITHUB_REF_NAME} ($TIP is)."\n'
        '            echo "A stale deployment must not supersede a newer commit."\n'
        '            exit 1\n'
@@ -253,7 +259,7 @@ MUTATIONS = [
        "  cancel-in-progress: false",
        "concurrency:\n  group: pages-${{ github.ref }}\n"
        "  cancel-in-progress: true"),
-      ('          if [ -n "$TIP" ] && [ "$TIP" != "${{ github.sha }}" ]; then\n'
+      ('          if [ "$TIP" != "${{ github.sha }}" ]; then\n'
        '            echo "HOLD: ${{ github.sha }} is not the tip of ${GITHUB_REF_NAME} ($TIP is)."\n'
        '            echo "A stale deployment must not supersede a newer commit."\n'
        '            exit 1\n'

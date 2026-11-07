@@ -124,6 +124,13 @@ jobs:
           set -euo pipefail
           python tools/validate_web_artifact.py build
 
+      # The artifact is uploaded by the job that BUILT it. The deploy
+      # job downloads it from here, so the bytes that are published
+      # are exactly the bytes that were validated.
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: build/
+
   # -------------------------------------------------------------------
   # The deployment. It needs the build AND the validation, and it
   # carries the ONLY elevated permissions in this workflow.
@@ -146,21 +153,33 @@ jobs:
       # the OLDER run of the same branch, but an already RUNNING
       # deployment is not guaranteed to be cancelled -- so the deploy
       # job checks the tip itself and refuses to publish a stale SHA.
+      #
+      # The checkout is REQUIRED: without a repository there is no
+      # remote to ask, and the check would silently compare nothing.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
       - name: Verify the SHA is still the tip of the branch
         run: |
           set -euo pipefail
           TIP="$(git ls-remote origin "refs/heads/${GITHUB_REF_NAME}" | cut -f1)"
           echo "the tip of ${GITHUB_REF_NAME}: $TIP"
           echo "the SHA being published: ${{ github.sha }}"
-          if [ -n "$TIP" ] && [ "$TIP" != "${{ github.sha }}" ]; then
+          if [ -z "$TIP" ]; then
+            echo "HOLD: the tip of ${GITHUB_REF_NAME} could not be read."
+            echo "An unreadable tip is a HOLD, never a GREEN."
+            exit 1
+          fi
+          if [ "$TIP" != "${{ github.sha }}" ]; then
             echo "HOLD: ${{ github.sha }} is not the tip of ${GITHUB_REF_NAME} ($TIP is)."
             echo "A stale deployment must not supersede a newer commit."
             exit 1
           fi
 
       - uses: actions/configure-pages@v5
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: build/
+      # The artifact comes from the build job, which uploaded the
+      # bytes it validated. The deploy job must NOT upload a local
+      # build/ directory: it has none.
       - id: deployment
         uses: actions/deploy-pages@v4
