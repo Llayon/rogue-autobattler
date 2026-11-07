@@ -83,11 +83,18 @@ func _test_B_a_max_round_victory_over_an_ordinary_opponent() -> void:
 	ctrl.state.round_index = BalanceScript.MAX_ROUND
 	ctrl._enter_map()
 	# The encounter is an ordinary combat node, not the boss.
-	var ordinary: int = _ordinary_combat_id(ctrl)
+	#
+	# RUN-ENTRY-01: the battle entry is guarded, so the ordinary
+	# opponent must be REACHABLE and must be the current encounter.
+	# The node is found by walking the map -- the same walk the player
+	# does -- because a node of a deeper layer cannot be selected
+	# directly.
+	var ordinary: int = await _walk_to_an_ordinary_combat(ctrl)
 	_assert(ordinary >= 0, "an ordinary combat node was found")
+	if ordinary < 0:
+		return
 	_assert(ordinary != _boss_id(ctrl.encounter_map),
 		"the ordinary node is not the boss")
-	ctrl._on_node_selected(ordinary)
 	await _finish_battle(ctrl, 0)
 	_assert(ctrl.phase != ctrl.Phase.GAMEOVER,
 		"a victory over an ordinary opponent does not end the run "
@@ -144,7 +151,16 @@ func _test_D_an_unreachable_boss_does_not_end_the_run() -> void:
 			parent.child_ids.erase(boss_id)
 	boss.parent_ids.clear()
 	# The encounter is the (now unreachable) boss.
+	#
+	# RUN-ENTRY-01: the battle entry is guarded, so the boss id was
+	# written into the state by hand before, which is not a state the
+	# game can produce. The encounter is set through the map instead:
+	# the boss is the current node of the malformed graph, and the run
+	# is in PREP with it current -- the battle context.
+	ctrl.encounter_map.choose_next(boss_id)
 	ctrl.state.current_encounter_id = boss_id
+	ctrl.state.encounter_visited_ids.append(boss_id)
+	ctrl._set_phase(ctrl.Phase.PREP)
 	var endings: Array = [0]
 	ctrl.run_ended.connect(func(_won: bool) -> void: endings[0] = int(endings[0]) + 1)
 	await _finish_battle(ctrl, 0)
@@ -195,6 +211,47 @@ func _boss_id(map: Object) -> int:
 
 
 ## The id of an ordinary (or elite) combat node.
+## Walks the map to a reachable ordinary COMBAT node.
+##
+## The walk uses the MAP's own transition, `choose_next()`, which is
+## what the map UI calls: `_on_node_selected()` only works in the MAP
+## phase, and selecting a node moves the run out of it.
+func _walk_to_an_ordinary_combat(ctrl: Node) -> int:
+	var map: Object = ctrl.encounter_map
+	if map == null:
+		return -1
+	var boss_id: int = _boss_id(map)
+	var walked: Dictionary = {}
+	for _step in range(12):
+		var current: int = int(ctrl.state.current_encounter_id)
+		if walked.has(current):
+			break
+		walked[current] = true
+		for node_id in map.get_available_next_ids():
+			var node: Object = map.get_node(int(node_id))
+			if node == null:
+				continue
+			if not node.is_combat():
+				continue
+			if int(node_id) == boss_id:
+				continue
+			map.choose_next(int(node_id))
+			ctrl.state.current_encounter_id = int(node_id)
+			ctrl.state.encounter_visited_ids.append(int(node_id))
+			ctrl._set_phase(ctrl.Phase.PREP)
+			return int(node_id)
+		var moved: bool = false
+		for node_id in map.get_available_next_ids():
+			map.choose_next(int(node_id))
+			ctrl.state.current_encounter_id = int(node_id)
+			ctrl.state.encounter_visited_ids.append(int(node_id))
+			moved = true
+			break
+		if not moved:
+			break
+	return -1
+
+
 func _ordinary_combat_id(ctrl: Node) -> int:
 	var map: Object = ctrl.encounter_map
 	for depth in range(1, BalanceScript.MAP_MAX_DEPTH):

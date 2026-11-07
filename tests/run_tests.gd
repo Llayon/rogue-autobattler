@@ -3035,7 +3035,15 @@ func _test_run_controller_invalid_node_id_ignored() -> void:
 	var phase_before: int = ctrl.phase
 	ctrl._on_node_selected(99999)
 	_assert(ctrl.phase == phase_before, "phase unchanged (was %d, now %d)" % [phase_before, ctrl.phase])
+	# RUN-ENTRY-01: the battle entry is guarded, so the setup must use
+	# a real battle context. The MAP phase is not one -- a MAP means
+	# "the player must select a node" -- so the run goes back to the
+	# initial preparation, where the first battle of the run is legal.
+	ctrl._set_phase(RunControllerScript.Phase.PREP)
+	ctrl.state.current_encounter_id = -1
 	ctrl.start_battle()
+	_assert(ctrl.phase == RunControllerScript.Phase.BATTLE,
+		"the battle started for the setup (got %d)" % ctrl.phase)
 	ctrl._on_node_selected(0)
 	_assert(ctrl.phase == RunControllerScript.Phase.BATTLE, "phase still BATTLE (got %d)" % ctrl.phase)
 	_cleanup_ctrl(ctrl)

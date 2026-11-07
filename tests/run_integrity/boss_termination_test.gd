@@ -68,9 +68,17 @@ func _test_B_the_boss_defeat_ends_the_run() -> void:
 	var ctrl: Node = await _make_controller(630002)
 	# The run is on the last round, and the boss is the encounter.
 	ctrl.state.round_index = BalanceScript.MAX_ROUND
-	ctrl.state.current_encounter_id = _boss_node_id(ctrl)
-	_assert(ctrl.state.current_encounter_id >= 0,
-		"the boss node was found")
+	# RUN-ENTRY-01: the battle entry is guarded, so the boss is
+	# REACHED through the map: the walk leaves the run in PREP with
+	# the boss current, which is the battle context. The boss id was
+	# written into the state by hand before, which is not a state the
+	# game can produce.
+	ctrl._enter_map()
+	await process_frame
+	var boss_id: int = _boss_node_id(ctrl)
+	_assert(boss_id >= 0, "the boss node was found")
+	_assert(BattleEntryFixturesScript.select_the_boss(ctrl) == boss_id,
+		"the boss is the current encounter")
 	# The boss is fought and won.
 	await _finish_battle(ctrl, 0)
 	_assert(ctrl.phase == ctrl.Phase.GAMEOVER,
@@ -90,11 +98,9 @@ func _test_C_the_run_does_not_end_without_the_boss() -> void:
 	ctrl.state.round_index = BalanceScript.MAX_ROUND
 	ctrl._enter_map()
 	var boss_id: int = _boss_node_id(ctrl)
-	# RUN-ENTRY-01: the battle entry is guarded, so the boss is
-	# REACHED through the map: the walk leaves the run in PREP with
-	# the boss current, which is the battle context.
-	_assert(BattleEntryFixturesScript.select_the_boss(ctrl) == boss_id,
-		"the boss is the current encounter")
+	# The case fights an ORDINARY opponent, so the run must NOT walk
+	# to the boss: the boss has no children, and the walk would empty
+	# the available list.
 	# The player starts ON a combat node of the first layer. The
 	# available next ids are the nodes of the NEXT layer, so the walk
 	# is: pick the next node, and the run fights it.
@@ -106,12 +112,18 @@ func _test_C_the_run_does_not_end_without_the_boss() -> void:
 			combat_id = int(nid)
 			break
 	if combat_id < 0:
-		# No combat node in the next layer for this seed: take the
-		# first reachable node and fight it anyway. The question is
-		# the completion, not the node type.
-		combat_id = int(ids[0])
+		# No COMBAT node in the next layer for this seed.
+		#
+		# RUN-ENTRY-01: the battle entry is guarded, so a SERVICE node
+		# is NOT a battle context: the fallback used to take the first
+		# reachable node and fight it, and that node can be a service
+		# node. The case needs a real COMBAT node, so the walk goes
+		# deeper into the graph until it finds one.
+		combat_id = await _walk_to_a_combat(ctrl)
+	_assert(combat_id >= 0, "a combat node is reachable")
+	if combat_id < 0:
+		return
 	_assert(boss_id != combat_id, "the combat node is not the boss")
-	ctrl._on_node_selected(combat_id)
 	# The battle is won.
 	await _finish_battle(ctrl, 0)
 	_assert(ctrl.phase != ctrl.Phase.GAMEOVER,
@@ -176,6 +188,49 @@ func _boss_node_id(ctrl: Node) -> int:
 		for node in ctrl.encounter_map.get_layer_nodes(depth):
 			if node.type == EncounterTypeScript.Kind.BOSS:
 				return int(node.id)
+	return -1
+
+
+## Walks the map to a reachable COMBAT node, the way the player does.
+##
+## The kind of a selectable node is drawn, so a seed can offer a
+## SERVICE node where the case needs a combat one. The walk follows
+## the graph until it finds a COMBAT node.
+func _walk_to_a_combat(ctrl: Node) -> int:
+	var map: Object = ctrl.encounter_map
+	if map == null:
+		return -1
+	# The walk uses the MAP's own transition, `choose_next()`, which is
+	# what the map UI calls. `_on_node_selected()` cannot be used for
+	# the intermediate steps: it only works in the MAP phase, and
+	# selecting a node moves the run out of it.
+	var walked: Dictionary = {}
+	for _step in range(12):
+		var current: int = int(ctrl.state.current_encounter_id)
+		if walked.has(current):
+			break
+		walked[current] = true
+		for node_id in map.get_available_next_ids():
+			var node: Object = map.get_node(int(node_id))
+			if node == null:
+				continue
+			if not node.is_combat():
+				continue
+			map.choose_next(int(node_id))
+			ctrl.state.current_encounter_id = int(node_id)
+			ctrl.state.encounter_visited_ids.append(int(node_id))
+			ctrl._set_phase(ctrl.Phase.PREP)
+			return int(node_id)
+		# No combat child: step one node deeper.
+		var moved: bool = false
+		for node_id in map.get_available_next_ids():
+			map.choose_next(int(node_id))
+			ctrl.state.current_encounter_id = int(node_id)
+			ctrl.state.encounter_visited_ids.append(int(node_id))
+			moved = true
+			break
+		if not moved:
+			break
 	return -1
 
 
