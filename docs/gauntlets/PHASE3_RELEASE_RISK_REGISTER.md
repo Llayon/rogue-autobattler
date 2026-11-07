@@ -27,6 +27,26 @@
 
 ## HIGH
 
+### H-02 — the release decision did not read the concurrency protection
+
+    Status:  PROVEN DEFECT — FIXED
+    Found:   the release DECISION FUNCTION never read the CONCURRENCY
+             block. The stale protection had only ONE mechanism in the
+             decision (the tip check), while the workflow has TWO (the
+             per-branch concurrency group and the tip check). The
+             NC-REL-07 mutation changed `cancel-in-progress`, so it
+             could not change the verdict through that path -- and a
+             control that cannot fail proves nothing.
+             Found by the independent critic.
+    Fix:     the decision derives both mechanisms: the group must be
+             per ref, and a cancelled run must never reach the deploy
+             job. The NC-REL-07 mutation removes the tip check as
+             well, so the stale publication is really possible, and
+             the control proves the mutated gate ALLOWs it while the
+             clean gate denies it.
+    Proof:   NC-REL-07 is RED, and the clean gate denies the stale
+             scenario.
+
 ### H-01 — the A-H baseline would have compared nothing after the merge
 
     Status:  PROVEN DEFECT — FIXED
@@ -86,7 +106,22 @@
     was not. A committed Pages artifact could only ever be a stale
     one. Both directories are ignored now.
 
-### L-02 — the .uid files are not tracked
+### L-02 — the reusable trigger had been reverted
+
+    Status:  PROVEN DEFECT — FIXED
+    Found:   a strict YAML audit (parse the workflows, assert the
+             trigger block, the needs graph, the permissions and the
+             concurrency) found that test.yml had lost its
+             `workflow_call` trigger and its `contents: read`
+             permission. The release workflow was calling a workflow
+             that could not be called, and the CI would have failed.
+             The cause was a `git reset --hard` from an earlier series,
+             which reverted that change together with the unrelated
+             restoration.
+    Fix:     the trigger and the permission are restored and the YAML
+             is parsed and asserted afterwards.
+
+### L-03 — the .uid files are not tracked
 
     Status:  OBSERVATION — NOT A DEFECT
     The base tracks no .uid file at all (0 of 128 .gd files), and the
