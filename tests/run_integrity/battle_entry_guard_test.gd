@@ -54,6 +54,7 @@ func _initialize() -> void:
 	await _test_B_a_map_without_a_selection_refuses_the_battle()
 	await _test_C_a_map_after_a_service_refuses_the_battle()
 	await _test_D_the_terminal_phases_refuse_the_battle()
+	await _test_D2_a_service_encounter_refuses_the_battle()
 	await _test_E_the_initial_run_prep_starts_the_battle()
 	await _test_F_a_selected_combat_starts_the_battle()
 	await _test_G_a_selected_elite_or_boss_starts_the_battle()
@@ -119,6 +120,36 @@ func _test_D_the_terminal_phases_refuse_the_battle() -> void:
 	_assert(not ctrl.start_battle(), "GAMEOVER refuses the battle")
 	ctrl._set_phase(ctrl.Phase.REWARD)
 	_assert(not ctrl.start_battle(), "REWARD refuses the battle")
+
+
+## D2. A SERVICE encounter is not a battle context.
+##
+## A service encounter leaves the run in PREP with that node current:
+## the merchant visit is the obvious case, and the merchant flag is
+## cleared when the shop is left. The node itself is NOT a combat node,
+## so the battle must be refused even when the merchant flag is gone.
+func _test_D2_a_service_encounter_refuses_the_battle() -> void:
+	var ctrl: Node = await _make_controller(670110)
+	ctrl._enter_map()
+	await process_frame
+	var node_id: int = _first_service_node(ctrl)
+	_assert(node_id >= 0, "the map offers a service node")
+	if node_id < 0:
+		return
+	# The service node is selected through the production path, so the
+	# phase and the state are the real ones.
+	ctrl._on_node_selected(node_id)
+	await process_frame
+	_assert(int(ctrl.phase) == 0, "the phase is PREP after the service")
+	_assert(ctrl.state.current_encounter_id == node_id,
+		"the service node is the current encounter")
+	# The merchant flag is cleared: the shop was left. The node is
+	# still a service node, and a service node is not a battle.
+	ctrl.state.just_visited_merchant = false
+	var before: Dictionary = _snapshot(ctrl)
+	var started: bool = ctrl.start_battle()
+	_assert(not started, "a service encounter refuses the battle")
+	_assert(_equal(before, _snapshot(ctrl)), "the refusal changed nothing")
 
 
 ## E. The initial run PREP starts the battle.

@@ -207,9 +207,27 @@ def main():
                            full_set(), missing_event)
 
         # H and I: a non-zero probe exit after the valid snapshots.
-        # The runner must not report PASS when a probe exits non-zero.
-        for side in ("baseline", "candidate"):
-            h.check("the %s probe exit code is checked" % side, True)
+        #
+        # The runner's contract is checked against its SOURCE: the
+        # comparator self-tests cannot see the runner, and a control
+        # that mutates the runner is only caught if something asserts
+        # on the runner.
+        with io.open(RUNNER, encoding="utf-8") as f:
+            runner_source = f.read()
+        h.check("the baseline probe return code is checked",
+                "if rc_b != 0:" in runner_source,
+                "the runner does not check the baseline return code")
+        h.check("the candidate probe return code is checked",
+                "if rc_c != 0:" in runner_source,
+                "the runner does not check the candidate return code")
+        h.check("a failed import is checked",
+                "if proc.returncode != 0:" in runner_source,
+                "the runner does not check the import return code")
+        h.check("the baseline worktree is not written to",
+                "copy_tree(" in runner_source
+                and "shutil.copyfile(probe_src, probe_dst)" in runner_source
+                and "shutil.rmtree(workdir" in runner_source,
+                "the runner does not isolate the baseline copy")
 
         # K. both probes produce zero fixtures.
         empty = []
