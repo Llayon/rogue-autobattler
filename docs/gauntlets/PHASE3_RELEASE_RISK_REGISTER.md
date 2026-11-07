@@ -1,0 +1,133 @@
+# PHASE 3 RELEASE RISK REGISTER
+
+    Every entry states WHAT was proven, HOW it was proven and what is
+    still unproven. A proven defect and a theoretical risk are never
+    mixed: the PROVEN column says which one it is.
+
+## BLOCKER
+
+### B-01 — the Pages deployment did not depend on the required CI
+
+    Status:  PROVEN DEFECT — FIXED
+    Found:   .github/workflows/web-build.yml, the `deploy` job needed
+             only `build`. The required jobs live in a separate
+             workflow (test.yml) whose success was not a precondition
+             of the publication, so a RED test run never stopped a
+             deploy.
+    Fix:     test.yml became reusable (workflow_call) and the new
+             release.yml calls it. The deploy job needs the required
+             tests AND the build. The old workflow was deleted, because
+             its presence would have published without the gate.
+    Proof:   tools/release_negative_controls.py — NC-REL-01..07, all
+             semantic RED; the clean gate ALLOWs the good scenario
+             only.
+    Residual: the GitHub Pages environment restrictions are NOT
+              verified locally: NOT VERIFIED UNTIL REMOTE CI /
+              DEPLOYMENT.
+
+## HIGH
+
+### H-01 — the A-H baseline would have compared nothing after the merge
+
+    Status:  PROVEN DEFECT — FIXED
+    Found:   the A-H differential took its baseline from HEAD^. After
+             Phase 3 is merged into master, HEAD^ is the previous
+             MASTER commit, and master carries NO A-H probe at all
+             (verified: the probe file does not exist on master). The
+             comparison would have been empty, and an empty
+             comparison passes.
+    Fix:     the baseline is PINNED to the published Phase 3 commit
+             4316a32. The step verifies that the baseline carries the
+             probe, and HOLDs (exit 1) when the baseline cannot be
+             fetched. It never skips and never passes.
+    Residual: the pinned baseline must stay reachable. It is a
+              published commit, so it stays reachable.
+
+## MEDIUM
+
+### M-01 — the export path was relative
+
+    Status:  PROVEN DEFECT — FIXED
+    Found:   the web build exported to "build/index.html". On Windows
+             Godot resolves a relative path against the editor's
+             working directory, not against the project, and the
+             export fails with "the target folder does not exist or is
+             not accessible". The Linux CI could not see it.
+    Fix:     the release workflow exports to an ABSOLUTE path.
+    Proof:   a local clean export produced the full artifact.
+
+### M-02 — a corrupt save is dropped, but the drop is not proved on every platform
+
+    Status:  PROVEN BEHAVIOUR — CHARACTERIZATION ONLY
+    Found:   the web build keeps user:// in IndexedDB. A corrupt
+             meta.tres and run file were written there; after the
+             reload the application loaded normally, the "Continue"
+             button was gone and "New Run" still worked, with zero
+             page errors.
+    Residual: only the WEB runtime was exercised. The desktop and the
+              headless runtimes are covered by the save suites, not
+              by a browser. NOT VERIFIED UNTIL A REAL DEPLOYMENT.
+
+### M-03 — the local browser smoke did not reach two scenarios
+
+    Status:  COVERAGE GAP — NOT A PROVEN DEFECT
+    WEB-14 (TREASURE) and WEB-15 (settings) were not reached: the run
+    in that session never routed through a TREASURE, and the main
+    menu exposes no settings control the automation could reach.
+    Neither is claimed as working.
+
+## LOW
+
+### L-01 — the build output was not ignored
+
+    Status:  PROVEN DEFECT — FIXED
+    The root build/ directory was untracked but not ignored, and the
+    .gitignore comment claimed that docs/build/** is committed -- it
+    was not. A committed Pages artifact could only ever be a stale
+    one. Both directories are ignored now.
+
+### L-02 — the .uid files are not tracked
+
+    Status:  OBSERVATION — NOT A DEFECT
+    The base tracks no .uid file at all (0 of 128 .gd files), and the
+    134 .gd files Phase 3 added have no .uid either. They are Godot
+    import artifacts, generated on import, and the CI import step
+    regenerates them. The 88 that appeared in the worktree were left
+    untracked on purpose.
+
+## ACCEPTED
+
+### A-01 — the historical NC matrix count differs from the published number
+
+    The matrix declares 42 named controls and a run prints 44 result
+    lines (the RNG pair is reported under two names). Measured against
+    the base tree and the candidate tree with the SAME twelve scripts:
+    the declared set is identical, nothing was lost, and the
+    candidate has 44 RED with 0 SKIP and 0 INVALID. The base had
+    three SKIPs because of drifted anchors, which the candidate
+    resolves. This is an improvement, not a loss.
+
+### A-02 — the A-H differential compares against a pinned baseline, not HEAD^
+
+    A pinned baseline is stable: every release compares against the
+    same known-good reference instead of drifting with the branch.
+    The cost is that the baseline must be refreshed deliberately when
+    the ECS semantics change. The release runbook names that step.
+
+### A-03 — the legacy and the ECS combat systems both carry Shield Block
+
+    The legacy view has its own id ("shield_block_legacy") and its own
+    trigger name ("unit_attacked"); the ECS path resolves
+    "shield_block" through the unit's reaction_ids and uses the
+    Phase-3 event types. The two systems therefore cannot select the
+    same reaction object, and neither path can apply the effect
+    twice. The legacy "unit_move_start" AoO trigger was never polled
+    by any legacy code, so the AoO was already dead on master: the
+    Phase-3 resource is not a regression but the removal of a zombie
+    registration.
+
+### A-04 — the crash recovery, the exactly-once terminal awards and the atomic MetaProfile are still unproven
+
+    They belong to the A0 Persistence Transaction Gauntlet, which this
+    gauntlet does not start. If a public release needs them, that is a
+    separate decision with its own gate.
