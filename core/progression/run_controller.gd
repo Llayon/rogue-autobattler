@@ -1123,15 +1123,19 @@ func build_checkpoint_dto() -> Dictionary:
 
 
 func save_now() -> bool:
-	# The boolean contract is kept for the existing callers: a COMPLETE
-	# success. A partial success (the checkpoint landed, the meta
-	# pointer did not) is NOT a complete success, so it is reported as
-	# false -- and the checkpoint itself stays valid on the disk.
+	# R-06: the boolean keeps its HISTORICAL meaning -- true when the
+	# CHECKPOINT landed. A partial success (the checkpoint landed, the
+	# meta pointer did not) is still a saved run: the checkpoint is
+	# valid on the disk, and the caller must not discard it.
 	#
-	# H-08: the outcome latch is bound to the CHECKPOINT, not to this
-	# boolean, so a meta failure can never make the outcome
+	# The COMPLETE and the PARTIAL success are distinguished by
+	# `save_now_report()`, which is the structured result. The
+	# partial failure is also logged there.
+	#
+	# H-08: the outcome latch is bound to the CHECKPOINT commit, not
+	# to this boolean, so a meta failure can never make the outcome
 	# reapplicable. See `_write_outcome`.
-	return save_now_report().is_complete()
+	return bool(save_now_report().checkpoint_committed)
 
 
 ## The structured result of a checkpoint attempt.

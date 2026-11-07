@@ -133,7 +133,7 @@ func _test_B_a_checkpoint_failure_is_not_a_persisted_checkpoint() -> void:
 
 
 ## C. A checkpoint that committed with a meta failure is a PARTIAL
-## success.
+## success -- and the public boolean keeps its HISTORICAL meaning.
 func _test_C_a_meta_failure_is_a_partial_success() -> void:
 	var ctrl: Node = await _make_controller(670503, true)
 	ctrl.meta_writer.fail = true
@@ -153,6 +153,13 @@ func _test_C_a_meta_failure_is_a_partial_success() -> void:
 	var loaded: RefCounted = reader.load_run(670503)
 	_assert(loaded != null and loaded.is_ok(),
 		"the checkpoint is valid after the meta failure")
+	# R-06: the public boolean keeps its HISTORICAL meaning -- it is
+	# true when the CHECKPOINT landed, even on a partial success. A
+	# caller treating false as "nothing was persisted" would wrongly
+	# discard a valid on-disk checkpoint.
+	var saved_ok: bool = ctrl.save_now()
+	_assert(saved_ok,
+		"save_now() is true when the checkpoint landed, even on a partial success")
 
 
 ## D. A meta failure emits no false run_saved.
