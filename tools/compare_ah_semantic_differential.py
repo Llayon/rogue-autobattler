@@ -205,11 +205,11 @@ def compare(base_path, cand_path):
     try:
         bases = load_fixtures(base_path)
     except FixtureError as error:
-        return ["the baseline fixtures are damaged: %s" % error], notes
+        return ["the baseline fixtures are damaged: %s" % error], notes, 0
     try:
         cands = load_fixtures(cand_path)
     except FixtureError as error:
-        return ["the candidate fixtures are damaged: %s" % error], notes
+        return ["the candidate fixtures are damaged: %s" % error], notes, 0
     # CI-02: the set must be EXACTLY the canonical A-H, once each, on
     # BOTH sides. A missing fixture, an unknown fixture or a duplicated
     # name blocks the PASS -- the baseline compared only the COUNT, so
@@ -279,7 +279,17 @@ def compare(base_path, cand_path):
                 if x.get(f) != y.get(f):
                     failures.append("%s event %d %s: base=%r cand=%r"
                                     % (name, i, f, x.get(f), y.get(f)))
-    return failures, notes
+    # The number of PAIRS the comparison actually walked. It is
+    # REPORTED, not re-derived: a re-read of the file could report a
+    # count that was never compared.
+    compared = 0
+    for b in bases:
+        name = b.get("name")
+        for c in cands:
+            if c.get("name") == name:
+                compared += 1
+                break
+    return failures, notes, compared
 
 
 def fmt(e):
@@ -294,7 +304,7 @@ if __name__ == "__main__":
     if len(sys.argv) < 3:
         print("usage: compare_ah_semantic_differential.py BASELINE.jsonl CANDIDATE.jsonl")
         sys.exit(2)
-    failures, notes = compare(sys.argv[1], sys.argv[2])
+    failures, notes, compared = compare(sys.argv[1], sys.argv[2])
     for n in notes:
         print("  NOTE " + n)
     if failures:
@@ -304,11 +314,9 @@ if __name__ == "__main__":
         sys.exit(1)
     # CI-02: the message reports the REAL number of compared
     # fixtures, not a fixed number.
-    compared = len(json.loads("[]"))
-    try:
-        compared = len(load_fixtures(sys.argv[1]))
-    except FixtureError:
-        compared = 0
+    # The number of PAIRS the comparison walked, as reported by
+    # compare() itself: a re-read of the file could report a count
+    # that was never compared.
     print("A-H SEMANTIC DIFFERENTIAL: PASS "
           "(%d fixtures, legacy-projected traces + world + rng + "
           "emitter + result all identical)" % compared)

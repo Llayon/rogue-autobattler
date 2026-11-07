@@ -56,14 +56,20 @@ def run_probe(godot, root):
 
 
 def copy_tree(source, target):
-    """Copies a project tree WITHOUT the .git directory.
+    """Copies a project tree WITHOUT the .git directory and the cache.
 
     The baseline worktree must never be written to, so the probe runs
-    in an isolated copy. The `.godot` cache is copied as well: it is
-    the import registry the probe needs.
+    in an isolated copy.
+
+    The `.godot` cache is NOT copied: it is the import registry, it is
+    by far the largest part of the tree, and copying it made every run
+    cost a full multi-hundred-megabyte copy. The cache is BUILT in the
+    copy by `import_cache()` when it is missing, which is the same
+    path a fresh checkout takes.
     """
     shutil.copytree(source, target, symlinks=True,
-                    ignore=shutil.ignore_patterns(".git", "__pycache__"))
+                    ignore=shutil.ignore_patterns(".git", "__pycache__",
+                                                 ".godot"))
 
 
 def fixture_ids(path):

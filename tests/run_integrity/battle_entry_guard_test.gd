@@ -59,6 +59,8 @@ func _initialize() -> void:
 	await _test_F_a_selected_combat_starts_the_battle()
 	await _test_G_a_selected_elite_or_boss_starts_the_battle()
 	await _test_H_a_continue_after_a_selection_starts_the_battle()
+	await _test_I_a_post_defeat_retry_starts_the_battle()
+	await _test_I2_a_post_defeat_retry_of_a_combat_node_starts_the_battle()
 	await _test_I_the_refusal_changes_nothing()
 	print("")
 	print("=== STAGE ENTRY: THE BATTLE ENTRY IS GUARDED: %d pass / %d fail ==="
@@ -226,6 +228,84 @@ func _test_H_a_continue_after_a_selection_starts_the_battle() -> void:
 		"the resumed run keeps the selected combat")
 	var started: bool = other.start_battle()
 	_assert(started, "the Continue after a selection starts the battle")
+
+
+## I2. The post-defeat retry starts the battle.
+##
+## The loss branch of `_on_battle_ended()` grows the round and returns
+## the run to the PREP phase, but it does NOT change the current
+## encounter: the DEFEATED combat node is still current. That is the
+## one legal PREP origin whose encounter id is stale by construction,
+## and the player must be able to fight it again while lives remain.
+func _test_I_a_post_defeat_retry_starts_the_battle() -> void:
+	var ctrl: Node = await _make_controller(670120)
+	# The first battle of the run: the initial preparation.
+	_assert(ctrl.start_battle(), "the first battle starts")
+	await process_frame
+	_assert(ctrl.runner != null, "the battle has a runner")
+	# The player LOSES, and a life remains.
+	ctrl.state.lives = 3
+	ctrl.runner.state.winner_team = 1
+	ctrl.runner.state.phase = 6
+	ctrl._on_battle_ended()
+	await process_frame
+	_assert(int(ctrl.phase) == 0,
+		"the run is back in PREP after the defeat (the phase is %d)"
+			% int(ctrl.phase))
+	_assert(int(ctrl.state.losses) == 1, "the defeat was counted")
+	_assert(int(ctrl.state.lives) == 2, "a life remains")
+	# The retry is a LEGAL battle: the run is in PREP, the merchant
+	# flag is clear and the current encounter is the initial battle.
+	var before: Dictionary = _snapshot(ctrl)
+	var started: bool = ctrl.start_battle()
+	_assert(started, "the post-defeat retry starts the battle")
+	await process_frame
+	_assert(int(ctrl.phase) == 1,
+		"the phase is BATTLE after the retry (the phase is %d)"
+			% int(ctrl.phase))
+	_assert(ctrl.runner != null, "the retry has a runner")
+	# The retry did not repeat the outcome.
+	_assert(int(ctrl.state.wins) == int(before["wins"]),
+		"the retry did not count a win")
+	_assert(int(ctrl.state.losses) == int(before["losses"]),
+		"the retry did not count a defeat")
+
+
+## I3. The post-defeat retry of a DEFEATED COMBAT node is legal.
+##
+## The same flow, but with a real combat encounter: the defeated node
+## is still current, and it is a combat node, so the retry is legal.
+func _test_I2_a_post_defeat_retry_of_a_combat_node_starts_the_battle() -> void:
+	var ctrl: Node = await _make_controller(670121)
+	ctrl._enter_map()
+	await process_frame
+	var node_id: int = _first_combat_node(ctrl)
+	_assert(node_id >= 0, "the map offers a combat node")
+	if node_id < 0:
+		return
+	ctrl._on_node_selected(node_id)
+	await process_frame
+	_assert(ctrl.start_battle(), "the combat battle starts")
+	await process_frame
+	_assert(ctrl.runner != null, "the battle has a runner")
+	# The player LOSES the combat, and a life remains.
+	ctrl.state.lives = 3
+	ctrl.runner.state.winner_team = 1
+	ctrl.runner.state.phase = 6
+	ctrl._on_battle_ended()
+	await process_frame
+	_assert(int(ctrl.phase) == 0,
+		"the run is back in PREP after the defeat (the phase is %d)"
+			% int(ctrl.phase))
+	_assert(int(ctrl.state.current_encounter_id) == node_id,
+		"the defeated node is still the current encounter")
+	# The retry of the defeated node is LEGAL.
+	var started: bool = ctrl.start_battle()
+	_assert(started, "the retry of the defeated node starts the battle")
+	await process_frame
+	_assert(int(ctrl.phase) == 1,
+		"the phase is BATTLE after the retry (the phase is %d)"
+			% int(ctrl.phase))
 
 
 ## I. The refusal changes NOTHING: the state, the runtime, the RNG and

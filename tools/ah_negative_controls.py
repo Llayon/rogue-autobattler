@@ -24,6 +24,7 @@ Usage:
 import io
 import os
 import subprocess
+import tempfile
 import sys
 
 REPO = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)),
@@ -91,15 +92,44 @@ MUTATIONS = [
 ]
 
 
+
+def write_atomic(path, text):
+    """Writes the file ATOMICALLY.
+
+    A reader -- another process, a concurrent test run, a git status
+    -- never sees a half-written file: the content goes to a temp file
+    in the same directory and is then swapped in.
+    """
+    directory = os.path.dirname(os.path.abspath(path))
+    handle, tmp = tempfile.mkstemp(dir=directory, prefix=".nc_", suffix=".tmp")
+    try:
+        with os.fdopen(handle, "w", encoding="utf-8", newline="") as f:
+            f.write(text)
+        os.replace(tmp, path)
+    except BaseException:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+        raise
+
+
+def restore_verified(path, original, label):
+    """Restores the file and VERIFIES the bytes.
+
+    A restore that silently does not land is worse than a failed
+    control: the next run would mutate a file that is already
+    mutated, and the control would measure the wrong thing.
+    """
+    write_atomic(path, original)
+    with io.open(path, encoding="utf-8", newline="") as f:
+        landed = f.read()
+    if landed != original:
+        raise SystemExit("%s: the restore of %s did NOT land"
+                         % (label, os.path.basename(path)))
+
 def read(path):
     with io.open(path, encoding="utf-8", newline="") as f:
         raw = f.read()
     return raw, raw.replace("\r\n", "\n")
-
-
-def write(path, text):
-    with io.open(path, "w", encoding="utf-8", newline="") as f:
-        f.write(text)
 
 
 def run_selftest():
@@ -141,8 +171,8 @@ def main():
             results.append((name, "SKIP", 0, 0))
             continue
 
-        write(target, mutated.replace("\n", "\r\n")
-              if "\r\n" in original else mutated)
+        write_atomic(target, mutated.replace("\n", "\r\n")
+                     if "\r\n" in original else mutated)
         try:
             # The mutated file must still PARSE: a parse error is an
             # INVALID verdict, not a catch.
@@ -156,7 +186,7 @@ def main():
                 verdict = "MISSED"
             results.append((name, verdict, rc, failed))
         finally:
-            write(target, original)
+            restore_verified(target, original, name)
 
     rc, failed, out = run_selftest()
     if rc != 0 or failed != 0:
