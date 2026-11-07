@@ -35,14 +35,10 @@ SELFTEST = os.path.join(REPO, "tests", "ci", "ah_differential_test.py")
 MUTATIONS = [
     ("NC-AH-A", "the baseline return code is ignored",
      RUNNER,
-     [("""    if rc_b != 0:
-        print("A-H SEMANTIC DIFFERENTIAL: FAIL — the baseline probe exited "
-              "rc=%d" % rc_b)
-        return 1
-""", """    if false:
-        print("A-H SEMANTIC DIFFERENTIAL: FAIL — the baseline probe exited "
-              "rc=%d" % rc_b)
-        return 1
+     [("""    if rc_baseline != 0:
+        return ("the baseline probe exited rc=%d" % int(rc_baseline))
+""", """    if False:
+        return ("the baseline probe exited rc=%d" % int(rc_baseline))
 """)]),
 
     ("NC-AH-B", "a missing fixture is accepted",
@@ -87,14 +83,10 @@ MUTATIONS = [
 
     ("NC-AH-E", "a failed import is ignored",
      RUNNER,
-     [("""    if proc.returncode != 0:
-        print("A-H SEMANTIC DIFFERENTIAL: FAIL — the Godot editor import "
-              "failed in %s (rc=%d)" % (root, proc.returncode))
-        return False
-""", """    if false:
-        print("A-H SEMANTIC DIFFERENTIAL: FAIL — the Godot editor import "
-              "failed in %s (rc=%d)" % (root, proc.returncode))
-        return False
+     [("""    if int(returncode) != 0:
+        return ("the Godot editor import failed (rc=%d)" % int(returncode))
+""", """    if False:
+        return ("the Godot editor import failed (rc=%d)" % int(returncode))
 """)]),
 ]
 

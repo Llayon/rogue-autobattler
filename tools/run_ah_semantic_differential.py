@@ -82,6 +82,34 @@ def fixture_ids(path):
     return ids
 
 
+def probe_failure_reason(rc_baseline, rc_candidate):
+    """The reason the differential must FAIL, or "" when it may pass.
+
+    A pure decision, so the contract can be tested BEHAVIOURALLY:
+    a probe that exits NON-ZERO blocks the PASS even when it printed
+    valid snapshots.
+
+    Returns a human-readable reason, or an empty string when neither
+    probe failed.
+    """
+    if rc_baseline != 0:
+        return ("the baseline probe exited rc=%d" % int(rc_baseline))
+    if rc_candidate != 0:
+        return ("the candidate probe exited rc=%d" % int(rc_candidate))
+    return ""
+
+
+def import_failure_reason(returncode):
+    """The reason the import step must FAIL, or "" when it may pass.
+
+    A pure decision, so the contract can be tested behaviourally: a
+    failed Godot editor import is a FAILURE, not a warning.
+    """
+    if int(returncode) != 0:
+        return ("the Godot editor import failed (rc=%d)" % int(returncode))
+    return ""
+
+
 def import_cache(godot, root):
     """Builds the project cache when it is missing.
 
@@ -101,9 +129,10 @@ def import_cache(godot, root):
     proc = subprocess.run([godot, "--headless", "--path", root,
                            "--editor", "--quit"],
                           capture_output=True, text=True, timeout=1800)
-    if proc.returncode != 0:
-        print("A-H SEMANTIC DIFFERENTIAL: FAIL — the Godot editor import "
-              "failed in %s (rc=%d)" % (root, proc.returncode))
+    reason = import_failure_reason(proc.returncode)
+    if reason != "":
+        print("A-H SEMANTIC DIFFERENTIAL: FAIL — %s in %s"
+              % (reason, root))
         return False
     return True
 
@@ -138,13 +167,9 @@ def run_differential(args, baseline, candidate):
     # CI-02: a probe that exits NON-ZERO blocks the PASS, even when it
     # printed valid snapshots. The baseline printed the return codes
     # and then ignored them.
-    if rc_b != 0:
-        print("A-H SEMANTIC DIFFERENTIAL: FAIL — the baseline probe exited "
-              "rc=%d" % rc_b)
-        return 1
-    if rc_c != 0:
-        print("A-H SEMANTIC DIFFERENTIAL: FAIL — the candidate probe exited "
-              "rc=%d" % rc_c)
+    reason = probe_failure_reason(rc_b, rc_c)
+    if reason != "":
+        print("A-H SEMANTIC DIFFERENTIAL: FAIL — %s" % reason)
         return 1
 
     comparator = os.path.join(candidate, COMPARATOR_REL)

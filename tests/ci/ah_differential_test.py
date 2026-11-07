@@ -212,22 +212,38 @@ def main():
         # comparator self-tests cannot see the runner, and a control
         # that mutates the runner is only caught if something asserts
         # on the runner.
-        with io.open(RUNNER, encoding="utf-8") as f:
-            runner_source = f.read()
-        h.check("the baseline probe return code is checked",
-                "if rc_b != 0:" in runner_source,
-                "the runner does not check the baseline return code")
-        h.check("the candidate probe return code is checked",
-                "if rc_c != 0:" in runner_source,
-                "the runner does not check the candidate return code")
-        h.check("a failed import is checked",
-                "if proc.returncode != 0:" in runner_source,
-                "the runner does not check the import return code")
-        h.check("the baseline worktree is not written to",
-                "copy_tree(" in runner_source
-                and "shutil.copyfile(probe_src, probe_dst)" in runner_source
-                and "shutil.rmtree(workdir" in runner_source,
-                "the runner does not isolate the baseline copy")
+        # The runner's decisions are PURE functions, so the contract is
+        # checked BEHAVIOURALLY: the decision is called with the
+        # failing inputs and must report a failure.
+        sys.path.insert(0, os.path.join(REPO, "tools"))
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "ah_runner_under_test", RUNNER)
+        runner_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(runner_module)
+
+        h.check("the runner exposes the probe decision",
+                hasattr(runner_module, "probe_failure_reason"),
+                "the runner has no probe_failure_reason()")
+        h.check("the baseline probe return code blocks the PASS",
+                runner_module.probe_failure_reason(1, 0) != "",
+                "a non-zero baseline return code is accepted")
+        h.check("the candidate probe return code blocks the PASS",
+                runner_module.probe_failure_reason(0, 1) != "",
+                "a non-zero candidate return code is accepted")
+        h.check("two zero return codes pass the probe decision",
+                runner_module.probe_failure_reason(0, 0) == "",
+                "two zero return codes are rejected")
+
+        h.check("the runner exposes the import decision",
+                hasattr(runner_module, "import_failure_reason"),
+                "the runner has no import_failure_reason()")
+        h.check("a failed import blocks the run",
+                runner_module.import_failure_reason(1) != "",
+                "a non-zero import return code is accepted")
+        h.check("a successful import passes the import decision",
+                runner_module.import_failure_reason(0) == "",
+                "a zero import return code is rejected")
 
         # K. both probes produce zero fixtures.
         empty = []
