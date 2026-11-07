@@ -101,10 +101,15 @@ def release_decision(workflow_text, test_text, jobs, artifact_ok,
         return "DENY", "the release does not call the test workflow"
 
     # --- the required jobs must exist in the CALLED workflow ---------
+    # A job that was renamed or disabled with `if: false` does NOT
+    # count: the release must not publish while that job never ran.
     for name in REQUIRED_JOBS:
         if not re.search(r"^  %s:" % re.escape(name), test_text,
                          re.MULTILINE):
             return "DENY", "the test workflow carries no %s job" % name
+        block = _needs_block(test_text, name)
+        if "if: false" in block:
+            return "DENY", "the %s job never runs" % name
 
     # --- the deploy must DEPEND on the required tests ----------------
     deploy_block = _needs_block(workflow_text, "deploy")
@@ -177,15 +182,17 @@ def mutate_release(text, old, new):
 MUTATIONS = [
     ("NC-REL-01",
      "remove the dependency on battle-ecs",
-     "release.yml",
-     [("    needs: [required-tests, web-build]",
-       "    needs: [web-build]")]),
+     "test.yml",
+     [("  battle-ecs:\n    runs-on: ubuntu-latest",
+       "  battle-ecs-disabled:\n    runs-on: ubuntu-latest\n"
+       "    if: false")]),
 
     ("NC-REL-02",
      "remove the dependency on save-battle-migration",
-     "release.yml",
-     [("    needs: [required-tests, web-build]",
-       "    needs: [web-build]")]),
+     "test.yml",
+     [("  save-battle-migration:\n    runs-on: ubuntu-latest",
+       "  save-battle-migration-disabled:\n    runs-on: ubuntu-latest\n"
+       "    if: false")]),
 
     ("NC-REL-03",
      "allow a failed or skipped required job",
@@ -245,11 +252,16 @@ def run_control(name, description, target, edits):
         copy_validator = os.path.join(tmp, "validate_web_artifact.py")
         shutil.copyfile(VALIDATOR, copy_validator)
 
-        path = os.path.join(tmp, os.path.basename(target))
+        # The workflows are copied into tmp/workflows/, so a mutation
+        # of test.yml or release.yml is applied THERE.
         if target == "release.yml":
             path = os.path.join(copy_wf, "release.yml")
+        elif target == "test.yml":
+            path = os.path.join(copy_wf, "test.yml")
         elif target == "tools/validate_web_artifact.py":
             path = copy_validator
+        else:
+            path = os.path.join(tmp, os.path.basename(target))
 
         with io.open(path, encoding="utf-8") as f:
             text = f.read()
@@ -275,21 +287,22 @@ def run_control(name, description, target, edits):
         # ALLOW it: if it still DENIES, the mutation changed nothing
         # and the control proves nothing.
         if name == "NC-REL-01":
-            # The dependency on the required tests is gone, so a RED
-            # battle-ecs no longer blocks the publication.
+            # The battle-ecs job no longer runs, so its RED result can
+            # no longer block the publication.
             verdict, reason = workflow_verdict(
                 release_text, test_text,
                 jobs={"save-battle-migration": "success",
-                      "battle-ecs": "failure"},
+                      "battle-ecs": "skipped"},
                 artifact_ok=True, built_sha="a", deployed_sha="a",
                 branch_tip="a", manual=False)
             if verdict != "ALLOW":
                 failures.append("the mutation did not open the gate: %s"
                                 % reason)
         elif name == "NC-REL-02":
+            # The save-battle-migration job no longer runs.
             verdict, reason = workflow_verdict(
                 release_text, test_text,
-                jobs={"save-battle-migration": "failure",
+                jobs={"save-battle-migration": "skipped",
                       "battle-ecs": "success"},
                 artifact_ok=True, built_sha="a", deployed_sha="a",
                 branch_tip="a", manual=False)

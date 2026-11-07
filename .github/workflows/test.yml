@@ -3,6 +3,18 @@ name: Save and Battle Migration
 on:
   push:
   pull_request:
+  # R3: the release workflow CALLS this one, so the deployment depends
+  # on the REAL test jobs of the SAME commit SHA. A reusable workflow
+  # runs inside the calling workflow's run, so `needs:` in the release
+  # workflow is a genuine dependency -- not a race between two
+  # independent workflows that happen to watch the same branch.
+  workflow_call:
+
+# R3.5: the test jobs never need to write to the repository, to the
+# Pages, or to mint an OIDC token. The deploy rights live ONLY in the
+# deploy job of the release workflow.
+permissions:
+  contents: read
 
 jobs:
   save-battle-migration:
