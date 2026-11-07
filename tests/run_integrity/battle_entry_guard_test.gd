@@ -61,6 +61,8 @@ func _initialize() -> void:
 	await _test_H_a_continue_after_a_selection_starts_the_battle()
 	await _test_I_a_post_defeat_retry_starts_the_battle()
 	await _test_I2_a_post_defeat_retry_of_a_combat_node_starts_the_battle()
+	await _test_J_a_refusal_keeps_the_reaction_registry()
+	await _test_K_a_refusal_keeps_the_checkpoint_file()
 	await _test_I_the_refusal_changes_nothing()
 	print("")
 	print("=== STAGE ENTRY: THE BATTLE ENTRY IS GUARDED: %d pass / %d fail ==="
@@ -316,6 +318,110 @@ func _test_I2_a_post_defeat_retry_of_a_combat_node_starts_the_battle() -> void:
 	_assert(int(ctrl.phase) == 1,
 		"the phase is BATTLE after the retry (the phase is %d)"
 			% int(ctrl.phase))
+
+
+## J. A refusal does not clear the reaction registry.
+##
+## `start_battle()` clears the legacy reaction registry when it starts.
+## A REFUSED call must not touch it: the registry is the shared legacy
+## runtime, and a refusal that cleared it would destroy the
+## registrations of an unrelated battle.
+func _test_J_a_refusal_keeps_the_reaction_registry() -> void:
+	# The PALADIN owns the legacy reaction, so a battle with one on
+	# the board registers it through the production path. The
+	# registry must hold a REAL registration: an empty registry would
+	# make this case vacuous, because clearing an empty registry
+	# changes nothing.
+	var ctrl: Node = await _make_controller(670130)
+	ctrl.state.create_unit(&"paladin", 100, 0)
+	_reset_reaction_registry()
+	_assert(ctrl.start_battle(), "the battle with a paladin starts")
+	await process_frame
+	var registry_before: String = _reaction_registry_state()
+	_assert(registry_before.find("paladin") >= 0,
+		"the paladin registered a legacy reaction (the registry is %s)"
+			% registry_before)
+	if registry_before.find("paladin") < 0:
+		return
+	# The run goes back to the MAP, and the battle is refused.
+	ctrl._set_phase(ctrl.Phase.MAP)
+	var refused: bool = ctrl.start_battle()
+	_assert(not refused, "the MAP battle is refused")
+	_assert(_reaction_registry_state() == registry_before,
+		"the refusal did not clear the reaction registry")
+	_assert(_reaction_registry_state().find("paladin") >= 0,
+		"the paladin is still registered after the refusal")
+
+
+## K. A refusal does not change the checkpoint on the disk.
+##
+## The save count proves that no checkpoint was COMMITTED. The bytes
+## on the disk prove that the existing checkpoint was not rewritten
+## either.
+func _test_K_a_refusal_keeps_the_checkpoint_file() -> void:
+	var ctrl: Node = await _make_controller(670131)
+	ctrl._enter_map()
+	await process_frame
+	# The run has a checkpoint of its own.
+	ctrl.save_now()
+	await process_frame
+	var before: String = _checkpoint_bytes(ctrl)
+	_assert(before != "", "the checkpoint is on the disk")
+	if before == "":
+		return
+	var count_before: int = ctrl.save_repository.get_save_count()
+	var refused: bool = ctrl.start_battle()
+	_assert(not refused, "the MAP battle is refused")
+	_assert(int(ctrl.save_repository.get_save_count()) == count_before,
+		"the refusal wrote no checkpoint")
+	_assert(_checkpoint_bytes(ctrl) == before,
+		"the refusal did not rewrite the checkpoint file")
+
+
+## The state of the legacy reaction registry, or "" when the autoload
+## is not reachable in this headless tree.
+func _reaction_registry_state() -> String:
+	var tree: Object = Engine.get_main_loop()
+	if tree == null or not ("root" in tree):
+		return ""
+	var node: Object = tree.root.get_node_or_null("ReactionSystem")
+	if node == null:
+		return ""
+	var inner: Object = node.get("_inner")
+	if inner == null:
+		return ""
+	return str(inner.get("_reactions"))
+
+
+## Makes the reaction registry reachable and EMPTY.
+##
+## The autoload's own _ready() resolves /root/EventBus with an
+## absolute path, which fails outside the active scene tree, so the
+## inner system is created here directly -- the same wiring the
+## legacy compatibility suite uses.
+func _reset_reaction_registry() -> void:
+	var tree: Object = Engine.get_main_loop()
+	if tree == null or not ("root" in tree):
+		return
+	var node: Object = tree.root.get_node_or_null("ReactionSystem")
+	if node == null:
+		return
+	if node.get("_inner") == null:
+		var inner_script: Resource = load(
+			"res://core/reactions/reaction_system.gd")
+		node.set("_inner", inner_script.new())
+	var inner: Object = node.get("_inner")
+	if inner != null:
+		inner.get("_reactions").clear()
+
+
+## The bytes of the run file of the controller, or "" when there is no
+## file.
+func _checkpoint_bytes(ctrl: Node) -> String:
+	var reader: Object = ctrl.save_repository.load_run(int(ctrl.state.seed))
+	if reader == null or not bool(reader.is_ok()):
+		return ""
+	return str(reader.data)
 
 
 ## I. The refusal changes NOTHING: the state, the runtime, the RNG and
