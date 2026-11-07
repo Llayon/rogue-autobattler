@@ -316,7 +316,77 @@ baseline is never written to.
 
 ## M. INDEPENDENT CRITIC FINDINGS
 
-See the final report section below.
+An independent critic read the whole diff and the new production code,
+and hunted the twenty listed classes of defect. Its verdict was
+**HOLD** — with **no HIGH** finding, two MAJOR and three MINOR.
+
+### MAJOR-1 — the negative-control harness was not crash-safe
+
+The harness wrote a MUTATED tracked production file in place and
+restored it in a `finally:` block. A kill between the write and the
+restore — a CI job timeout, a Ctrl-C, a reboot — left the tracked file
+mutated.
+
+**Closed.** The restore is now ATOMIC (a temp file plus `os.replace`,
+so a reader never sees a half-written file) and VERIFIED (the bytes
+are compared with the original, and a mismatch is a loud failure). The
+three harnesses share the fix.
+
+### MAJOR-2 — the post-defeat retry was not covered
+
+The post-defeat retry is the ONE legal PREP origin whose encounter id
+is stale BY CONSTRUCTION: the loss branch of `_on_battle_ended()`
+grows the round and returns the run to PREP, but it does NOT change
+`current_encounter_id`, so the DEFEATED combat node is still current.
+The guard accepts it, but no test exercised it. The critic was right:
+a future change that required "not yet completed" would have broken
+the retry with nothing catching it.
+
+**Closed.** Two cases now drive a REAL loss through the production
+path — the initial battle and a real combat node. Both assert that the
+run returns to PREP, that the defeated node is still current, that the
+retry starts the battle, that the phase becomes BATTLE and that the
+outcome is not repeated.
+
+### MINOR-1 — a stale comment
+
+The A–H self-test comment still claimed a source-text inspection while
+the code checked the behaviour. **Closed.**
+
+### MINOR-2 — the PASS count was re-derived
+
+The comparator re-read the baseline file to get the fixture count. If
+the fixture-set check were ever weakened, the message could report a
+count that was never compared. **Closed:** `compare()` now REPORTS the
+number of PAIRS it walked.
+
+### MINOR-3 — the copy took the cache
+
+The baseline copy took the `.godot` cache with it — the largest part of
+the tree. **Closed:** the cache is built in the copy by `import_cache()`,
+the same path a fresh checkout takes.
+
+### What the critic confirmed clean
+
+The critic verified the twenty hunt items and named the verified
+evidence for each. The most important ones:
+
+- the production diff of `run_controller.gd` is 55 lines, ALL of it the
+  two new helpers plus the guard call — everything after the guard is
+  byte-identical to the base, so no battle semantics changed;
+- the guard is the FIRST statement of `start_battle()`, before the
+  context creation, the reaction registry clearing, the enemy wave and
+  the participant bridge — so a refusal consumes no RNG and writes no
+  checkpoint;
+- every `_assert(...)` of the eight migrated suites survives: the
+  migrations are setup-only, and several cases were STRENGTHENED (the
+  old "fight the first reachable node" fallback could pick a SERVICE
+  node; the new walk cannot);
+- all three control suites were re-run in an ISOLATED copy — 3/3, 5/5
+  and 5/5 RED, restore GREEN;
+- the "unmigrated" suites the critic flagged were checked directly:
+  their calls are legal, because a bare controller is in the INITIAL
+  preparation (`phase = PREP`, `current_encounter_id = -1`).
 
 ---
 
@@ -361,6 +431,8 @@ e9d4e4e  the published Run Integrity hardening (the base)
   +-- a193cbd  test(ah): check the runner contract behaviourally
   +-- e2fddb7  chore(ci): run the new contract checks on the runner and the guard
   +-- f32934a  docs(gauntlet): write the CI and runflow entry report
+  +-- bbcb827  docs(gauntlet): record the measured regression results
+  +-- 3481725  fix(gauntlet): close the critic findings
 ```
 
 Each RED/FIX pair is two commits: the characterisation, then the fix.
@@ -385,4 +457,36 @@ The production change of the battle entry is a SINGLE commit.
 
 ## R. FINAL STATUS
 
-See the final report section below.
+```
+CI INTEGRITY + RUNFLOW ENTRY SAFETY
+= READY
+```
+
+The independent critic held the branch for two MAJOR findings. Both are
+closed and verified: the harness restore is atomic and verified, and
+the post-defeat retry — the one legal PREP origin whose encounter id is
+stale by construction — now has two cases that drive a real loss
+through the production path.
+
+There is no open HIGH or MAJOR finding. The three MINOR findings are
+closed as well.
+
+**The branch is NOT published.** It is a local branch over the exact
+published SHA, the working tree is clean, and nothing was pushed, force
+pushed, rebased or reset.
+
+The A0 Persistence Transaction Gauntlet and the architectural migration
+were NOT started.
+
+What the next stage would still need, and what this series did NOT
+claim:
+
+- the crash and restart recovery of `CHECKPOINT_AND_META`, `TREASURE`
+  and `FINALIZE_RUN`, the atomic MetaProfile and the stale cleanup
+  protection remain unproven — they belong to A0;
+- the battle-entry guard derives the readiness from the CURRENT
+  encounter, so a PREP path the guard does not know would be refused.
+  The four known paths are covered by tests;
+- the CI self-tests of the runner use a FAKE godot, so they prove the
+  LOGIC of the runner, not the interaction with a real Godot binary.
+  The real interaction is covered by the real A–H differential.

@@ -243,6 +243,11 @@ func _test_I_a_post_defeat_retry_starts_the_battle() -> void:
 	_assert(ctrl.start_battle(), "the first battle starts")
 	await process_frame
 	_assert(ctrl.runner != null, "the battle has a runner")
+	if ctrl.runner == null:
+		# The battle did not start: the assertion above has already
+		# failed, and a runner access would raise a SCRIPT ERROR,
+		# which is not a catch.
+		return
 	# The player LOSES, and a life remains.
 	ctrl.state.lives = 3
 	ctrl.runner.state.winner_team = 1
@@ -288,6 +293,11 @@ func _test_I2_a_post_defeat_retry_of_a_combat_node_starts_the_battle() -> void:
 	_assert(ctrl.start_battle(), "the combat battle starts")
 	await process_frame
 	_assert(ctrl.runner != null, "the battle has a runner")
+	if ctrl.runner == null:
+		# The battle did not start: the assertion above has already
+		# failed, and a runner access would raise a SCRIPT ERROR,
+		# which is not a catch.
+		return
 	# The player LOSES the combat, and a life remains.
 	ctrl.state.lives = 3
 	ctrl.runner.state.winner_team = 1

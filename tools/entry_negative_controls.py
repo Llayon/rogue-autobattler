@@ -72,10 +72,8 @@ MUTATIONS = [
 
     ("NC-ENTRY-C", "the battle readiness is consumed incorrectly",
      CONTROLLER, ENTRY_SUITE,
-     [("""	if state == null or state.current_encounter_id == -1:
-		return true
-""", """	if state == null:
-		return true
+     [("""	return _current_encounter_is_combat()
+""", """	return not _current_encounter_is_combat()
 """)]),
 
     ("NC-ENTRY-D", "a repeat combat from a completed encounter is allowed",
