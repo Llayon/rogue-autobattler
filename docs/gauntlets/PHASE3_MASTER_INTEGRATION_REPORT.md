@@ -278,8 +278,51 @@ the browser smoke       16 of 18 PASS, 2 NOT REACHED
 
 ## M. INDEPENDENT CRITIC
 
-    See the final section of this document after the critic's report
-    was processed.
+    An independent critic read the diff, the new workflows and the
+    harness, and hunted the twenty listed classes of defect. It found
+    no HIGH. Two findings were real and are closed.
+
+    ### The concurrency protection was not part of the decision
+
+    The critic observed that the release DECISION FUNCTION never read
+    the CONCURRENCY block: the stale protection had only ONE mechanism
+    in the decision (the tip check), while the workflow has TWO (the
+    per-branch concurrency group and the tip check). The NC-REL-07
+    mutation changed `cancel-in-progress`, so it could not change the
+    verdict through that path -- and a control that cannot fail proves
+    nothing.
+
+    **Closed.** The decision now derives both mechanisms: the group
+    must be per ref, and a cancelled run must never reach the deploy
+    job. The NC-REL-07 mutation removes the tip check as well, so the
+    stale publication is really possible, and the control proves that
+    the mutated gate ALLOWs it while the clean gate denies it.
+
+    ### The reusable trigger had been reverted
+
+    A strict YAML audit -- parse the workflows and assert the trigger
+    block, the needs graph, the permissions and the concurrency block
+    -- found that `test.yml` had lost its `workflow_call` trigger and
+    its `contents: read` permission. The release workflow was calling
+    a workflow that could not be called, and the CI would have failed.
+
+    The cause was a `git reset --hard` from an earlier series, which
+    reverted that change together with the unrelated restoration.
+
+    **Closed.** The trigger and the permission are restored, the YAML
+    is parsed afterwards, and the commit hook had already refused the
+    first attempt at the commit message, which is how the length rule
+    surfaced.
+
+    ### What the critic confirmed clean
+
+    The critic ran the full regression itself: 120 suites, 9174
+    assertions, 0 failures, 0 unparsed, exit 0 -- identical to the
+    measured result of this gauntlet. It also verified the shipping
+    content question directly: the legacy Attack of Opportunity on
+    master carried `trigger = "unit_move_start"`, a name that no
+    legacy code ever polled, and the ECS imports neither the legacy
+    nor the reverse, so the two systems do not depend on each other.
 
 ## N. KNOWN LIMITATIONS
 
@@ -305,11 +348,18 @@ the browser smoke       16 of 18 PASS, 2 NOT REACHED
    +-- 4316a32  the published Phase 3 (274 commits over master)
    |     |
    |     +-- b00cb8b  chore(repo): gate the pages deployment on the
-   |                  required CI
+   |     |            required CI
+   |     +-- d40f7d5  docs(repo): write the integration report and the
+   |     |            release runbook
+   |     +-- 23e96e1  fix(repo): restore the reusable trigger and split
+   |     |            the release controls
+   |     +-- 66515d4  fix(repo): read the concurrency protection in the
+   |                  release decision
 ```
 
-    Exactly ONE new commit on top of the published Phase 3. The
-    candidate is a strict fast-forward of master.
+    Four commits on top of the published Phase 3: the release gate,
+    the documents, and the two fixes the checks and the critic forced.
+    The candidate remains a strict fast-forward of master.
 
 ## P. PUBLICATION INSTRUCTIONS
 
@@ -320,4 +370,24 @@ the browser smoke       16 of 18 PASS, 2 NOT REACHED
 
 ## Q. FINAL VERDICT
 
-    See the final status at the end of this document.
+```
+PHASE 3 -> MASTER INTEGRATION & RELEASE SAFETY
+= READY FOR AUTHORIZED PUBLICATION
+```
+
+    Every gate was executed and none of them was taken on trust. The
+    BLOCKER of the release path is closed and proved by seven negative
+    controls; the HIGH of the A-H baseline is closed and proved by the
+    pinned baseline that HOLDs when it is unavailable; the MEDIUM of
+    the export path is closed and proved by a clean local export; the
+    two findings of the independent critic are closed and proved.
+
+    There is no open HIGH or BLOCKER. The known limitations of section
+    N are real and are NOT hidden: the live Pages deployment, the
+    environment restrictions and the two browser scenarios that were
+    not reached remain unverified, and the crash recovery and the
+    atomic MetaProfile remain the business of A0.
+
+    Nothing was pushed, nothing was merged, nothing was deployed, and
+    master was not touched. The publication is prepared; the DECISION
+    to publish is a separate, authorized act.
