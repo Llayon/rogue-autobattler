@@ -298,6 +298,26 @@ The existing NC-01..NC-43 are preserved. The new controls are listed in
 production decision, runs the suite that must catch it, and restores the
 original file.
 
+### The controls that found their own gaps
+
+Two of the new controls were MISSED at first, and both misses were real
+coverage gaps rather than broken mutations:
+
+- **NC-H09C** (the battle phase guard removed) was MISSED because the
+  battle equip case was a NO-OP, and the no-op guard returns BEFORE the
+  phase guard -- so the case never reached the contract it claimed to
+  cover. The case now makes a REAL mutation.
+- **NC-H11B** (the duplicate ownership accepted silently) was SKIPPED
+  for a long time because its anchor had drifted, and a SKIP is not
+  evidence. Re-aimed, it turned out to be MISSED: TWO units listing
+  the same item is ALSO caught by the mirrored ownership check, so
+  only the shape where the SAME unit lists the SAME item TWICE is
+  caught by the duplicate ownership check alone. The suite gained both
+  cases.
+
+A control that cannot fail is not a control. Both of these were found
+by RUNNING the controls, not by reading them.
+
 A trustworthy RED is: `rc != 0` AND at least one `[FAIL]` AND 0 parse
 errors AND 0 SCRIPT ERROR lines. A mutation that breaks the parsing is
 INVALID, not a catch; a missing anchor is a SKIP, and a SKIP is never
@@ -317,7 +337,7 @@ CI gates     10/10 clean
 lint         0 errors / 5 warnings (baseline)
 parse        0 errors
 ledger       VALID + 7/7 validator controls RED
-NC-H01..NC-H12  13/13 honest RED, 0 SKIP, 0 INVALID
+NC-H01..NC-H12  14/14 honest RED, 0 SKIP, 0 INVALID
 A-H          PASS (8 baseline fixtures rc=0, 8 candidate fixtures rc=0)
 ```
 
@@ -487,7 +507,7 @@ The evidence for the verdict:
 - all 7 findings of the independent critic are closed, including the
   three HIGH ones that the critic proved against the production call
   graph;
-- 13/13 new negative controls are honest RED (no SKIP, no INVALID),
+- 14/14 new negative controls are honest RED (no SKIP, no INVALID),
   and the 7 ledger-validator controls are 7/7 RED;
 - the full standalone regression is GREEN: 118 suites / 9082
   assertions / 0 fail / 0 unparsed, the CI gates are 10/10 clean, and
@@ -513,7 +533,7 @@ assertions              9082 pass / 0 fail
 failures                0
 unparsed                0
 A-H result              PASS (8 + 8 fixtures, both sides rc=0)
-negative controls       13 new (13/13 RED) + 7 ledger controls (7/7 RED)
+negative controls       14 new (14/14 RED) + 7 ledger controls (7/7 RED)
 Godot parse             0 errors / 0 script errors
 CI result               not run: the branch is local and NOTHING WAS PUSHED
 ```
