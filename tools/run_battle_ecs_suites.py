@@ -21,7 +21,18 @@ For every suite the runner requires ALL of:
   - the output contains no `Parse Error`;
   - the output contains no unexpected `ERROR:`;
   - the output contains a parseable summary, so a suite that prints
-    nothing cannot silently count as a pass.
+    nothing cannot silently count as a pass;
+  - the summary reports at least ONE passing assertion, so a suite
+    that asserts nothing cannot silently count as a pass.
+
+And for the run as a whole:
+  - at least one suite was DISCOVERED (an empty discovery is RED);
+  - the `--only` filter matched at least one suite (an unmatched
+    filter is RED);
+  - every discovered suite was EXECUTED and PASSED.
+
+The suite COUNT is free to grow -- there is no hard-coded number --
+but it must never be zero.
 
 Usage:
     python tools/run_battle_ecs_suites.py [--godot PATH] [--root PATH]
@@ -164,9 +175,30 @@ def main(argv):
     args = parser.parse_args(argv[1:])
 
     root = os.path.abspath(args.root)
-    suites = discover(root)
+    discovered = discover(root)
+    suites = discovered
     if args.only:
         suites = [s for s in suites if args.only in s.replace("\\", "/")]
+
+    # CI-01: the runner must PROVE that it ran something. An empty
+    # discovery -- no tests directory, a wrong root, a filter that
+    # matched nothing -- is a RED, not a GREEN: the baseline reported
+    # `RUNNER: GREEN` and exit code 0 for exactly that case.
+    if not suites:
+        print("=== Battle ECS suite runner ===")
+        print("godot    : %s" % args.godot)
+        print("root     : %s" % root)
+        print("discovered: %d suites" % len(discovered))
+        if args.only:
+            print("filter   : %r" % args.only)
+        print("")
+        if args.only:
+            print("RUNNER: RED — the --only filter matched NO suite")
+        else:
+            print("RUNNER: RED — the discovery found NO suite")
+        print("A runner that discovered nothing cannot prove that it ran "
+              "anything.")
+        return 1
 
     print("=== Battle ECS suite runner ===")
     print("godot    : %s" % args.godot)
@@ -215,6 +247,11 @@ def main(argv):
             problems.append("rc=%d" % rc)
         if summary[1] > 0:
             problems.append("%d failed assertions" % summary[1])
+        # CI-01: a suite that asserts NOTHING is not a pass. `0 pass /
+        # 0 fail` means the suite never proved anything -- it is the
+        # shape of a suite that silently lost its body.
+        if summary[0] <= 0:
+            problems.append("the suite asserted nothing (0 passing assertions)")
         for label, line in errors:
             problems.append("%s (%s)" % (label, line[:90]))
         if problems:
@@ -234,6 +271,12 @@ def main(argv):
     print("=== SUMMARY ===")
     print("expected : %d" % len(suites))
     print("executed : %d" % executed)
+    # CI-01: the counts must agree. A runner that executed fewer
+    # suites than it discovered did not run the whole set, and the
+    # difference must be visible.
+    if executed != len(suites):
+        print("MISMATCH : executed %d of %d discovered suites"
+              % (executed, len(suites)))
     print("passed   : %d" % passed)
     print("failed   : %d" % failed)
     print("unparsed : %d" % unparsed)
@@ -245,6 +288,15 @@ def main(argv):
             print("  %s — %s" % (rel, reason))
         print("")
         print("RUNNER: RED")
+        return 1
+    # CI-01: the runner may only report GREEN when it proves the whole
+    # contract. The empty-discovery case is handled before the loop,
+    # and the per-suite checks guarantee a positive assertion count,
+    # so the remaining invariant is the count agreement.
+    if executed != len(suites) or passed != executed:
+        print("")
+        print("RUNNER: RED — the counts do not agree: %d discovered, "
+              "%d executed, %d passed" % (len(suites), executed, passed))
         return 1
     print("")
     print("RUNNER: GREEN")

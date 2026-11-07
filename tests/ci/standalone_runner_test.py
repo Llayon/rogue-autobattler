@@ -202,11 +202,17 @@ def main():
                              "SCRIPT ERROR: something broke\n", 0)])
 
         # 7. several suites: one good, one empty.
+        #
+        # Without --keep-going the runner stops at the FIRST failure --
+        # that is the intended behaviour -- so the check runs with
+        # --keep-going, where BOTH suites are executed and the good
+        # one is still reported as OK.
         code, out = h.case("a good suite beside an empty one is RED",
                            [("tests/battle_ecs/good_test.gd",
                              "=== GOOD: 5 pass / 0 fail ===\n", 0),
                             ("tests/battle_ecs/empty_test.gd",
-                             "=== EMPTY: 0 pass / 0 fail ===\n", 0)])
+                             "=== EMPTY: 0 pass / 0 fail ===\n", 0)],
+                           extra=["--keep-going"])
         h.check("the good suite is still reported",
                 "good_test.gd" in out and "5 pass / 0 fail" in out,
                 "the output was:\n%s" % out[-800:])
