@@ -263,6 +263,35 @@ allocation, no mutation.
 
 ---
 
+## THE INDEPENDENT CRITIC'S FINDINGS
+
+An independent critic reviewed the whole branch read-only and returned
+**HOLD** with three HIGH, two MAJOR and two MINOR findings. Every one
+of them was a real defect or a real contract problem, and every one is
+closed.
+
+| ID | Severity | Problem | Disposition |
+|---|---|---|---|
+| R-01 | HIGH | the outcome retry was UNREACHABLE in production: `tick_battle` has one caller and it is guarded by `phase == BATTLE`, so after the outcome the tick stopped | **FIXED** `0cd33fc` — the retry moved to the controller's own `_process`, which runs in EVERY phase. The regression now drives the real per-frame hook. |
+| R-02 | HIGH | `build()` returned `null` while the return type is non-nullable, and 23 existing callsites dereference it unguarded — the failure mode was a SCRIPT ERROR, not a clean refusal | **FIXED** `014138a` — the refusal is an OBJECT: `BattleSetup.refused()` carries `build_error`, `validate()` reports it, and the refused setup has no units. The 23 callsites stay untouched. |
+| R-03 | HIGH | the ledger validator's negative controls were NOT run by any CI step — a validator that accepted everything would keep CI green forever | **FIXED** `1fcbe11` — the controls run in CI, on temporary copies. |
+| R-04 | MAJOR | `recoverable_checkpoints()` was dead code: the Continue button was gated on the meta pointer alone, so a stale pointer hid a committed run from the player | **FIXED** `f39a742` — the menu resolves the target: the fresh pointer wins, a stale pointer with exactly ONE candidate offers that candidate, and a stale pointer with SEVERAL candidates asks instead of guessing. |
+| R-05 | MAJOR | the H-07 guard uses a whole-graph validator, so a legitimate map with a childless node could turn a victory into a soft lock | **FIXED (disproven)** `6db36ab` — 200 generated maps, 200 seeds, and EVERY one is valid. The risk does not materialise; the suite also proves the guard is reachable. |
+| R-06 | MINOR | the public boolean semantics of `save_now()` changed silently: a partial success reported false, so a caller could discard a valid checkpoint | **FIXED** `9f355d0` — the boolean keeps its historical meaning (true when the checkpoint landed); the structured result distinguishes the complete and the partial success. |
+| R-07 | MINOR | two parsers for one filename format, with different directory sources and divergent sorting | **FIXED** `2cc2576` — one parser, in the repository (which owns the format); the service delegates to it. The dependency points one way: the service already preloads the repository. |
+
+### What the critic verified as clean
+
+Eighteen hunt items were checked against the code, not asserted. The
+notable ones: **no extra gameplay RNG draws** (the `Rng.*` call sites
+in `core/` are 25 at the base and 25 at HEAD), the pre-existing
+RI-01..RI-12 and Inventory tests are 30 of 31 byte-identical with the
+only changed file STRENGTHENED, the v4/v5 migration path is intact,
+the Inventory identity gates are untouched, and the outcome latch is
+bound to the checkpoint commit rather than to the complete success.
+
+---
+
 ## NEGATIVE CONTROL MATRIX
 
 The existing NC-01..NC-43 are preserved. The new controls are added per
@@ -323,7 +352,8 @@ finding as the packages land.
 | H-11 | FIXED | `c204be3` `a74e58d` |
 
 **Progress: 11 of 11 fixed, plus one NEW finding (H-12) that the
-cross-package gauntlet discovered.**
+cross-package gauntlet discovered, plus all seven findings of the
+independent critic (R-01..R-07) closed.**
 
 **Runner after the fixed packages:** 115 suites / 8992 assertions /
 0 fail / 0 unparsed, CI gates 10/10 clean.
