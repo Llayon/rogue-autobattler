@@ -434,9 +434,11 @@ e9d4e4e  the published Run Integrity hardening (the base)
   +-- bbcb827  docs(gauntlet): record the measured regression results
   +-- 3481725  fix(gauntlet): close the critic findings
   +-- 16fc150  fix(gauntlet): make the post-defeat cases degrade gracefully
+  +-- 110b3c7  docs(gauntlet): refresh the final numbers of the report
+  +-- 143dbcc  test(run): prove the refusal leaves the registry and the disk alone
 ```
 
-Sixteen commits over the base. Each RED/FIX pair is two commits: the
+Eighteen commits over the base. Each RED/FIX pair is two commits: the
 characterisation, then the fix. The production change of the battle
 entry is a SINGLE commit.
 
