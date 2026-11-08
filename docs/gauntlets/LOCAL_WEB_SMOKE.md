@@ -165,8 +165,19 @@ the tracked .uid files                  174
 the .gd sources without a tracked .uid    88
   and those 88 are exactly the .gd files Phase 3 added under
   core/battle_ecs/, and the 88 untracked .uid files in the working
-  tree are the SAME files
-uid:// references in the shipping content  none
+  tree are the SAME set -- the comparison is empty in both
+  directions
+```
+
+    Where the uid:// references actually live:
+
+```
+the .uid files themselves          174   (each carries its own uid)
+icon.svg.import                       1   (the importer's identity for
+                                         the icon texture)
+the shipping content (.tres)         0   (every script is referenced
+                                         by PATH, "script =
+                                         ExtResource(...)")
 ```
 
     The clean checkout, which has NO untracked .uid at all, imported
