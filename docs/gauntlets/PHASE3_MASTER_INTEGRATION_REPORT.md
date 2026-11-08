@@ -44,11 +44,11 @@ the tracked tree          clean throughout
 
 ```
 the published Phase 3 over master   273
-the candidate over the Phase 3        22
+the candidate over the Phase 3        25
 --------------------------------------------
-the candidate over master            295   (273 + 22)
+the candidate over master            298   (273 + 25)
 
-ahead / behind            0 / 295
+ahead / behind            0 / 298
 the changed files         297
 the merge commits         1      (the historical one, inside Phase 3)
 the merge-base            02fe83ef == master  -> a strict fast-forward
@@ -62,7 +62,7 @@ the merge-base            02fe83ef == master  -> a strict fast-forward
     said 274 commits and 294 files. Those were the values of the
     FIRST commit of the series (b00cb8b), written when the series
     consisted of one commit and never updated. The final numbers are
-    295 commits and 297 files. The 22 commits of the series are all
+    298 commits and 297 files. The 25 commits of the series are all
     listed in section O; none of them is a filler, and the history
     was NOT touched to make a number look right.
 
@@ -189,8 +189,50 @@ NC-REL-05  allow a manual deployment bypass             RED
 NC-REL-06  accept a missing index.html                  RED
 NC-REL-07  allow a stale deployment to supersede        RED
 NC-REL-08  accept a reference to a missing path         RED
+NC-REL-09  upload the artifact from the wrong job       RED
 the clean gate: ALLOW (every gate passed)
 ```
+
+    What each control actually MEASURES, because the difference
+    matters when the evidence is read:
+
+```
+the GATE controls      NC-REL-01..05, 07, 09
+  they mutate the WORKFLOWS and assert a property of the parsed
+  result: the needs graph, the job conditions, the permissions, the
+  checkout, the SHA comparison, the concurrency group, the artifact
+  flow.
+
+the VALIDATOR controls NC-REL-06 and NC-REL-08
+  they mutate the VALIDATOR and compare two validator invocations.
+  They say nothing about the gate: they say that the artifact gate
+  itself cannot be weakened.
+```
+
+    The controls are STRUCTURAL: the workflows are parsed as data and
+    each control asserts a PROPERTY of the parsed graph. A mutation
+    breaks a property, so the assertion fails, so the control is a
+    real RED. And the CLEAN gate is asserted to satisfy every
+    property, so a control that passes for the wrong reason is
+    visible.
+
+    Two holes that the controls had, found by the independent critic
+    and closed:
+
+      - the "the job never runs" check was a literal substring match
+        on "if: false". A required job that KEPT its name and carried
+        any other guard -- "if: ${{ false }}", "if: ${{
+        !cancelled() }}", "if: github.event_name == 'never'", "if:
+        'false'", "if:false" -- was invisible to every control, so
+        the required job could be disabled while the harness stayed
+        green. The check is now SEMANTIC: a required job must have NO
+        condition at all, because a condition is the only way to take
+        a job out of the run. All six spellings are caught now.
+      - the artifact flow had NO control: the property function that
+        would have caught the removal of the validation step or of the
+        upload was defined and never registered. NC-REL-09 now moves
+        the upload from the build job to the deploy job, which is
+        exactly the defect that was fixed earlier in the series.
 
     The controls evaluate a DECISION FUNCTION whose rules are DERIVED
     FROM THE MUTATED WORKFLOW: the mutation must OPEN the gate for
@@ -279,9 +321,9 @@ the absolute paths    0
 the master SHA        02fe83ef378d13965184c6224a512a91ae6263a1
 the candidate SHA     (the final commit of this series)
 the merge-base        02fe83ef == master -> the fast-forward is eligible
-ahead / behind        0 / 295
+ahead / behind        0 / 298
 the merge commits     1 (the historical one, inside Phase 3)
-the new work          22 commits on top of the published Phase 3
+the new work          25 commits on top of the published Phase 3
 the changed files     11 over the published Phase 3
 ```
 
@@ -303,7 +345,7 @@ the CI gates            10 / 10 clean
 the A-H differential    PASS (8 + 8 fixtures, both rc=0)
 the CI-01 self-tests    13 / 0 failed
 the CI-02 self-tests    20 / 0 failed
-the release NC          8 / 8 RED, the clean gate ALLOWs
+the release NC          9 / 9 RED, the clean gate ALLOWs
 the hardening NC        14 / 14 RED
 the ledger controls     7 / 7 RED, the ledger VALID
 the historical NC       44 RED, 0 SKIP, 0 INVALID
@@ -486,8 +528,12 @@ the browser smoke       17 of 18 PASS (the settings are NOT VERIFIED:
        locally.
     3. The crash recovery, the exactly-once terminal awards and the
        atomic MetaProfile are unproven: they belong to A0.
-    4. The TREASURE route and the settings were not reached by the
-       browser smoke.
+    4. The SETTINGS were not reached by the browser smoke, and they
+       cannot be: the Settings button is declared and never created,
+       so the panel cannot be opened. The TREASURE WAS reached and
+       verified -- the route was walked, the production handler
+       applied the effect exactly once, and the re-selection granted
+       nothing twice.
     5. The CI self-tests of the runner use a FAKE godot: they prove
        the LOGIC of the runner, not the interaction with a real Godot
        binary. The real interaction is covered by the real A-H
@@ -556,14 +602,14 @@ the browser smoke       17 of 18 PASS (the settings are NOT VERIFIED:
    |     +-- (the final documentation commit)  docs(repo): close the pre-publication closure
 ```
 
-    22 commits on top of the published Phase 3: the release
+    25 commits on top of the published Phase 3: the release
     gate, the documents, and the fixes that the checks and the
     independent critic forced. Every one of them is a single parent,
     so the chain is linear and the candidate remains a strict
     fast-forward of master.
 
-    The arithmetic: 273 (the published Phase 3) + 22 (this series) =
-    295 commits over master.
+    The arithmetic: 273 (the published Phase 3) + 25 (this series) =
+    298 commits over master.
 
     The 11 files the series changed over the published Phase 3:
 

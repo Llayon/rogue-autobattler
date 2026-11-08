@@ -18,14 +18,60 @@
              release.yml calls it. The deploy job needs the required
              tests AND the build. The old workflow was deleted, because
              its presence would have published without the gate.
-    Proof:   tools/release_negative_controls.py — NC-REL-01..07, all
+    Proof:   tools/release_negative_controls.py — NC-REL-01..09, all
              semantic RED; the clean gate ALLOWs the good scenario
              only.
+             Six of the nine are GATE controls: they mutate the
+             workflows and assert a property of the parsed result.
+             NC-REL-06 and NC-REL-08 are VALIDATOR controls: they
+             mutate the validator itself and compare two validator
+             invocations. NC-REL-09 covers the artifact FLOW: the job
+             that builds the artifact uploads it, and the deploy job
+             does not upload a directory it does not have.
     Residual: the GitHub Pages environment restrictions are NOT
               verified locally: NOT VERIFIED UNTIL REMOTE CI /
               DEPLOYMENT.
 
 ## HIGH
+
+### H-07 — the "the job never runs" check was a literal substring match
+
+    Status:  PROVEN DEFECT — FIXED
+    Found:   the check looked for the exact text "if: false". A
+             required job that KEPT its name and carried any other
+             guard -- "if: ${{ false }}", "if: ${{ !cancelled() }}",
+             "if: github.event_name == 'never'", "if: 'false'",
+             "if:false" -- was invisible to EVERY control, so the
+             required job could be disabled while the harness still
+             reported green and exited 0. That is precisely the
+             BLOCKER (B-01) the series exists to close.
+             Found by the independent critic.
+    Fix:     the check is SEMANTIC. A required job must have NO
+             condition at all: a condition is the only way to take a
+             job out of the run, so any condition on a required job is
+             a guard.
+    Proof:   all six spellings, on both required jobs, are caught:
+             battle-ecs by NC-REL-01, save-battle-migration by
+             NC-REL-02.
+
+### H-08 — the artifact flow had no control at all
+
+    Status:  PROVEN DEFECT — FIXED
+    Found:   prop_06_artifact_validation was DEFINED and never
+             REGISTERED. NC-REL-06 and NC-REL-08 measure the
+             VALIDATOR, so nothing checked that the job which builds
+             the artifact uploads it, or that the deploy job does not
+             upload a directory it does not have -- the exact defect
+             that was fixed earlier in the series. Removing the
+             validation step from the workflow left every control
+             green.
+             Found by the independent critic.
+    Fix:     the property is registered, and NC-REL-09 moves the
+             upload from the build job to the deploy job, so the
+             property really breaks.
+    Proof:   9 of 9 controls are RED, and the registry carries only
+             the gate properties, so every entry is really checked by
+             the property it names.
 
 ### H-06 — the release controls imported yaml, and the CI installs no yaml
 

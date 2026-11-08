@@ -12,7 +12,7 @@
     branch            integration/phase3-master-release-rehearsal
     the merge-base    02fe83ef (== master: a strict fast-forward)
     ahead / behind    0 / 295
-    the commits       22 over the published Phase 3, 295 over master
+    the commits       25 over the published Phase 3, 298 over master
 
     The candidate SHA moves with every commit of the series. Read it
     from the repository at the moment of the publication; do NOT copy

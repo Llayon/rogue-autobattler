@@ -97,6 +97,42 @@ def _block(jobs, job_name):
     return jobs.get(job_name) or ""
 
 
+def _job_condition(block):
+    """The `if:` condition of a job, if it has one.
+
+    The condition is read SEMANTICALLY: the key is matched with its
+    optional quoting and any spacing, and the value is returned as it
+    stands. A literal substring match on "if: false" would only catch
+    that one spelling -- "if: ${{ false }}", "if: ${{ !cancelled() }}"
+    and "if: github.event_name == 'never'" would all slip through, and
+    the required job could be disabled while every control stayed
+    green.
+    """
+    for line in block.split("\n"):
+        stripped = line.strip()
+        match = re.match(r"^if\s*:\s*(.*)$", stripped)
+        if match:
+            return match.group(1).strip()
+    return ""
+
+
+def _never_runs(block):
+    """True when the job's condition can disable it.
+
+    ANY condition on a required job is treated as a guard: the
+    required jobs must always run, and a condition is the only way to
+    take one out of the run.
+    """
+    condition = _job_condition(block)
+    if not condition:
+        return False
+    # A condition that is literally true cannot disable the job.
+    normalised = condition.strip().strip("'\"").lower()
+    if normalised in ("true", "${{ true }}", "${{true}}"):
+        return False
+    return True
+
+
 def prop_01_battle_ecs_dependency(release, test):
     """The release CALLS the reusable workflow AND that workflow runs
     the battle-ecs job."""
@@ -108,8 +144,9 @@ def prop_01_battle_ecs_dependency(release, test):
         out.append("the reusable workflow carries no battle-ecs job")
     else:
         block = test["jobs"]["battle-ecs"]
-        if "if: false" in block:
-            out.append("the battle-ecs job never runs")
+        if _never_runs(block):
+            out.append("the battle-ecs job is conditioned and can be "
+                       "skipped: %s" % _job_condition(block))
     return out
 
 
@@ -120,8 +157,9 @@ def prop_02_save_dependency(release, test):
         out.append("the reusable workflow carries no save-battle-migration job")
     else:
         block = test["jobs"]["save-battle-migration"]
-        if "if: false" in block:
-            out.append("the save-battle-migration job never runs")
+        if _never_runs(block):
+            out.append("the save-battle-migration job is conditioned and "
+                       "can be skipped: %s" % _job_condition(block))
     return out
 
 
