@@ -325,17 +325,24 @@ def load_validator_from(path):
 
 
 def make_fake_artifact(with_html=True):
-    """A synthetic artifact directory."""
+    """A synthetic artifact directory.
+
+    It is a COMPLETE artifact, so a control that removes one
+    requirement sees exactly that one requirement disappear and not a
+    dozen others.
+    """
     root = tempfile.mkdtemp(prefix="rel_art_")
     if with_html:
         with io.open(os.path.join(root, "index.html"), "w",
                      encoding="utf-8") as f:
             f.write("<html><body>test</body></html>\n")
-    with io.open(os.path.join(root, "game.wasm"), "wb") as f:
-        f.write(b"\0asm" + b"\0" * 2048)
-    with io.open(os.path.join(root, "game.js"), "w",
+    with io.open(os.path.join(root, "index.wasm"), "wb") as f:
+        f.write(b"\x00asm" + b"\0" * (2 * 1024 * 1024))
+    with io.open(os.path.join(root, "index.js"), "w",
                  encoding="utf-8") as f:
         f.write("var x = 1;\n")
+    with io.open(os.path.join(root, "index.pck"), "wb") as f:
+        f.write(b"\0" * (256 * 1024))
     return root
 
 

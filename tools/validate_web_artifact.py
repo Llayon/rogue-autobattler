@@ -30,6 +30,15 @@ SCRIPT_SUFFIXES = (".js", ".js.gz", ".wasm.gz", ".worker.js")
 # The size in bytes below which a resource is considered empty.
 MIN_BYTES = 512
 
+# The size in bytes below which the WASM binary is considered
+# truncated. A real Godot 4.7 web export ships a WASM of tens of
+# megabytes; anything under a megabyte is a failed export.
+MIN_WASM_BYTES = 1024 * 1024
+
+# The size in bytes below which the resource bundle is considered
+# truncated.
+MIN_PCK_BYTES = 64 * 1024
+
 
 def fail(reason, problems):
     problems.append(reason)
@@ -46,20 +55,47 @@ def check_required(files, problems):
                  % (name, files[name]), problems)
 
 
-def check_payload(files, problems):
-    """The artifact must carry a WASM and a JavaScript bootstrap."""
-    has_wasm = False
-    has_script = False
-    for name in files:
-        lower = name.lower()
-        if ".wasm" in lower:
-            has_wasm = True
-        if lower.endswith(SCRIPT_SUFFIXES):
-            has_script = True
-    if not has_wasm:
+def check_payload(files, problems, root=None):
+    """The artifact must carry a real WASM, a JavaScript bootstrap and
+    the resource bundle.
+
+    A name that merely CONTAINS ".wasm" is not a WASM: the binary
+    must be big enough to be a real one, and its magic bytes must be
+    right. A partially failed export produces a truncated WASM, and
+    publishing it yields a blank page.
+    """
+    wasm_names = [n for n in files if ".wasm" in n.lower()]
+    if not wasm_names:
         fail("the artifact carries no WASM binary", problems)
+    else:
+        for name in wasm_names:
+            if files[name] < MIN_WASM_BYTES:
+                fail("%s is %d bytes: the WASM binary is truncated"
+                     % (name, files[name]), problems)
+            elif root:
+                # The magic bytes: "\0asm" is the WebAssembly header.
+                path = os.path.join(root, name)
+                try:
+                    with open(path, "rb") as f:
+                        head = f.read(4)
+                except OSError:
+                    head = b""
+                if head != b"\x00asm":
+                    fail("%s is not a WebAssembly binary" % name, problems)
+
+    has_script = any(n.lower().endswith(SCRIPT_SUFFIXES) for n in files)
     if not has_script:
         fail("the artifact carries no JavaScript bootstrap", problems)
+
+    # The resource bundle: without it the game has no content at all.
+    pck_names = [n for n in files if n.lower().endswith(".pck")]
+    if not pck_names:
+        fail("the artifact carries no resource bundle (.pck)", problems)
+    else:
+        for name in pck_names:
+            if files[name] < MIN_PCK_BYTES:
+                fail("%s is %d bytes: the resource bundle is truncated"
+                     % (name, files[name]), problems)
 
 
 def check_html_references(files, problems, root):
@@ -124,7 +160,7 @@ def validate(root):
     if not files:
         return ["the artifact directory %s is empty" % root]
     check_required(files, problems)
-    check_payload(files, problems)
+    check_payload(files, problems, root)
     check_html_references(files, problems, root)
     check_no_local_paths(files, problems, root)
     return problems
