@@ -136,6 +136,32 @@ jobs:
   deploy:
     name: Deploy to Pages
     needs: [required-tests, web-build]
+    # RB2: the deployment is authorized ONLY from refs/heads/master.
+    #
+    # A manual dispatch runs the workflow file of the SELECTED ref, and
+    # github.ref is then that ref. Without this condition, a dispatch
+    # of a staging, a feature or a phase3 branch would build, validate
+    # and PUBLISH that SHA to GitHub Pages, as long as the tests of the
+    # same ref were green -- and the tip-check does not help, because
+    # the dispatched SHA is the tip of the dispatched branch.
+    #
+    # success() is the default for a job whose needs succeeded, and it
+    # is REQUIRED for "one required job failed -> DENY" to hold. It is
+    # NOT an always() bypass: always() would run the job even when a
+    # required job failed, which is exactly what must not happen.
+    #
+    # The full ref is compared, EXACTLY: refs/heads/master is the
+    # branch master, refs/tags/v1 is a tag, and feature/master is a
+    # different branch whose name merely ends with master.
+    if: >-
+      ${{
+        success() &&
+        github.ref == 'refs/heads/master' &&
+        (
+          github.event_name == 'push' ||
+          github.event_name == 'workflow_dispatch'
+        )
+      }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:

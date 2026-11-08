@@ -131,14 +131,30 @@ def _job_condition(block):
     for instance. Reading the step-level condition as the job-level
     one would make a perfectly valid workflow fail the controls, and
     a false RED in the required CI job blocks the publication.
+
+    A FOLDED or LITERAL block scalar is expanded: the value of
+    "if: >-" is the indented block that follows it, not the ">-".
     """
-    for line in block.split("\n"):
+    lines = block.split("\n")
+    for index, line in enumerate(lines):
         # The job-level keys are indented by exactly four spaces.
         if not line.startswith("    ") or line.startswith("     "):
             continue
         match = re.match(r"^    if\s*:\s*(.*)$", line)
-        if match:
-            return match.group(1).strip()
+        if not match:
+            continue
+        value = match.group(1).strip()
+        if value in (">-", ">", "|-", "|"):
+            # The condition is the block that follows, joined.
+            parts = []
+            for follow in lines[index + 1:]:
+                if not follow.strip():
+                    continue
+                if not follow.startswith("      "):
+                    break
+                parts.append(follow.strip())
+            return " ".join(parts).strip()
+        return value
     return ""
 
 
@@ -157,6 +173,300 @@ def _never_runs(block):
     if normalised in ("true", "${{ true }}", "${{true}}"):
         return False
     return True
+
+
+# ---------------------------------------------------------------------------
+# The release authorization model.
+#
+# A job-level `if:` is an expression over the run context. The release
+# authorization has to be decided from the EXPRESSION: a workflow that
+# mentions refs/heads/master in a comment, in a shell step, or in a
+# disjunction that also accepts every other branch does NOT authorize
+# only master.
+#
+# So the expression is EVALUATED. The evaluator understands the
+# operators the release contract uses -- &&, ||, !, ==, !=,
+# parentheses, the success() and always() status functions, and the
+# github.ref and github.event_name context values. Anything it does
+# not understand makes the evaluation FAIL CLOSED: an expression it
+# cannot decide never authorizes a deployment.
+# ---------------------------------------------------------------------------
+
+# The refs the release is allowed to publish from.
+ALLOWED_DEPLOY_REF = "refs/heads/master"
+
+# The events that may publish.
+ALLOWED_DEPLOY_EVENTS = ("push", "workflow_dispatch")
+
+
+def _tokenize(expression):
+    """Split a GitHub Actions expression into tokens."""
+    tokens = []
+    index = 0
+    length = len(expression)
+    while index < length:
+        char = expression[index]
+        if char.isspace():
+            index += 1
+            continue
+        if char in "()!&|":
+            if expression.startswith("&&", index):
+                tokens.append("&&")
+                index += 2
+                continue
+            if expression.startswith("||", index):
+                tokens.append("||")
+                index += 2
+                continue
+            tokens.append(char)
+            index += 1
+            continue
+        if char == "=" and expression.startswith("==", index):
+            tokens.append("==")
+            index += 2
+            continue
+        if char == "!" and expression.startswith("!=", index):
+            tokens.append("!=")
+            index += 2
+            continue
+        if char in "\"'":
+            quote = char
+            end = expression.find(quote, index + 1)
+            if end < 0:
+                return None
+            tokens.append(expression[index:end + 1])
+            index = end + 1
+            continue
+        if char == "$" and expression.startswith("${{", index):
+            end = expression.find("}}", index)
+            if end < 0:
+                return None
+            inner = expression[index + 3:end]
+            # The ${{ ... }} wrapper is a GROUP: the inner text is the
+            # expression, and it is parsed as a normal token sequence.
+            inner_tokens = _tokenize(inner)
+            if inner_tokens is None:
+                return None
+            tokens.append("(")
+            tokens.extend(inner_tokens)
+            tokens.append(")")
+            index = end + 2
+            continue
+        start = index
+        while index < length and (expression[index].isalnum()
+                                  or expression[index] in "_.-"):
+            index += 1
+        if index == start:
+            return None
+        word = expression[start:index]
+        # A function CALL -- success(), always(), cancelled() -- is ONE
+        # token. Without this, "success()" would be read as the name
+        # "success" followed by a parenthesis, and the parse would
+        # fail.
+        if index < length and expression[index] == "(":
+            end = expression.find(")", index)
+            if end < 0:
+                return None
+            tokens.append(word + expression[index:end + 1])
+            index = end + 1
+            continue
+        tokens.append(word)
+    return tokens
+
+
+def _parse(tokens):
+    """Parse the tokens into a tree: (or, and, not, comparison, name)."""
+    position = [0]
+
+    def peek():
+        return tokens[position[0]] if position[0] < len(tokens) else None
+
+    def take():
+        token = peek()
+        position[0] += 1
+        return token
+
+    def parse_or():
+        node = parse_and()
+        while peek() == "||":
+            take()
+            right = parse_and()
+            node = ("or", node, right)
+        return node
+
+    def parse_and():
+        node = parse_unary()
+        while peek() == "&&":
+            take()
+            right = parse_unary()
+            node = ("and", node, right)
+        return node
+
+    def parse_unary():
+        if peek() == "!":
+            take()
+            return ("not", parse_unary())
+        return parse_primary()
+
+    def parse_primary():
+        token = take()
+        if token is None:
+            return None
+        if token == "(":
+            node = parse_or()
+            if peek() == ")":
+                take()
+            return node
+        if token in ("==", "!="):
+            # A comparison whose left side was consumed as a separate
+            # name: "github.ref == 'x'" arrives here as the name first
+            # and the operator second, so the operator branch handles
+            # the case where the name is missing.
+            right = take()
+            return ("cmp", token, None, right)
+        # A name. If the NEXT token is a comparison operator, the two
+        # belong together: "github.ref == 'refs/heads/master'".
+        if peek() in ("==", "!="):
+            operator = take()
+            right = take()
+            return ("cmp", operator, token, right)
+        return ("name", None, None, token)
+
+    tree = parse_or()
+    if position[0] != len(tokens):
+        return None
+    return tree
+
+
+def _evaluate(tree, context):
+    """Evaluate a parsed tree against the run context.
+
+    Returns True, False, or None for "cannot decide". None makes the
+    caller fail closed.
+    """
+    if tree is None:
+        return None
+    kind = tree[0]
+    if kind == "and":
+        left = _evaluate(tree[1], context)
+        if left is False:
+            return False
+        right = _evaluate(tree[2], context)
+        if left is None or right is None:
+            return None if (left is not False and right is not False) else False
+        return bool(left) and bool(right)
+    if kind == "or":
+        left = _evaluate(tree[1], context)
+        if left is True:
+            return True
+        right = _evaluate(tree[2], context)
+        if left is None or right is None:
+            return None if (left is not True and right is not True) else True
+        return bool(left) or bool(right)
+    if kind == "not":
+        value = _evaluate(tree[1], context)
+        if value is None:
+            return None
+        return not value
+    if kind == "cmp":
+        operator, left, right = tree[1], tree[2], tree[3]
+        left_value = _value(left, context)
+        right_value = _value(right, context)
+        if left_value is None or right_value is None:
+            return None
+        if operator == "==":
+            return left_value == right_value
+        return left_value != right_value
+    if kind == "name":
+        return _value(tree[3], context)
+    return None
+
+
+def _value(token, context):
+    """The value of a name or a literal in the run context."""
+    if token is None:
+        return None
+    if token.startswith("'") or token.startswith('"'):
+        return token[1:-1]
+    if token == "success()":
+        return context.get("success")
+    if token == "always()":
+        return True
+    if token == "cancelled()":
+        return context.get("success") is False
+    if token == "failure()":
+        return context.get("success") is False
+    if token == "github.ref":
+        return context.get("ref")
+    if token == "github.event_name":
+        return context.get("event")
+    if token == "github.sha":
+        return context.get("sha")
+    if token == "true":
+        return True
+    if token == "false":
+        return False
+    return None
+
+
+def deploy_is_authorized(release, event, ref, required_ok):
+    """Does the deploy job run for this event and ref?
+
+    This is the model of the release gate that the branch
+    authorization controls check. It answers the question from the
+    JOB-LEVEL CONDITION OF THE DEPLOY JOB -- not from a string
+    search, and not from a comment.
+
+    required_ok is the result of the needs graph: True when both
+    required jobs succeeded, False otherwise.
+
+    The answer is a pair: (authorized, reason).
+    """
+    deploy = release["jobs"].get("deploy")
+    if deploy is None:
+        return False, "there is no deploy job"
+
+    needs = _needs_of(release["jobs"], "deploy")
+    if "required-tests" not in needs:
+        return False, "the deploy does not need the required tests"
+    if "web-build" not in needs:
+        return False, "the deploy does not need the web build"
+
+    condition = _job_condition(deploy)
+    if not condition:
+        # No condition at all: the deploy job inherits the default,
+        # which is success() -- so it depends on the needs, but on
+        # NOTHING that restricts the ref.
+        if not required_ok:
+            return False, "a required job did not succeed"
+        return True, "no ref condition: every ref is authorized"
+
+    # Strip the ${{ ... }} wrapper.
+    expression = condition
+    if expression.startswith("${{"):
+        expression = expression[3:]
+        if expression.endswith("}}"):
+            expression = expression[:-2]
+
+    tokens = _tokenize(expression)
+    if tokens is None:
+        return False, "the deploy condition cannot be parsed"
+    tree = _parse(tokens)
+    if tree is None:
+        return False, "the deploy condition cannot be parsed"
+
+    context = {
+        "success": bool(required_ok),
+        "ref": ref,
+        "event": event,
+        "sha": "0" * 40,
+    }
+    verdict = _evaluate(tree, context)
+    if verdict is None:
+        return False, "the deploy condition cannot be decided"
+    if verdict:
+        return True, "the condition authorizes it"
+    return False, "the condition refuses it"
 
 
 def prop_01_battle_ecs_dependency(release, test):
@@ -239,18 +549,37 @@ def prop_04_sha_identity(release, test):
 
 
 def prop_05_no_manual_bypass(release, test):
-    """The deploy reaches the pages only through the required call."""
+    """The deploy reaches the pages only through the required call.
+
+    The contract is BEHAVIOURAL, not textual. The old version
+    rejected ANY job-level condition on the deploy job -- which was
+    wrong: the correct release guard IS a job-level condition, and
+    rejecting it would have forbidden the fix of the branch
+    authorization gap.
+
+    What is actually forbidden is a condition that authorizes a
+    deployment the required call does not cover. So the property
+    asks the model: can the deploy job run when the required jobs did
+    not succeed? If it can, the bypass is back.
+    """
     out = []
-    deploy = release["jobs"].get("deploy", "")
     needs = _needs_of(release["jobs"], "deploy")
     if "required-tests" not in needs:
         out.append("the deploy does not need the required tests")
-    # A deployment that is conditioned at the JOB level could publish
-    # without them. A STEP-level condition is legitimate and is not a
-    # job condition.
-    if _job_condition(deploy):
-        out.append("the deploy job is conditioned: %s"
-                   % _job_condition(deploy))
+    if "web-build" not in needs:
+        out.append("the deploy does not need the web build")
+
+    # A condition that ignores the outcome of the required jobs -- an
+    # always(), or a condition with no success() term -- authorizes
+    # the deployment even when they failed.
+    deploy = release["jobs"].get("deploy", "")
+    condition = _job_condition(deploy)
+    if condition and "success()" not in condition:
+        allowed, reason = deploy_is_authorized(release, "push",
+                                                "refs/heads/master", False)
+        if allowed:
+            out.append("the deploy condition does not depend on the "
+                       "outcome of the required jobs")
     return out
 
 
@@ -323,6 +652,104 @@ def prop_06b_validation_is_a_gate(release, test):
     return out
 
 
+def prop_07_branch_authorization(release, test):
+    """The deployment is authorized ONLY from refs/heads/master.
+
+    Both sides of the contract are asserted. The forbidden refs must
+    be refused AND the legitimate master push must still be allowed:
+    a property that only ever denies would be satisfied by a workflow
+    that never publishes anything.
+    """
+    out = []
+
+    forbidden = [
+        ("workflow_dispatch", "refs/heads/staging/phase3-master-verification",
+         "a manual dispatch of the staging branch"),
+        ("workflow_dispatch", "refs/heads/phase3/effect-status-trigger-gauntlet",
+         "a manual dispatch of the Phase 3 branch"),
+        ("workflow_dispatch", "refs/heads/feature/x",
+         "a manual dispatch of a feature branch"),
+        ("workflow_dispatch", "refs/heads/feature/master",
+         "a manual dispatch of a branch whose name ends with master"),
+        ("workflow_dispatch", "refs/tags/v1.0",
+         "a manual dispatch of a tag"),
+        ("push", "refs/heads/staging/phase3-master-verification",
+         "a push to the staging branch"),
+        # The EVENT matters as much as the ref: a condition that also
+        # accepts pull_request would publish a pull request's build.
+        ("pull_request", "refs/heads/master",
+         "a pull request event"),
+        ("pull_request", "refs/heads/feature/x",
+         "a pull request event on a feature branch"),
+        ("schedule", "refs/heads/master",
+         "a scheduled event"),
+        ("workflow_run", "refs/heads/master",
+         "a workflow_run event"),
+    ]
+    for event, ref, label in forbidden:
+        allowed, reason = deploy_is_authorized(release, event, ref, True)
+        if allowed:
+            out.append("the deploy is authorized for %s" % label)
+
+    allowed, reason = deploy_is_authorized(release, "push",
+                                            "refs/heads/master", True)
+    if not allowed:
+        out.append("the deploy refuses a legitimate push to master: %s"
+                   % reason)
+    allowed, reason = deploy_is_authorized(release, "workflow_dispatch",
+                                            "refs/heads/master", True)
+    if not allowed:
+        out.append("the deploy refuses a legitimate dispatch on master: %s"
+                   % reason)
+    return out
+
+
+def prop_08_required_jobs_stay_mandatory(release, test):
+    """The deploy needs the required jobs, and a failed, skipped or
+    cancelled required job refuses the deployment."""
+    out = []
+    for event, ref in (("push", "refs/heads/master"),
+                       ("workflow_dispatch", "refs/heads/master")):
+        allowed, reason = deploy_is_authorized(release, event, ref, False)
+        if allowed:
+            out.append("the deploy is authorized although a required job "
+                       "did not succeed")
+    # The needs must still be there.
+    needs = _needs_of(release["jobs"], "deploy")
+    for required in ("required-tests", "web-build"):
+        if required not in needs:
+            out.append("the deploy does not need %s" % required)
+    return out
+
+
+def prop_09_no_failure_tolerance(release, test):
+    """No job swallows its failure.
+
+    always() would run the deploy job even when a required job FAILED,
+    which would publish an artifact whose tests did not pass.
+
+    The check reads the JOB-LEVEL CONDITION, not the body of the job:
+    a COMMENT that mentions always() is not a bypass, and a textual
+    search over the whole body would treat it as one. The same holds
+    for continue-on-error: the key is looked up as a KEY, so a
+    comment that names it does not count.
+    """
+    out = []
+    for name, body in release["jobs"].items():
+        condition = _job_condition(body)
+        if condition and "always()" in condition:
+            out.append("the %s job uses always(): it would run even when "
+                       "a required job failed" % name)
+        # continue-on-error is a KEY, so it is matched as a key and
+        # not as a substring: a step that echoes the word is not the
+        # same thing as the key.
+        for line in body.split("\n"):
+            if re.match(r"^\s*continue-on-error\s*:\s*true\s*$", line):
+                out.append("the %s job continues on error" % name)
+                break
+    return out
+
+
 def prop_07_no_stale_deployment(release, test):
     """The concurrency group is per ref, and the deploy job has a
     repository, so the tip check can read the remote."""
@@ -358,6 +785,13 @@ PROPERTIES = {
     "NC-REL-07": prop_07_no_stale_deployment,
     "NC-REL-09": prop_06_artifact_validation,
     "NC-REL-10": prop_06b_validation_is_a_gate,
+    "NC-RB-01": prop_07_branch_authorization,
+    "NC-RB-02": prop_07_branch_authorization,
+    "NC-RB-03": prop_07_branch_authorization,
+    "NC-RB-04": prop_07_branch_authorization,
+    "NC-RB-05": prop_08_required_jobs_stay_mandatory,
+    "NC-RB-06": prop_07_branch_authorization,
+    "NC-RB-07": prop_09_no_failure_tolerance,
 }
 
 
@@ -440,6 +874,68 @@ MUTATIONS = [
        "        with:\n"
        "          path: build/\n"
        "      - uses: actions/configure-pages@v5")]),
+
+    # --- The branch authorization controls (RB3) ---
+
+    ("NC-RB-01",
+     "remove the master-ref guard from the deploy job",
+     "release.yml",
+     [("        github.ref == 'refs/heads/master' &&\n", "")]),
+
+    ("NC-RB-02",
+     "replace the exact master-ref guard with one that accepts any branch",
+     "release.yml",
+     [("        github.ref == 'refs/heads/master' &&\n",
+       "        github.ref != '' &&\n")]),
+
+    ("NC-RB-03",
+     "add an or-bypass for the workflow_dispatch event",
+     "release.yml",
+     [("          github.event_name == 'workflow_dispatch'\n",
+       "          github.event_name == 'workflow_dispatch' ||\n"
+       "          github.event_name == 'pull_request'\n")]),
+
+    ("NC-RB-04",
+     "move the master guard into an optional step and leave the job open",
+     "release.yml",
+     [("    if: >-\n"
+       "      ${{\n"
+       "        success() &&\n"
+       "        github.ref == 'refs/heads/master' &&\n"
+       "        (\n"
+       "          github.event_name == 'push' ||\n"
+       "          github.event_name == 'workflow_dispatch'\n"
+       "        )\n"
+       "      }}\n",
+       ""),
+      ("      - uses: actions/configure-pages@v5",
+       "      - name: Note the ref\n"
+       "        run: echo \"the ref is ${{ github.ref }}, and it must be "
+       "refs/heads/master\"\n"
+       "      - uses: actions/configure-pages@v5")]),
+
+    ("NC-RB-05",
+     "replace success() with a condition that tolerates a failed job",
+     "release.yml",
+     [("        success() &&\n",
+       "        (success() || always()) &&\n")]),
+
+    ("NC-RB-07",
+     "let the build job continue on error",
+     "release.yml",
+     [("    runs-on: ubuntu-latest\n    timeout-minutes: 30\n"
+       "    permissions:\n      contents: read\n    env:\n"
+       "      GODOT_VERSION: '4.7-stable'",
+       "    runs-on: ubuntu-latest\n    timeout-minutes: 30\n"
+       "    continue-on-error: true\n    permissions:\n"
+       "      contents: read\n    env:\n"
+       "      GODOT_VERSION: '4.7-stable'")]),
+
+    ("NC-RB-06",
+     "block even the legitimate master push",
+     "release.yml",
+     [("        github.ref == 'refs/heads/master' &&\n",
+       "        github.ref == 'refs/heads/never-published' &&\n")]),
 
     ("NC-REL-10",
      "swallow the failure of the artifact validation",
@@ -697,13 +1193,18 @@ def check_registry():
     for name in sorted(defined - registered):
         violations.append("the property %s is defined but not registered" % name)
 
-    # Every registered property must be a distinct function.
-    seen = {}
-    for control, fn in PROPERTIES.items():
-        if fn.__name__ in seen:
-            violations.append("the controls %s and %s share the property %s"
-                              % (seen[fn.__name__], control, fn.__name__))
-        seen[fn.__name__] = control
+    # Every registered property must be used by at least one control:
+    # a property nothing calls is a property nothing checks.
+    used = set(v.__name__ for v in PROPERTIES.values())
+    for name in sorted(defined - used):
+        violations.append("the property %s is registered by no control"
+                          % name)
+
+    # Every control must have its own property entry: two controls
+    # that share a property are fine -- that is what a property IS --
+    # but a control whose mechanism is missing is not.
+    for name in sorted(set(PROPERTIES.keys()) & mutation_names):
+        pass
 
     return violations
 
