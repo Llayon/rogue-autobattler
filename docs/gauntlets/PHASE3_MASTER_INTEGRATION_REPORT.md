@@ -44,11 +44,11 @@ the tracked tree          clean throughout
 
 ```
 the published Phase 3 over master   273
-the candidate over the Phase 3        19
+the candidate over the Phase 3        22
 --------------------------------------------
-the candidate over master            292   (273 + 19)
+the candidate over master            295   (273 + 22)
 
-ahead / behind            0 / 292
+ahead / behind            0 / 295
 the changed files         297
 the merge commits         1      (the historical one, inside Phase 3)
 the merge-base            02fe83ef == master  -> a strict fast-forward
@@ -61,7 +61,7 @@ the merge-base            02fe83ef == master  -> a strict fast-forward
     said 274 commits and 294 files. Those were the values of the
     FIRST commit of the series (b00cb8b), written when the series
     consisted of one commit and never updated. The final numbers are
-    292 commits and 297 files. The 19 commits of the series are all
+    295 commits and 297 files. The 22 commits of the series are all
     listed in section O; none of them is a filler, and the history
     was NOT touched to make a number look right.
 
@@ -278,9 +278,9 @@ the absolute paths    0
 the master SHA        02fe83ef378d13965184c6224a512a91ae6263a1
 the candidate SHA     (the final commit of this series)
 the merge-base        02fe83ef == master -> the fast-forward is eligible
-ahead / behind        0 / 292
+ahead / behind        0 / 295
 the merge commits     1 (the historical one, inside Phase 3)
-the new work          19 commits on top of the published Phase 3
+the new work          22 commits on top of the published Phase 3
 the changed files     11 over the published Phase 3
 ```
 
@@ -516,18 +516,38 @@ the browser smoke       16 of 18 PASS, 2 NOT REACHED
    |     +-- 66515d4 fix(repo): read the concurrency protection in the release decision
    |     +-- 23e96e1 fix(repo): restore the reusable trigger and split the release controls
    |     +-- d40f7d5 docs(repo): write the integration report and the release runbook
+   |     +-- 553e320 fix(repo): drop the yaml dependency from the release controls
+   |     +-- f2f3a8f docs(repo): reconcile the final counts of the series
+   |     +-- 9d39341 docs(repo): state the uid references precisely
+   |     +-- 9978ba4 docs(repo): add the staging stage and reconcile the commit graph
+   |     +-- 1e23ab1 docs(repo): record the settings defect and the uid classification
+   |     +-- 9a563ae docs(repo): reconcile the commit counts and the browser evidence
+   |     +-- 7681c39 docs(repo): record the critic verdict and the accepted risks
+   |     +-- d9276bd fix(repo): check the html references by path and gate the release
+   |     +-- 5f6a89b docs(repo): record the critic findings in the report and the register
+   |     +-- 3c3e92f fix(repo): reject a truncated or incomplete web artifact
+   |     +-- dbad02a fix(repo): make the release controls structural instead of textual
+   |     +-- 45125fc fix(repo): remove the decorative dispatch input and the dangling field
+   |     +-- 078b2b3 docs(repo): record the artifact flow defects in the report
+   |     +-- ef1ccd0 fix(repo): pass the artifact from the build job to the deploy job
+   |     +-- c8185ec docs(repo): add the critic findings to the risk register
+   |     +-- 4b39876 docs(repo): record the critic findings and the final verdict
+   |     +-- 66515d4 fix(repo): read the concurrency protection in the release decision
+   |     +-- 23e96e1 fix(repo): restore the reusable trigger and split the release controls
+   |     +-- d40f7d5 docs(repo): write the integration report and the release runbook
    |     +-- b00cb8b chore(repo): gate the pages deployment on the required CI
-   |     +-- (this documentation commit)  docs(repo): reconcile the final counts
+   |     +-- (this documentation commit)  docs(repo): record the yaml blocker
+   |     +-- (the final documentation commit)  docs(repo): close the pre-publication closure
 ```
 
-    19 commits on top of the published Phase 3: the release
+    22 commits on top of the published Phase 3: the release
     gate, the documents, and the fixes that the checks and the
     independent critic forced. Every one of them is a single parent,
     so the chain is linear and the candidate remains a strict
     fast-forward of master.
 
-    The arithmetic: 273 (the published Phase 3) + 19 (this series) =
-    292 commits over master.
+    The arithmetic: 273 (the published Phase 3) + 22 (this series) =
+    295 commits over master.
 
     The 11 files the series changed over the published Phase 3:
 
@@ -575,6 +595,30 @@ PHASE 3 -> MASTER INTEGRATION & RELEASE SAFETY
     closed and proved by the pinned baseline that HOLDs when it is
     unavailable; the MEDIUM of the export path is closed and proved by
     a clean local export.
+
+    The closure pass added three more things and found one more real
+    defect:
+
+      - the TREASURE is verified in the real browser with the real
+        WASM build, with the absolute values;
+      - the clean checkout exports a complete artifact whose html, js
+        and wasm are byte-for-byte identical to the working tree build;
+      - the staging push cannot deploy the Pages, and the structural
+        reason is recorded;
+      - the release controls no longer import yaml. They were the
+        ONLY file in the repository that did, and no workflow installs
+        pyyaml, so the step would have failed with an ImportError on
+        the runner and turned the REQUIRED battle-ecs job RED. The
+        controls now read the workflows as text, like every other CI
+        tool of the repository, and they were run under a python where
+        importing yaml raises: 8 of 8 RED, exit 0.
+
+    The SETTINGS scenario remains NOT VERIFIED: the Settings button is
+    declared and never created, so the panel cannot be opened. It is
+    a PRE-EXISTING defect -- the same is true on master -- the panel
+    is never exercised by any test, and the setting itself works and
+    is persisted. It is recorded as H-05, an ACCEPTED RISK for the
+    staging run, with a named follow-up.
 
     The independent critic returned HOLD. Its HOLD rested on the
     inverted evidence (the controls proved nothing) and on the

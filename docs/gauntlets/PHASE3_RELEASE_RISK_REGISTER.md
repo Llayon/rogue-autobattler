@@ -27,6 +27,28 @@
 
 ## HIGH
 
+### H-06 — the release controls imported yaml, and the CI installs no yaml
+
+    Status:  PROVEN DEFECT — FIXED
+    Found:   tools/release_negative_controls.py was the ONLY file in the
+             repository that imported yaml, and NO workflow installs
+             pyyaml. The step "Run the release negative controls"
+             would have failed with an ImportError on the runner,
+             which would have turned the REQUIRED battle-ecs job RED
+             -- and a RED required job blocks the deployment. The
+             defect would only have appeared on the real CI, never
+             locally, because the development machine has pyyaml.
+             Found by the independent critic.
+    Fix:     the controls read the workflows with their own text
+             reader, exactly like every other CI tool of the
+             repository (the ledger validator, the exit-contract
+             audit, the reachability audit and the three other
+             negative-control harnesses all avoid yaml).
+    Proof:   the controls were run under a python where importing yaml
+             raises ImportError, exactly as on a bare runner: 8 of 8
+             RED, exit 0. There is no "import yaml" anywhere in the
+             repository now.
+
 ### H-05 — the settings UI is unreachable
 
     Status:  PROVEN DEFECT — NOT FIXED HERE (out of scope)
