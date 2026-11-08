@@ -18,10 +18,10 @@
              release.yml calls it. The deploy job needs the required
              tests AND the build. The old workflow was deleted, because
              its presence would have published without the gate.
-    Proof:   tools/release_negative_controls.py — NC-REL-01..09, all
+    Proof:   tools/release_negative_controls.py — NC-REL-01..10, all
              semantic RED; the clean gate ALLOWs the good scenario
              only.
-             SEVEN of the nine are GATE controls: they mutate the
+             SEVEN of the TEN are GATE controls: they mutate the
              workflows and assert a property of the parsed result.
              NC-REL-06 and NC-REL-08 are VALIDATOR controls: they
              mutate the validator itself and compare two validator
@@ -168,8 +168,14 @@
              well, so the stale publication is really possible, and
              the control proves the mutated gate ALLOWs it while the
              clean gate denies it.
-    Proof:   NC-REL-07 is RED, and the clean gate denies the stale
-             scenario.
+    Proof:   NC-REL-07 is RED. What it proves is exactly what its
+             mutation breaks: the deploy job loses the checkout, so
+             the tip check has no remote to read and the deployment
+             HALDS instead of publishing. The tip check itself
+             survives the mutation -- so the control does NOT claim
+             that a stale publication becomes possible; it claims
+             that the mechanism which refuses one cannot be removed
+             unnoticed.
 
 ### H-01 — the A-H baseline would have compared nothing after the merge
 

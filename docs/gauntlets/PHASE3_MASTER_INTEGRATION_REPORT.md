@@ -52,11 +52,11 @@ the tracked tree          clean throughout
 
 ```
 the published Phase 3 over master   273
-the candidate over the Phase 3        28
+the candidate over the Phase 3        30
 --------------------------------------------
-the candidate over master            301   (273 + 28)
+the candidate over master            303   (273 + 30)
 
-ahead / behind            0 / 301
+ahead / behind            0 / 303
 the changed files         297
 the merge commits         1      (the historical one, inside Phase 3)
 the merge-base            02fe83ef == master  -> a strict fast-forward
@@ -70,7 +70,7 @@ the merge-base            02fe83ef == master  -> a strict fast-forward
     said 274 commits and 294 files. Those were the values of the
     FIRST commit of the series (b00cb8b), written when the series
     consisted of one commit and never updated. The final numbers are
-    301 commits and 297 files. The 28 commits of the series are all
+    303 commits and 297 files. The 30 commits of the series are all
     listed in section O; none of them is a filler, and the history
     was NOT touched to make a number look right.
 
@@ -198,6 +198,7 @@ NC-REL-06  accept a missing index.html                  RED
 NC-REL-07  allow a stale deployment to supersede        RED
 NC-REL-08  accept a reference to a missing path         RED
 NC-REL-09  upload the artifact from the wrong job       RED
+NC-REL-10  swallow the failure of the validation         RED
 the clean gate: ALLOW (every gate passed)
 ```
 
@@ -205,7 +206,7 @@ the clean gate: ALLOW (every gate passed)
     matters when the evidence is read:
 
 ```
-the GATE controls      NC-REL-01..05, 07, 09
+the GATE controls      NC-REL-01..05, 07, 09, 10
   they mutate the WORKFLOWS and assert a property of the parsed
   result: the needs graph, the job conditions, the permissions, the
   checkout, the SHA comparison, the concurrency group, the artifact
@@ -333,9 +334,9 @@ the candidate SHA     (the tip of this branch: read it with
                        it can outlive is a document that will be
                        wrong)
 the merge-base        02fe83ef == master -> the fast-forward is eligible
-ahead / behind        0 / 301
+ahead / behind        0 / 303
 the merge commits     1 (the historical one, inside Phase 3)
-the new work          28 commits on top of the published Phase 3
+the new work          30 commits on top of the published Phase 3
 the changed files     11 over the published Phase 3
 ```
 
@@ -357,7 +358,7 @@ the CI gates            10 / 10 clean
 the A-H differential    PASS (8 + 8 fixtures, both rc=0)
 the CI-01 self-tests    13 / 0 failed
 the CI-02 self-tests    20 / 0 failed
-the release NC          9 / 9 RED, the clean gate ALLOWs
+the release NC          10 / 10 RED, the clean gate ALLOWs
 the hardening NC        14 / 14 RED
 the ledger controls     7 / 7 RED, the ledger VALID
 the historical NC       44 RED, 0 SKIP, 0 INVALID
@@ -390,7 +391,7 @@ the browser smoke       17 of 18 PASS (the settings are NOT VERIFIED:
     turned the REQUIRED battle-ecs job RED. Every other CI tool of the
     repository deliberately avoids yaml, and now the release controls
     do too. They were re-run under a python where importing yaml
-    raises: 9 of 9 RED, exit 0.
+    raises: 10 of 10 RED, exit 0.
 
     It also found TWO HIGH findings in the HARNESS itself, which are
     the most important findings of the whole closure:
@@ -576,121 +577,75 @@ the browser smoke       17 of 18 PASS (the settings are NOT VERIFIED:
 ## O. COMMIT GRAPH
 
 ```
-02fe83ef  master (the base)
-   |
-   +-- 4316a32  the published Phase 3 (273 commits over master)
-   |     |
-   |     +-- 1e23ab1 docs(repo): record the settings defect and the uid classification
-   |     +-- 9a563ae docs(repo): reconcile the commit counts and the browser evidence
-   |     +-- 7681c39 docs(repo): record the critic verdict and the accepted risks
-   |     +-- d9276bd fix(repo): check the html references by path and gate the release
-   |     +-- 5f6a89b docs(repo): record the critic findings in the report and the register
-   |     +-- 3c3e92f fix(repo): reject a truncated or incomplete web artifact
-   |     +-- dbad02a fix(repo): make the release controls structural instead of textual
-   |     +-- 45125fc fix(repo): remove the decorative dispatch input and the dangling field
-   |     +-- 078b2b3 docs(repo): record the artifact flow defects in the report
-   |     +-- ef1ccd0 fix(repo): pass the artifact from the build job to the deploy job
-   |     +-- c8185ec docs(repo): add the critic findings to the risk register
-   |     +-- 4b39876 docs(repo): record the critic findings and the final verdict
-   |     +-- 66515d4 fix(repo): read the concurrency protection in the release decision
-   |     +-- 23e96e1 fix(repo): restore the reusable trigger and split the release controls
-   |     +-- d40f7d5 docs(repo): write the integration report and the release runbook
-   |     +-- 9d39341 docs(repo): state the uid references precisely
-   |     +-- 9978ba4 docs(repo): add the staging stage and reconcile the commit graph
-   |     +-- 1e23ab1 docs(repo): record the settings defect and the uid classification
-   |     +-- 9a563ae docs(repo): reconcile the commit counts and the browser evidence
-   |     +-- 7681c39 docs(repo): record the critic verdict and the accepted risks
-   |     +-- d9276bd fix(repo): check the html references by path and gate the release
-   |     +-- 5f6a89b docs(repo): record the critic findings in the report and the register
-   |     +-- 3c3e92f fix(repo): reject a truncated or incomplete web artifact
-   |     +-- dbad02a fix(repo): make the release controls structural instead of textual
-   |     +-- 45125fc fix(repo): remove the decorative dispatch input and the dangling field
-   |     +-- 078b2b3 docs(repo): record the artifact flow defects in the report
-   |     +-- ef1ccd0 fix(repo): pass the artifact from the build job to the deploy job
-   |     +-- c8185ec docs(repo): add the critic findings to the risk register
-   |     +-- 4b39876 docs(repo): record the critic findings and the final verdict
-   |     +-- 66515d4 fix(repo): read the concurrency protection in the release decision
-   |     +-- 23e96e1 fix(repo): restore the reusable trigger and split the release controls
-   |     +-- d40f7d5 docs(repo): write the integration report and the release runbook
-   |     +-- 553e320 fix(repo): drop the yaml dependency from the release controls
-   |     +-- f2f3a8f docs(repo): reconcile the final counts of the series
-   |     +-- 9d39341 docs(repo): state the uid references precisely
-   |     +-- 9978ba4 docs(repo): add the staging stage and reconcile the commit graph
-   |     +-- 1e23ab1 docs(repo): record the settings defect and the uid classification
-   |     +-- 9a563ae docs(repo): reconcile the commit counts and the browser evidence
-   |     +-- 7681c39 docs(repo): record the critic verdict and the accepted risks
-   |     +-- d9276bd fix(repo): check the html references by path and gate the release
-   |     +-- 5f6a89b docs(repo): record the critic findings in the report and the register
-   |     +-- 3c3e92f fix(repo): reject a truncated or incomplete web artifact
-   |     +-- dbad02a fix(repo): make the release controls structural instead of textual
-   |     +-- 45125fc fix(repo): remove the decorative dispatch input and the dangling field
-   |     +-- 078b2b3 docs(repo): record the artifact flow defects in the report
-   |     +-- ef1ccd0 fix(repo): pass the artifact from the build job to the deploy job
-   |     +-- c8185ec docs(repo): add the critic findings to the risk register
-   |     +-- 4b39876 docs(repo): record the critic findings and the final verdict
-   |     +-- 66515d4 fix(repo): read the concurrency protection in the release decision
-   |     +-- 23e96e1 fix(repo): restore the reusable trigger and split the release controls
-   |     +-- d40f7d5 docs(repo): write the integration report and the release runbook
-   |     +-- 93faf49 fix(repo): close the two high findings of the independent critic
-   |     +-- 9011ff3 fix(repo): cover the artifact flow with a structural control
-   |     +-- 2412049 docs(repo): correct the stale numbers in the report
-   |     +-- e1d1d43 docs(repo): record the yaml blocker and close the closure
-   |     +-- 553e320 fix(repo): drop the yaml dependency from the release controls
-   |     +-- f2f3a8f docs(repo): reconcile the final counts of the series
-   |     +-- 9d39341 docs(repo): state the uid references precisely
-   |     +-- 9978ba4 docs(repo): add the staging stage and reconcile the commit graph
-   |     +-- 1e23ab1 docs(repo): record the settings defect and the uid classification
-   |     +-- 9a563ae docs(repo): reconcile the commit counts and the browser evidence
-   |     +-- 7681c39 docs(repo): record the critic verdict and the accepted risks
-   |     +-- d9276bd fix(repo): check the html references by path and gate the release
-   |     +-- 5f6a89b docs(repo): record the critic findings in the report and the register
-   |     +-- 3c3e92f fix(repo): reject a truncated or incomplete web artifact
-   |     +-- dbad02a fix(repo): make the release controls structural instead of textual
-   |     +-- 45125fc fix(repo): remove the decorative dispatch input and the dangling field
-   |     +-- 078b2b3 docs(repo): record the artifact flow defects in the report
-   |     +-- ef1ccd0 fix(repo): pass the artifact from the build job to the deploy job
-   |     +-- c8185ec docs(repo): add the critic findings to the risk register
-   |     +-- 4b39876 docs(repo): record the critic findings and the final verdict
-   |     +-- 66515d4 fix(repo): read the concurrency protection in the release decision
-   |     +-- 23e96e1 fix(repo): restore the reusable trigger and split the release controls
-   |     +-- d40f7d5 docs(repo): write the integration report and the release runbook
-   |     +-- 534a573 test(repo): assert the control registry is complete
-   |     +-- fc09b0d docs(repo): close the docstring and the stale reference findings
-   |     +-- 229a3fb docs(repo): rebuild the commit graph and reconcile the counts
-   |     +-- 93faf49 fix(repo): close the two high findings of the independent critic
-   |     +-- 9011ff3 fix(repo): cover the artifact flow with a structural control
-   |     +-- 2412049 docs(repo): correct the stale numbers in the report
-   |     +-- e1d1d43 docs(repo): record the yaml blocker and close the closure
-   |     +-- 553e320 fix(repo): drop the yaml dependency from the release controls
-   |     +-- f2f3a8f docs(repo): reconcile the final counts of the series
-   |     +-- 9d39341 docs(repo): state the uid references precisely
-   |     +-- 9978ba4 docs(repo): add the staging stage and reconcile the commit graph
-   |     +-- 1e23ab1 docs(repo): record the settings defect and the uid classification
-   |     +-- 9a563ae docs(repo): reconcile the commit counts and the browser evidence
-   |     +-- 7681c39 docs(repo): record the critic verdict and the accepted risks
-   |     +-- d9276bd fix(repo): check the html references by path and gate the release
-   |     +-- 5f6a89b docs(repo): record the critic findings in the report and the register
-   |     +-- 3c3e92f fix(repo): reject a truncated or incomplete web artifact
-   |     +-- dbad02a fix(repo): make the release controls structural instead of textual
-   |     +-- 45125fc fix(repo): remove the decorative dispatch input and the dangling field
-   |     +-- 078b2b3 docs(repo): record the artifact flow defects in the report
-   |     +-- ef1ccd0 fix(repo): pass the artifact from the build job to the deploy job
-   |     +-- c8185ec docs(repo): add the critic findings to the risk register
-   |     +-- 4b39876 docs(repo): record the critic findings and the final verdict
-   |     +-- 66515d4 fix(repo): read the concurrency protection in the release decision
-   |     +-- 23e96e1 fix(repo): restore the reusable trigger and split the release controls
-   |     +-- d40f7d5 docs(repo): write the integration report and the release runbook
-   |     +-- b00cb8b chore(repo): gate the pages deployment on the required CI
+   4316a32  the published Phase 3 (273 commits over master)
+      |
+      +-- b00cb8b chore(repo): gate the pages deployment on the required CI
+         |
+      +-- d40f7d5 docs(repo): write the integration report and the release runbook
+         |
+      +-- 23e96e1 fix(repo): restore the reusable trigger and split the release controls
+         |
+      +-- 66515d4 fix(repo): read the concurrency protection in the release decision
+         |
+      +-- 4b39876 docs(repo): record the critic findings and the final verdict
+         |
+      +-- c8185ec docs(repo): add the critic findings to the risk register
+         |
+      +-- ef1ccd0 fix(repo): pass the artifact from the build job to the deploy job
+         |
+      +-- 078b2b3 docs(repo): record the artifact flow defects in the report
+         |
+      +-- 45125fc fix(repo): remove the decorative dispatch input and the dangling field
+         |
+      +-- dbad02a fix(repo): make the release controls structural instead of textual
+         |
+      +-- 3c3e92f fix(repo): reject a truncated or incomplete web artifact
+         |
+      +-- 5f6a89b docs(repo): record the critic findings in the report and the register
+         |
+      +-- d9276bd fix(repo): check the html references by path and gate the release
+         |
+      +-- 7681c39 docs(repo): record the critic verdict and the accepted risks
+         |
+      +-- 9a563ae docs(repo): reconcile the commit counts and the browser evidence
+         |
+      +-- 1e23ab1 docs(repo): record the settings defect and the uid classification
+         |
+      +-- 9978ba4 docs(repo): add the staging stage and reconcile the commit graph
+         |
+      +-- 9d39341 docs(repo): state the uid references precisely
+         |
+      +-- f2f3a8f docs(repo): reconcile the final counts of the series
+         |
+      +-- 553e320 fix(repo): drop the yaml dependency from the release controls
+         |
+      +-- e1d1d43 docs(repo): record the yaml blocker and close the closure
+         |
+      +-- 2412049 docs(repo): correct the stale numbers in the report
+         |
+      +-- 9011ff3 fix(repo): cover the artifact flow with a structural control
+         |
+      +-- 93faf49 fix(repo): close the two high findings of the independent critic
+         |
+      +-- 229a3fb docs(repo): rebuild the commit graph and reconcile the counts
+         |
+      +-- fc09b0d docs(repo): close the docstring and the stale reference findings
+         |
+      +-- 534a573 test(repo): assert the control registry is complete
+         |
+      +-- 3e694fd docs(repo): record the critic findings and the final counts
+         |
+      +-- 4b3d18a docs(repo): correct the uid facts in the register and the smoke document
 ```
 
-    28 commits on top of the published Phase 3: the release
+    30 commits on top of the published Phase 3: the release
     gate, the documents, and the fixes that the checks and the
     independent critic forced. Every one of them is a single parent,
     so the chain is linear and the candidate remains a strict
     fast-forward of master.
 
-    The arithmetic: 273 (the published Phase 3) + 28 (this series) =
-    301 commits over master.
+    The arithmetic: 273 (the published Phase 3) + 30 (this series) =
+    303 commits over master.
 
     The 11 files the series changed over the published Phase 3:
 
@@ -733,7 +688,7 @@ PHASE 3 -> MASTER INTEGRATION & RELEASE SAFETY
 ```
 
     Every gate was executed and none of them was taken on trust. The
-    BLOCKER of the release path is closed and proved by EIGHT
+    BLOCKER of the release path is closed and proved by TEN
     structural negative controls; the HIGH of the A-H baseline is
     closed and proved by the pinned baseline that HOLDs when it is
     unavailable; the MEDIUM of the export path is closed and proved by
@@ -754,7 +709,7 @@ PHASE 3 -> MASTER INTEGRATION & RELEASE SAFETY
         the runner and turned the REQUIRED battle-ecs job RED. The
         controls now read the workflows as text, like every other CI
         tool of the repository, and they were run under a python where
-        importing yaml raises: 8 of 8 RED, exit 0.
+        importing yaml raises: 10 of 10 RED, exit 0.
 
     The SETTINGS scenario remains NOT VERIFIED: the Settings button is
     declared and never created, so the panel cannot be opened. It is

@@ -15,7 +15,7 @@
     branch            integration/phase3-master-release-rehearsal
     the merge-base    02fe83ef (== master: a strict fast-forward)
     ahead / behind    0 / 301
-    the commits       28 over the published Phase 3, 301 over master
+    the commits       30 over the published Phase 3, 303 over master
 
     The candidate SHA moves with every commit of the series. Read it
     from the repository at the moment of the publication; do NOT copy
@@ -104,7 +104,7 @@ battle-ecs              success
 save-battle-migration   success
 the standalone runner   GREEN
 the A-H differential    PASS
-the release controls    8/8 semantic RED
+the release controls    10/10 semantic RED
 the Pages deployment    NOT TRIGGERED
 ```
 

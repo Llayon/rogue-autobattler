@@ -40,3 +40,7 @@ ios_build/
 *.apk
 *.ipa
 *.zip
+
+# The Python bytecode cache of the tools.
+__pycache__/
+*.pyc

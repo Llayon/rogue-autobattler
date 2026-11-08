@@ -116,19 +116,27 @@ def _block(jobs, job_name):
 
 
 def _job_condition(block):
-    """The `if:` condition of a job, if it has one.
+    """The JOB-LEVEL `if:` condition of a job, if it has one.
 
-    The condition is read SEMANTICALLY: the key is matched with its
-    optional quoting and any spacing, and the value is returned as it
-    stands. A literal substring match on "if: false" would only catch
-    that one spelling -- "if: ${{ false }}", "if: ${{ !cancelled() }}"
-    and "if: github.event_name == 'never'" would all slip through, and
-    the required job could be disabled while every control stayed
-    green.
+    The condition is read SEMANTICALLY: the key is matched with any
+    spacing, and the value is returned as it stands. A literal
+    substring match on "if: false" would only catch that one spelling
+    -- "if: ${{ false }}", "if: ${{ !cancelled() }}" and "if:
+    github.event_name == 'never'" would all slip through, and the
+    required job could be disabled while every control stayed green.
+
+    It is read at the JOB level only. The job keys sit at four
+    spaces; a STEP key sits deeper, and a step-level condition is a
+    legitimate thing to write -- a cleanup step with "if: always()",
+    for instance. Reading the step-level condition as the job-level
+    one would make a perfectly valid workflow fail the controls, and
+    a false RED in the required CI job blocks the publication.
     """
     for line in block.split("\n"):
-        stripped = line.strip()
-        match = re.match(r"^if\s*:\s*(.*)$", stripped)
+        # The job-level keys are indented by exactly four spaces.
+        if not line.startswith("    ") or line.startswith("     "):
+            continue
+        match = re.match(r"^    if\s*:\s*(.*)$", line)
         if match:
             return match.group(1).strip()
     return ""
@@ -237,22 +245,49 @@ def prop_05_no_manual_bypass(release, test):
     needs = _needs_of(release["jobs"], "deploy")
     if "required-tests" not in needs:
         out.append("the deploy does not need the required tests")
-    # A deployment that is conditioned on the manual trigger could
-    # publish without them.
-    for line in deploy.split("\n"):
-        if line.strip().startswith("if:"):
-            out.append("the deploy job is conditioned")
-            break
+    # A deployment that is conditioned at the JOB level could publish
+    # without them. A STEP-level condition is legitimate and is not a
+    # job condition.
+    if _job_condition(deploy):
+        out.append("the deploy job is conditioned: %s"
+                   % _job_condition(deploy))
     return out
 
 
 def prop_06_artifact_validation(release, test):
     """The artifact is validated, and it is the validated bytes that
-    are published."""
+    are published.
+
+    The validation step must be a real GATE, so three things are
+    asserted, not one:
+
+      - it really invokes the validator;
+      - it really targets the BUILD directory;
+      - it does not swallow the failure.
+
+    Without the third one, "python tools/validate_web_artifact.py build
+    || true" would validate nothing and still look like a gate.
+    """
     out = []
     build = release["jobs"].get("web-build", "")
     if "validate_web_artifact.py" not in build:
         out.append("the build does not validate the artifact")
+    else:
+        # The step must target the build directory.
+        invocation = ""
+        for line in build.split("\n"):
+            if "validate_web_artifact.py" in line:
+                invocation = line.strip()
+                break
+        arguments = invocation.split("validate_web_artifact.py", 1)[1]
+        if "build" not in arguments:
+            out.append("the validation does not target the build "
+                       "directory: %s" % invocation)
+        # The step must not swallow the failure.
+        if "|| true" in invocation or "|| true" in build:
+            out.append("the validation swallows its failure")
+        if "continue-on-error" in build:
+            out.append("the build job continues on error")
     # The job that BUILDS the artifact uploads it.
     if "upload-pages-artifact" not in build:
         out.append("the build job does not upload the artifact")
@@ -261,6 +296,30 @@ def prop_06_artifact_validation(release, test):
     if "upload-pages-artifact" in deploy:
         out.append("the deploy job uploads a build/ directory it does "
                    "not have")
+    return out
+
+
+def prop_06b_validation_is_a_gate(release, test):
+    """The validation step must be a real GATE.
+
+    A step that invokes the validator but swallows its failure
+    validates nothing while still looking like a gate. The same goes
+    for a step that targets the wrong directory.
+    """
+    out = []
+    build = release["jobs"].get("web-build", "")
+    for line in build.split("\n"):
+        if "validate_web_artifact.py" not in line:
+            continue
+        invocation = line.strip()
+        if "|| true" in invocation:
+            out.append("the validation swallows its failure: %s" % invocation)
+        arguments = invocation.split("validate_web_artifact.py", 1)[1]
+        if "build" not in arguments:
+            out.append("the validation does not target the build "
+                       "directory: %s" % invocation)
+    if "continue-on-error" in build:
+        out.append("the build job continues on error")
     return out
 
 
@@ -298,6 +357,7 @@ PROPERTIES = {
     "NC-REL-05": prop_05_no_manual_bypass,
     "NC-REL-07": prop_07_no_stale_deployment,
     "NC-REL-09": prop_06_artifact_validation,
+    "NC-REL-10": prop_06b_validation_is_a_gate,
 }
 
 
@@ -381,8 +441,14 @@ MUTATIONS = [
        "          path: build/\n"
        "      - uses: actions/configure-pages@v5")]),
 
+    ("NC-REL-10",
+     "swallow the failure of the artifact validation",
+     "release.yml",
+     [("python tools/validate_web_artifact.py build",
+       "python tools/validate_web_artifact.py build || true")]),
+
     ("NC-REL-07",
-     "allow a stale deployment to supersede a newer commit",
+     "remove the checkout that lets the tip check read the remote",
      "release.yml",
      [("concurrency:\n  group: pages-${{ github.ref }}\n"
        "  cancel-in-progress: false",
