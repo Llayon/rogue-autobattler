@@ -358,7 +358,7 @@ the CI gates            10 / 10 clean
 the A-H differential    PASS (8 + 8 fixtures, both rc=0)
 the CI-01 self-tests    13 / 0 failed
 the CI-02 self-tests    20 / 0 failed
-the release NC          10 / 10 RED, the clean gate ALLOWs
+the release NC          17 / 17 RED, the clean gate ALLOWs
 the hardening NC        14 / 14 RED
 the ledger controls     7 / 7 RED, the ledger VALID
 the historical NC       44 RED, 0 SKIP, 0 INVALID
@@ -391,7 +391,7 @@ the browser smoke       17 of 18 PASS (the settings are NOT VERIFIED:
     turned the REQUIRED battle-ecs job RED. Every other CI tool of the
     repository deliberately avoids yaml, and now the release controls
     do too. They were re-run under a python where importing yaml
-    raises: 10 of 10 RED, exit 0.
+    raises: 17 of 17 RED, exit 0.
 
     It also found TWO HIGH findings in the HARNESS itself, which are
     the most important findings of the whole closure:
@@ -554,6 +554,79 @@ the browser smoke       17 of 18 PASS (the settings are NOT VERIFIED:
     legacy code ever polled, and the ECS imports neither the legacy
     nor the reverse, so the two systems do not depend on each other.
 
+## N2. THE BRANCH AUTHORIZATION
+
+    The deployment is authorized from ONE ref: refs/heads/master.
+
+```
+ALLOWED
+  a push to master
+  a manual dispatch that targets master
+
+DENIED
+  a manual dispatch of a staging branch
+  a manual dispatch of the Phase 3 branch
+  a manual dispatch of a feature branch
+  a manual dispatch of a branch whose name merely ends with master
+  a manual dispatch of a tag
+  a push to a staging branch
+  a pull_request event
+  a scheduled event
+  a workflow_run event
+```
+
+    The guard is the deploy job's own condition:
+
+```
+    if: >-
+      \${{
+        success() &&
+        github.ref == 'refs/heads/master' &&
+        (
+          github.event_name == 'push' ||
+          github.event_name == 'workflow_dispatch'
+        )
+      }}
+```
+
+    The full ref is compared EXACTLY. That is what refuses a tag
+    (refs/tags/v1 is not refs/heads/master) and what refuses a
+    different branch whose name merely ends with master
+    (refs/heads/feature/master).
+
+    success() is spelled out rather than left to the platform default,
+    so the contract is visible in the workflow instead of implied.
+    It is NOT an always() bypass: always() would run the job even
+    when a required job failed, which is exactly what must not
+    happen.
+
+    The required jobs stay mandatory in every allowed case: a failed,
+    skipped or cancelled required job refuses the deployment.
+
+    The controls check this BEHAVIOURALLY. The deploy job's condition
+    is EVALUATED for each scenario, and the property asserts both
+    sides: the forbidden refs and events are refused AND the
+    legitimate master push is still allowed. A property that only
+    ever denies would be satisfied by a workflow that never publishes
+    anything, so the ALLOW side is part of it.
+
+    NC-RB-01  remove the master-ref guard                 RED
+    NC-RB-02  replace it with a guard that accepts any ref RED
+    NC-RB-03  add an or-bypass for another event          RED
+    NC-RB-04  move the guard into an optional step        RED
+    NC-RB-05  replace success() with a failure tolerance   RED
+    NC-RB-06  block even the legitimate master push       RED
+    NC-RB-07  let the build job continue on error         RED
+
+    ENVIRONMENT BRANCH RESTRICTION:
+    NOT VERIFIED / OWNER ACTION REQUIRED
+
+    The github-pages environment can be restricted to master as an
+    INDEPENDENT second line of defence. That is a repository setting
+    and it was NOT changed here. Until it is confirmed, there is no
+    environment-level protection, and the only protection is the
+    deploy job's condition.
+
 ## N. KNOWN LIMITATIONS
 
     1. The LIVE PAGES deployment is NOT verified: there is no
@@ -692,7 +765,7 @@ PHASE 3 -> MASTER INTEGRATION & RELEASE SAFETY
 ```
 
     Every gate was executed and none of them was taken on trust. The
-    BLOCKER of the release path is closed and proved by TEN
+    BLOCKER of the release path is closed and proved by SEVENTEEN
     structural negative controls; the HIGH of the A-H baseline is
     closed and proved by the pinned baseline that HOLDs when it is
     unavailable; the MEDIUM of the export path is closed and proved by
@@ -713,7 +786,7 @@ PHASE 3 -> MASTER INTEGRATION & RELEASE SAFETY
         the runner and turned the REQUIRED battle-ecs job RED. The
         controls now read the workflows as text, like every other CI
         tool of the repository, and they were run under a python where
-        importing yaml raises: 10 of 10 RED, exit 0.
+        importing yaml raises: 17 of 17 RED, exit 0.
 
     The SETTINGS scenario remains NOT VERIFIED: the Settings button is
     declared and never created, so the panel cannot be opened. It is
@@ -757,7 +830,7 @@ PHASE 3 -> MASTER INTEGRATION & RELEASE SAFETY
     unregistered property a hard failure, and the condition check
     distinguishes the job level from the step level by INDENTATION.
 
-    The controls are 10 of 10 RED, with and without pyyaml, and the
+    The controls are 17 of 17 RED, with and without pyyaml, and the
     CLEAN gate ALLOWs every scenario.
 
     The three residual risks that are accepted, with their reasons:

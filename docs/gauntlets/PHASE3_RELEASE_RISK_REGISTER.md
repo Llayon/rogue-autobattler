@@ -18,10 +18,10 @@
              release.yml calls it. The deploy job needs the required
              tests AND the build. The old workflow was deleted, because
              its presence would have published without the gate.
-    Proof:   tools/release_negative_controls.py — NC-REL-01..10, all
+    Proof:   tools/release_negative_controls.py — NC-REL-01..10 and NC-RB-01..07, all
              semantic RED; the clean gate ALLOWs the good scenario
              only.
-             SEVEN of the TEN are GATE controls: they mutate the
+             EIGHT of the SEVENTEEN are GATE controls: they mutate the
              workflows and assert a property of the parsed result.
              NC-REL-06 and NC-REL-08 are VALIDATOR controls: they
              mutate the validator itself and compare two validator
@@ -33,6 +33,65 @@
               DEPLOYMENT.
 
 ## HIGH
+
+### H-09 — the deployment could be authorized from any ref by a manual dispatch
+
+    Status:  PROVEN DEFECT — FIXED
+    Found:   the release workflow had "on: push: branches: [master]" AND
+             "workflow_dispatch:", and the deploy job carried NO
+             job-level condition. A manual dispatch runs the workflow
+             file of the SELECTED ref, and github.ref is then that
+             ref. So a dispatch of staging, phase3, a feature branch
+             or a tag would build, validate and PUBLISH that SHA to
+             GitHub Pages, as long as the tests of the same ref were
+             green.
+             The tip-check did not close it: it compares the SHA with
+             the tip of the DISPATCHED ref, so for a dispatch on
+             staging the dispatched SHA IS the tip and the check
+             passes. It guards against staleness, not against the
+             wrong branch.
+    Fix:     the deploy job carries the authorization explicitly:
+             success() AND github.ref == 'refs/heads/master' AND the
+             event is push or workflow_dispatch. The full ref is
+             compared EXACTLY, so a tag and a branch whose name merely
+             ends with master are both refused.
+    Residual: the github-pages environment is NOT confirmed to be
+              restricted to master. That is a repository setting and
+              it was NOT changed by this series, so there is no
+              independent environment-level protection yet:
+              ENVIRONMENT BRANCH RESTRICTION:
+              NOT VERIFIED / OWNER ACTION REQUIRED.
+              The only protection is the deploy job's condition.
+    Proof:   the branch authorization is checked by EVALUATING the
+             deploy job's condition, not by searching for a string.
+             Seven new controls, NC-RB-01..07, and the property
+             asserts BOTH sides: the forbidden refs and events are
+             refused AND the legitimate master push is still allowed.
+             17 of 17 controls are RED.
+             The matrix: push master ALLOW, manual master ALLOW,
+             manual staging/phase3/feature/tag/pull_request/schedule
+             DENY, a failed required job DENY.
+
+### H-08 — the concurrency comment described a cancellation that did not happen
+
+    Status:  PROVEN DEFECT — FIXED
+    Found:   the comment said "a newer commit on the same branch
+             cancels the older run". With cancel-in-progress: false
+             the older run finishes FIRST and the newer one QUEUES
+             behind it. A reader would have believed there were no
+             ordering guarantee, and would not have looked for the
+             mechanism that actually provides it.
+    Fix:     the comment now states what the group does, what it does
+             NOT do, that the tip-check is the real protection, and
+             that the guarantee is NOT atomic: the tip-check and the
+             publication are two separate steps, so a commit pushed
+             between them is not seen. The window is small, the
+             concurrency group bounds the outcome, and the older
+             publication did happen briefly.
+    Residual: closing that window would need a protocol that
+             re-checks the tip at the moment of the publication. That
+             is a substantially more complex protocol and is recorded
+             here rather than built in a hardening pass.
 
 ### H-07 — the "the job never runs" check was a literal substring match
 
@@ -91,7 +150,7 @@
              audit, the reachability audit and the three other
              negative-control harnesses all avoid yaml).
     Proof:   the controls were run under a python where importing yaml
-             raises ImportError, exactly as on a bare runner: 8 of 8
+             raises ImportError, exactly as on a bare runner: 17 of 17
              RED, exit 0. There is no "import yaml" anywhere in the
              repository now.
 

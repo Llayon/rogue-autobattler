@@ -128,6 +128,49 @@ the Pages deployment    NOT TRIGGERED
     merge-base is master itself, so a merge would add an empty merge
     commit and hide the fact that the history is linear.
 
+## The branch authorization
+
+    The publication is authorized from ONE ref: refs/heads/master.
+
+```
+ALLOWED
+  a push to master
+  a manual dispatch that targets master
+
+DENIED
+  a manual dispatch of a staging branch
+  a manual dispatch of the Phase 3 branch
+  a manual dispatch of a feature branch
+  a manual dispatch of a branch whose name merely ends with master
+  a manual dispatch of a tag
+  a push to a staging branch
+  a pull_request event
+  a scheduled event
+  a workflow_run event
+```
+
+    A manual dispatch that targets any other ref is REFUSED by the
+    deploy job's own condition. The refusal is not a warning: the
+    job does not run, so nothing is published.
+
+    The required jobs stay mandatory in every allowed case: a failed,
+    skipped or cancelled required job refuses the deployment.
+
+    ENVIRONMENT BRANCH RESTRICTION:
+    NOT VERIFIED / OWNER ACTION REQUIRED
+
+    The github-pages environment can be restricted to master as an
+    independent second line of defence. That is a repository setting
+    and it is NOT changed by this series. Until the owner confirms
+    it, the only protection is the deploy job's condition.
+
+    To restrict the environment, the owner sets, in the repository
+    settings under Environments -> github-pages -> Deployment
+    branches, the branch policy to "Selected branches" and adds
+    ONLY master. The verification, afterwards, is a manual dispatch
+    of a staging branch: it must be refused, and the Pages site must
+    not change.
+
 ## Stage 4 — POST-MERGE CI
 
     1. Confirm the master SHA:

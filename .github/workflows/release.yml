@@ -42,10 +42,31 @@ on:
 permissions:
   contents: read
 
-# R3.3: a stale run must not overwrite a newer publication. The group
-# is per BRANCH, so a newer commit on the same branch cancels the older
-# run -- and the deploy job additionally verifies that the SHA it is
-# about to publish is still the tip of the branch.
+# R3.3 / RB4: the publication of one ref is serialized.
+#
+# WHAT THIS DOES: two runs of the SAME ref do not run at the same
+# time. The second one QUEUES behind the first.
+#
+# WHAT THIS DOES NOT DO: it does NOT cancel the older run. With
+# cancel-in-progress: false the OLDER run finishes FIRST and the
+# newer one runs afterwards. An earlier version of this comment said
+# that a newer commit cancels the older run; that was wrong, and it
+# would have made a reader believe there were no ordering guarantee.
+#
+# WHAT PREVENTS A STALE PUBLICATION: the tip-check in the deploy job.
+# It compares the SHA that is about to be published with the tip of
+# the branch and refuses when they differ. An unreadable tip is a
+# HOLD, never a GREEN.
+#
+# THE RESIDUAL WINDOW: the tip-check and the publication are two
+# separate steps, so a newer commit pushed between them is not seen.
+# The window is small and the guarantee is NOT atomic. The
+# concurrency group bounds the outcome: the newer run cannot start
+# until the older one has finished, so the newer publication happens
+# after the older one and wins -- but the older publication did
+# happen, briefly. Closing that window would need a protocol that
+# re-checks the tip at the moment of the publication, which is
+# recorded as a residual risk rather than built here.
 concurrency:
   group: pages-${{ github.ref }}
   cancel-in-progress: false
@@ -172,11 +193,22 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      # R3.3: a run that is no longer the tip of the branch must not
-      # overwrite the newer publication. The concurrency group cancels
-      # the OLDER run of the same branch, but an already RUNNING
-      # deployment is not guaranteed to be cancelled -- so the deploy
-      # job checks the tip itself and refuses to publish a stale SHA.
+      # R3.3 / RB4: a run that is no longer the tip of the branch must
+      # not overwrite the newer publication.
+      #
+      # The concurrency group does NOT cancel the older run --
+      # cancel-in-progress is false, so the older run finishes first
+      # and the newer one queues behind it. The guarantee against a
+      # stale publication therefore rests on THIS check, and not on
+      # the concurrency group.
+      #
+      # The check is fail-closed: an unreadable tip is a HOLD, never
+      # a GREEN, because a check that compared nothing would silently
+      # approve everything.
+      #
+      # The residual window: this check and the publication are two
+      # separate steps, so a commit pushed between them is not seen.
+      # The guarantee is not atomic.
       #
       # The checkout is REQUIRED: without a repository there is no
       # remote to ask, and the check would silently compare nothing.
