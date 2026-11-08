@@ -174,6 +174,7 @@ NC-REL-04  remove the SHA identity check                RED
 NC-REL-05  allow a manual deployment bypass             RED
 NC-REL-06  accept a missing index.html                  RED
 NC-REL-07  allow a stale deployment to supersede        RED
+NC-REL-08  accept a reference to a missing path         RED
 the clean gate: ALLOW (every gate passed)
 ```
 
@@ -374,6 +375,40 @@ the browser smoke       16 of 18 PASS, 2 NOT REACHED
     the 64 KB WASM, the wrong magic bytes and the missing `.pck` all
     DENY.
 
+    ### The html references were compared by basename
+
+    The critic showed that the reference check compared only the
+    BASENAME: a reference to "subdir/index.js" passed when "index.js"
+    sat at the root. The site is served from the artifact root, so the
+    reference would 404 in production while the validator reported
+    PASS.
+
+    **Closed.** The check now resolves the reference against the
+    deployment root, refuses an absolute reference, and refuses one
+    that resolves outside the artifact. The measured verdict for the
+    critic's exact scenario is DENY. NC-REL-08 was added for the
+    class.
+
+    ### The release controls only ran locally
+
+    The critic required the controls to be wired into CI: a control
+    that nobody runs can be bypassed by a future edit that nobody
+    checks.
+
+    **Closed.** They run in the battle-ecs job -- the required job the
+    deployment depends on -- so a broken release gate BLOCKS the
+    publication instead of being discovered after it.
+
+    ### The critic's verdict
+
+    The critic returned HOLD, and stated explicitly that there was no
+    HIGH in the YAML gate as it stood. Its HOLD rested on the two
+    findings above: the inverted evidence (F-01) and the incomplete
+    artifact (F-02), both of which are now closed and proved. The
+    critic also confirmed clean all twenty hunt items, the
+    double-application question, the absence of any legacy/ECS
+    dependency, and that nothing was pushed and master was untouched.
+
     ### What the critic confirmed clean
 
     The critic ran the full regression itself: 120 suites, 9174
@@ -420,7 +455,19 @@ the browser smoke       16 of 18 PASS, 2 NOT REACHED
    |     +-- c8185ec  docs(repo): add the critic findings to the risk
    |     |            register
    |     +-- ef1ccd0  fix(repo): pass the artifact from the build job to
-   |                  the deploy job
+   |     |            the deploy job
+   |     +-- 078b2b3  docs(repo): record the artifact flow defects in the
+   |     |            report
+   |     +-- 45125fc  fix(repo): remove the decorative dispatch input and
+   |     |            the dangling field
+   |     +-- dbad02a  fix(repo): make the release controls structural
+   |     |            instead of textual
+   |     +-- 3c3e92f  fix(repo): reject a truncated or incomplete web
+   |     |            artifact
+   |     +-- 5f6a89b  docs(repo): record the critic findings in the report
+   |     |            and the register
+   |     +-- d9276bd  fix(repo): check the html references by path and
+   |                  gate the release
 ```
 
     Four commits on top of the published Phase 3: the release gate,
@@ -442,17 +489,33 @@ PHASE 3 -> MASTER INTEGRATION & RELEASE SAFETY
 ```
 
     Every gate was executed and none of them was taken on trust. The
-    BLOCKER of the release path is closed and proved by seven negative
-    controls; the HIGH of the A-H baseline is closed and proved by the
-    pinned baseline that HOLDs when it is unavailable; the MEDIUM of
-    the export path is closed and proved by a clean local export; the
-    two findings of the independent critic are closed and proved.
+    BLOCKER of the release path is closed and proved by EIGHT
+    structural negative controls; the HIGH of the A-H baseline is
+    closed and proved by the pinned baseline that HOLDs when it is
+    unavailable; the MEDIUM of the export path is closed and proved by
+    a clean local export.
+
+    The independent critic returned HOLD. Its HOLD rested on the
+    inverted evidence (the controls proved nothing) and on the
+    incomplete artifact (a 4-byte WASM passed). BOTH are closed and
+    proved, and the two further findings it named are closed as well.
+    The critic confirmed clean all twenty hunt items.
 
     There is no open HIGH or BLOCKER. The known limitations of section
     N are real and are NOT hidden: the live Pages deployment, the
     environment restrictions and the two browser scenarios that were
     not reached remain unverified, and the crash recovery and the
     atomic MetaProfile remain the business of A0.
+
+    The three residual risks that are accepted, with their reasons:
+
+      - the A-H baseline is pinned rather than HEAD^: stable, and the
+        runbook names the deliberate refresh step;
+      - the legacy and the ECS combat systems both carry Shield
+        Block: isolated by three independent mechanisms, so the
+        effect cannot be applied twice;
+      - the Pages environment restrictions are not verified locally:
+        they are only verifiable against the real deployment.
 
     Nothing was pushed, nothing was merged, nothing was deployed, and
     master was not touched. The publication is prepared; the DECISION

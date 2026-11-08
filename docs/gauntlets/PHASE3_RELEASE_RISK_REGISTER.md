@@ -136,7 +136,18 @@
     was not. A committed Pages artifact could only ever be a stale
     one. Both directories are ignored now.
 
-### L-02 — the reusable trigger had been reverted
+### L-02 — the html references were compared by basename
+
+    Status:  PROVEN DEFECT — FIXED
+    Found:   a reference to "subdir/index.js" passed when "index.js"
+             sat at the root, so a broken reference would 404 in
+             production while the validator reported PASS.
+    Fix:     the check resolves the reference against the deployment
+             root and refuses an absolute or an escaping reference.
+    Proof:   the critic's exact scenario is DENY, and NC-REL-08 keeps
+             it that way.
+
+### L-03 — the reusable trigger had been reverted
 
     Status:  PROVEN DEFECT — FIXED
     Found:   a strict YAML audit (parse the workflows, assert the
@@ -151,7 +162,7 @@
     Fix:     the trigger and the permission are restored and the YAML
              is parsed and asserted afterwards.
 
-### L-03 — the .uid files are not tracked
+### L-04 — the .uid files are not tracked
 
     Status:  OBSERVATION — NOT A DEFECT
     The base tracks no .uid file at all (0 of 128 .gd files), and the
