@@ -726,9 +726,35 @@ PHASE 3 -> MASTER INTEGRATION & RELEASE SAFETY
 
     There is no open HIGH or BLOCKER. The known limitations of section
     N are real and are NOT hidden: the live Pages deployment, the
-    environment restrictions and the two browser scenarios that were
-    not reached remain unverified, and the crash recovery and the
-    atomic MetaProfile remain the business of A0.
+    environment restrictions and the settings scenario remain
+    unverified, and the crash recovery and the atomic MetaProfile
+    remain the business of A0.
+
+    The closure pass itself was reviewed twice, and both reviews found
+    real defects -- in the HARNESS, not in the workflow. The ones that
+    mattered:
+
+      - the release controls imported yaml, and no workflow installs
+        pyyaml: the step would have failed on the runner and turned
+        the REQUIRED battle-ecs job RED. It would only ever have
+        appeared on the real CI.
+      - a property function was defined and never registered, so the
+        artifact flow had no control at all.
+      - the "the job never runs" check was a literal substring match,
+        so a required job that kept its name and carried any other
+        guard was invisible.
+      - the same check then over-corrected and read a STEP-level
+        condition as a job-level one, so a legitimate cleanup step
+        would have made the required job go RED. That one was a live
+        CI-breaking false positive.
+
+    Each is closed, and the last two classes are now impossible by
+    construction: the registry completeness check makes an
+    unregistered property a hard failure, and the condition check
+    distinguishes the job level from the step level by INDENTATION.
+
+    The controls are 10 of 10 RED, with and without pyyaml, and the
+    CLEAN gate ALLOWs every scenario.
 
     The three residual risks that are accepted, with their reasons:
 
