@@ -219,13 +219,41 @@ the absolute paths    0
     does not exist or is not accessible", while the Linux CI resolves
     it. The workflow now exports to an absolute path.
 
+    The closure pass repeated it from a checkout that contained ONLY
+    the tracked files: no .godot/, no build/, no untracked .uid, no
+    local cache. The import reported zero errors, the export produced
+    the complete artifact, the validation passed, and index.html,
+    index.js and index.wasm came out BYTE-FOR-BYTE identical to the
+    build of the working tree. The clean build was then loaded in the
+    same browser: the WASM initialized, the menu appeared, a new run
+    started, the battle ran and ended in a win, and the REWARD screen
+    offered the three units.
+
+    The 88 untracked .uid files are NOT a hidden dependency: the
+    shipping content references no uid:// path, and the clean checkout
+    without them exported perfectly.
+
 ## I. BROWSER SMOKE
 
     LOCAL WEB SMOKE. Chrome 156.0.8078.80 (headless, CDP), a local
     HTTP server, the real WASM runtime. NOT a live Pages deployment.
 
-    16 of the 18 scenarios PASS, 2 were NOT REACHED (the TREASURE
-    route and the settings). The full evidence is in
+    17 of the 18 scenarios PASS. The TREASURE was verified in the
+    real browser with the real WASM build: the production route was
+    walked, the production handler applied the effect exactly once,
+    the gold rose by the production constant (31 -> 36), the
+    inventory gained one item, the meta profile gained one unlock, the
+    checkpoint recorded the stable phase, a reload restored
+    everything, and re-selecting the treasure granted nothing twice.
+
+    The SETTINGS scenario is NOT VERIFIED, and the reason is a real
+    defect in the shipping game: the Settings button is declared and
+    never created, so the panel cannot be opened. It is a
+    PRE-EXISTING defect -- the same is true on master -- and the
+    panel is never exercised by any test. The setting itself works
+    and is persisted; only the way in is missing.
+
+    The full evidence, with the absolute values, is in
     docs/gauntlets/LOCAL_WEB_SMOKE.md.
 
     The three findings that matter:
@@ -456,41 +484,32 @@ the browser smoke       16 of 18 PASS, 2 NOT REACHED
    |
    +-- 4316a32  the published Phase 3 (273 commits over master)
    |     |
-   |     +-- b00cb8b  chore(repo): gate the pages deployment on the
-   |     |            required CI
-   |     +-- d40f7d5  docs(repo): write the integration report and the
-   |     |            release runbook
-   |     +-- 23e96e1  fix(repo): restore the reusable trigger and split
-   |     |            the release controls
-   |     +-- 66515d4  fix(repo): read the concurrency protection in the
-   |     |            release decision
-   |     +-- 4b39876  docs(repo): record the critic findings and the final
-   |     |            verdict
-   |     +-- c8185ec  docs(repo): add the critic findings to the risk
-   |     |            register
-   |     +-- ef1ccd0  fix(repo): pass the artifact from the build job to
-   |     |            the deploy job
-   |     +-- 078b2b3  docs(repo): record the artifact flow defects in the
-   |     |            report
-   |     +-- 45125fc  fix(repo): remove the decorative dispatch input and
-   |     |            the dangling field
-   |     +-- dbad02a  fix(repo): make the release controls structural
-   |     |            instead of textual
-   |     +-- 3c3e92f  fix(repo): reject a truncated or incomplete web
-   |     |            artifact
-   |     +-- 5f6a89b  docs(repo): record the critic findings in the report
-   |     |            and the register
-   |     +-- d9276bd  fix(repo): check the html references by path and
-   |     |            gate the release
-   |     +-- 7681c39  docs(repo): record the critic verdict and the
-   |                  accepted risks
+   |     +-- 1e23ab1 docs(repo): record the settings defect and the uid classification
+   |     +-- 9a563ae docs(repo): reconcile the commit counts and the browser evidence
+   |     +-- 7681c39 docs(repo): record the critic verdict and the accepted risks
+   |     +-- d9276bd fix(repo): check the html references by path and gate the release
+   |     +-- 5f6a89b docs(repo): record the critic findings in the report and the register
+   |     +-- 3c3e92f fix(repo): reject a truncated or incomplete web artifact
+   |     +-- dbad02a fix(repo): make the release controls structural instead of textual
+   |     +-- 45125fc fix(repo): remove the decorative dispatch input and the dangling field
+   |     +-- 078b2b3 docs(repo): record the artifact flow defects in the report
+   |     +-- ef1ccd0 fix(repo): pass the artifact from the build job to the deploy job
+   |     +-- c8185ec docs(repo): add the critic findings to the risk register
+   |     +-- 4b39876 docs(repo): record the critic findings and the final verdict
+   |     +-- 66515d4 fix(repo): read the concurrency protection in the release decision
+   |     +-- 23e96e1 fix(repo): restore the reusable trigger and split the release controls
+   |     +-- d40f7d5 docs(repo): write the integration report and the release runbook
+   |     +-- b00cb8b chore(repo): gate the pages deployment on the required CI
 ```
 
-    FOURTEEN commits on top of the published Phase 3: the release
+    SIXTEEN commits on top of the published Phase 3: the release
     gate, the documents, and the fixes that the checks and the
     independent critic forced. Every one of them is a single parent,
     so the chain is linear and the candidate remains a strict
     fast-forward of master.
+
+    The arithmetic: 273 (the published Phase 3) + 16 (this series) =
+    289 commits over master.
 
     The 11 files the series changed over the published Phase 3:
 

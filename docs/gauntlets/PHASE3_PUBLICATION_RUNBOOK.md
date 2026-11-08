@@ -8,10 +8,15 @@
 
     master            02fe83ef378d13965184c6224a512a91ae6263a1
     phase3            4316a32e210b8660b77a6eda916fb28c4f3bcb8a
-    the candidate     b00cb8b4a46aca231e0558511794b1f0901dad47
+    the candidate     1e23ab1
     branch            integration/phase3-master-release-rehearsal
     the merge-base    02fe83ef (== master: a strict fast-forward)
-    ahead / behind    0 / 274
+    ahead / behind    0 / 289
+    the commits       15 over the published Phase 3, 289 over master
+
+    The candidate SHA moves with every commit of the series. Read it
+    from the repository at the moment of the publication; do NOT copy
+    it from a document.
 
 ## Stage 1 — FREEZE
 
@@ -60,6 +65,48 @@
          are understood;
        - the environment's deployment branch rule accepts master;
        - the Pages source is set to "GitHub Actions".
+
+## Stage 2b — THE STAGING RUN (the safe first step)
+
+    The staging branch exists so that the REAL GitHub Actions can be
+    exercised WITHOUT any risk of a Pages publication.
+
+    The structural guarantee, verified locally:
+
+```
+.github/workflows/release.yml   push:  branches: [master]
+.github/workflows/test.yml      push:  every branch
+                                pull_request, workflow_call
+```
+
+    A push to the staging branch therefore starts the test workflow:
+    save-battle-migration, battle-ecs and the release negative
+    controls. It does NOT start the release workflow, so the Pages
+    deployment cannot happen.
+
+    The command, once the owner authorizes it:
+
+         git -C <worktree> push canonical \
+             HEAD:refs/heads/staging/phase3-master-release-rehearsal
+
+    A NEW branch, so no force, no rebase and no reset are involved.
+    The pre-push gate is the same as the one below: the source SHA,
+    the clean worktree, the diff --check, the merge-base and the
+    ahead/behind.
+
+    What the run must show, and what it must NOT show:
+
+```
+battle-ecs              success
+save-battle-migration   success
+the standalone runner   GREEN
+the A-H differential    PASS
+the release controls    8/8 semantic RED
+the Pages deployment    NOT TRIGGERED
+```
+
+    The Pages deployment NOT being triggered is a POSITIVE result of
+    the staging run: it proves the branch filter holds.
 
 ## Stage 3 — INTEGRATION
 
