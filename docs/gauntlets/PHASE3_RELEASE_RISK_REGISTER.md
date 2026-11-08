@@ -27,6 +27,32 @@
 
 ## HIGH
 
+### H-05 — the settings UI is unreachable
+
+    Status:  PROVEN DEFECT — NOT FIXED HERE (out of scope)
+    Found:   `_settings_button` is DECLARED in
+             scenes/main_menu/main_menu.gd and never created, so the
+             "Battle Speed" panel cannot be opened. The commit that
+             introduced the feature (ebb304c) claimed in its message
+             that the Settings button opens the panel and never wrote
+             that button.
+    Scope:   this is a PRE-EXISTING defect, NOT a regression of this
+             series: the same is true on master, and the panel is
+             never exercised by any test, which is why it survived.
+    Impact:  the setting itself WORKS -- `_set_speed()` writes
+             `MetaProfile.battle_speed` through
+             `SaveService.save_meta()`, and `battle_scene.gd` reads
+             `profile.battle_speed` for the battle speed -- but the
+             PLAYER cannot reach it.
+    Verified: in the real browser the main menu carries only "New
+             Run" and "Continue"; clicking every plausible spot opens
+             no panel.
+    Decision: adding the missing button is a UI FEATURE change, and
+             this closure is an integration and staging-readiness
+             pass, not a feature sprint. It is recorded here as an
+             ACCEPTED RISK for the staging run and named as a
+             separate follow-up.
+
 ### H-03 — the release negative controls proved nothing
 
     Status:  PROVEN DEFECT — FIXED
@@ -118,13 +144,37 @@
               headless runtimes are covered by the save suites, not
               by a browser. NOT VERIFIED UNTIL A REAL DEPLOYMENT.
 
+### M-04 — the 88 .gd files of Phase 3 have no tracked .uid
+
+    Status:  OBSERVATION — NOT A BUILD DEPENDENCY
+    Found:   the repository tracks 174 .uid files and every one of
+             them has its source file. The 88 .gd files that Phase 3
+             added under core/battle_ecs/ have NO tracked .uid, and
+             the 88 untracked .uid files in the working tree are
+             exactly those files. The shipping content references no
+             uid:// path at all.
+    Proof:   the CLEAN checkout -- tracked files only, no untracked
+             .uid, no .godot, no build -- imported with ZERO errors
+             and exported a complete artifact. index.html, index.js
+             and index.wasm are byte-for-byte identical to the build
+             of the working tree.
+    Decision: the .uid files are a by-product of the import, not a
+             dependency of the build. Adding the 88 would be a
+             deliberate change to the repository's convention, and it
+             is not done in a closure pass.
+
 ### M-03 — the local browser smoke did not reach two scenarios
 
-    Status:  COVERAGE GAP — NOT A PROVEN DEFECT
-    WEB-14 (TREASURE) and WEB-15 (settings) were not reached: the run
-    in that session never routed through a TREASURE, and the main
-    menu exposes no settings control the automation could reach.
-    Neither is claimed as working.
+    Status:  PARTIALLY CLOSED
+    WEB-14 (TREASURE) is now VERIFIED in the real browser with the
+    real WASM build: the production route was walked, the production
+    handler applied the effect exactly once, the gold rose by the
+    production constant (31 -> 36), the inventory gained one item, the
+    meta profile gained one unlock, the checkpoint recorded the stable
+    phase, and a reload restored everything. Re-selecting the
+    treasure granted nothing twice.
+    WEB-15 (settings) remains NOT VERIFIED: the UI is unreachable --
+    see H-05.
 
 ## LOW
 
