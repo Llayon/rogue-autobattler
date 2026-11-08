@@ -21,7 +21,7 @@
     Proof:   tools/release_negative_controls.py — NC-REL-01..09, all
              semantic RED; the clean gate ALLOWs the good scenario
              only.
-             Six of the nine are GATE controls: they mutate the
+             SEVEN of the nine are GATE controls: they mutate the
              workflows and assert a property of the parsed result.
              NC-REL-06 and NC-REL-08 are VALIDATOR controls: they
              mutate the validator itself and compare two validator
@@ -212,15 +212,21 @@
               headless runtimes are covered by the save suites, not
               by a browser. NOT VERIFIED UNTIL A REAL DEPLOYMENT.
 
-### M-04 — the 88 .gd files of Phase 3 have no tracked .uid
+### M-04 — the 88 .gd files without a tracked .uid
 
     Status:  OBSERVATION — NOT A BUILD DEPENDENCY
     Found:   the repository tracks 174 .uid files and every one of
-             them has its source file. The 88 .gd files that Phase 3
-             added under core/battle_ecs/ have NO tracked .uid, and
-             the 88 untracked .uid files in the working tree are
-             exactly those files. The shipping content references no
-             uid:// path at all.
+             them has its source file. 88 .gd files have NO tracked
+             .uid, and the 88 untracked .uid files in the working
+             tree are exactly those files -- the comparison is empty
+             in both directions.
+
+             They are NOT all under core/battle_ecs/: 63 are under
+             tests/, 19 under core/battle_ecs/ and 6 under other
+             core/. And 13 of the 88 pre-date Phase 3 -- they were
+             already missing a .uid on master.
+
+             The shipping content references no uid:// path at all.
     Proof:   the CLEAN checkout -- tracked files only, no untracked
              .uid, no .godot, no build -- imported with ZERO errors
              and exported a complete artifact. index.html, index.js
@@ -280,14 +286,39 @@
     Fix:     the trigger and the permission are restored and the YAML
              is parsed and asserted afterwards.
 
-### L-04 — the .uid files are not tracked
+### L-04 — the .uid coverage of the repository is incomplete
 
-    Status:  OBSERVATION — NOT A DEFECT
-    The base tracks no .uid file at all (0 of 128 .gd files), and the
-    134 .gd files Phase 3 added have no .uid either. They are Godot
-    import artifacts, generated on import, and the CI import step
-    regenerates them. The 88 that appeared in the worktree were left
-    untracked on purpose.
+    Status:  OBSERVATION — NOT A BUILD DEPENDENCY
+    The MEASURED facts, which correct an earlier version of this
+    register:
+
+```
+master            114 .uid over 128 .gd
+phase 3           174 .uid over 262 .gd
+the candidate     174 .uid over 262 .gd
+
+the .gd files with NO tracked .uid at the candidate   88
+  of those, ADDED by Phase 3                          75
+  of those, already missing on master                  13
+  where they are:  tests/ 63, core/battle_ecs/ 19, other core/ 6
+
+the untracked .uid files in the working tree          88
+  the same set as the 88, in both directions
+```
+
+    So the repository DOES track .uid files, and 59 of the 134
+    scripts Phase 3 added came with one. The gap is 75 of them plus
+    the 13 that were already missing on master.
+
+    It is NOT a build dependency: the shipping content references no
+    uid:// path (every .tres references its script by PATH), and the
+    CLEAN checkout -- tracked files only, no untracked .uid, no
+    .godot, no build -- imported with ZERO errors and exported a
+    complete artifact whose html, js and wasm are byte-for-byte
+    identical to the working tree build.
+
+    Adding the 88 would be a deliberate change to the repository's
+    convention, and it is not done in a closure pass.
 
 ## ACCEPTED
 

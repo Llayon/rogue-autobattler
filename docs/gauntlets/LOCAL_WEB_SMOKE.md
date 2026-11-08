@@ -163,10 +163,13 @@ index.wasm  39509339   index.pck  1893188
 the tracked .uid files                  174
   without their source file               0   (no orphans)
 the .gd sources without a tracked .uid    88
-  and those 88 are exactly the .gd files Phase 3 added under
-  core/battle_ecs/, and the 88 untracked .uid files in the working
-  tree are the SAME set -- the comparison is empty in both
+  of those, added by Phase 3               75
+  of those, already missing on master      13
+  where they are:  tests/ 63, core/battle_ecs/ 19, other core/ 6
+the untracked .uid files in the working tree  88
+  the SAME set as the 88 -- the comparison is empty in both
   directions
+the master baseline                   114 .uid over 128 .gd
 ```
 
     Where the uid:// references actually live:
