@@ -8,11 +8,11 @@
 
     master            02fe83ef378d13965184c6224a512a91ae6263a1
     phase3            4316a32e210b8660b77a6eda916fb28c4f3bcb8a
-    the candidate     1e23ab1
+    the candidate     (the final commit of this series)
     branch            integration/phase3-master-release-rehearsal
     the merge-base    02fe83ef (== master: a strict fast-forward)
-    ahead / behind    0 / 289
-    the commits       15 over the published Phase 3, 289 over master
+    ahead / behind    0 / 292
+    the commits       19 over the published Phase 3, 292 over master
 
     The candidate SHA moves with every commit of the series. Read it
     from the repository at the moment of the publication; do NOT copy
