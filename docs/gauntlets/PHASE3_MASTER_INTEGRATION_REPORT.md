@@ -597,9 +597,30 @@ the browser smoke       17 of 18 PASS (the settings are NOT VERIFIED:
    |     +-- 66515d4 fix(repo): read the concurrency protection in the release decision
    |     +-- 23e96e1 fix(repo): restore the reusable trigger and split the release controls
    |     +-- d40f7d5 docs(repo): write the integration report and the release runbook
+   |     +-- 93faf49 fix(repo): close the two high findings of the independent critic
+   |     +-- 9011ff3 fix(repo): cover the artifact flow with a structural control
+   |     +-- 2412049 docs(repo): correct the stale numbers in the report
+   |     +-- e1d1d43 docs(repo): record the yaml blocker and close the closure
+   |     +-- 553e320 fix(repo): drop the yaml dependency from the release controls
+   |     +-- f2f3a8f docs(repo): reconcile the final counts of the series
+   |     +-- 9d39341 docs(repo): state the uid references precisely
+   |     +-- 9978ba4 docs(repo): add the staging stage and reconcile the commit graph
+   |     +-- 1e23ab1 docs(repo): record the settings defect and the uid classification
+   |     +-- 9a563ae docs(repo): reconcile the commit counts and the browser evidence
+   |     +-- 7681c39 docs(repo): record the critic verdict and the accepted risks
+   |     +-- d9276bd fix(repo): check the html references by path and gate the release
+   |     +-- 5f6a89b docs(repo): record the critic findings in the report and the register
+   |     +-- 3c3e92f fix(repo): reject a truncated or incomplete web artifact
+   |     +-- dbad02a fix(repo): make the release controls structural instead of textual
+   |     +-- 45125fc fix(repo): remove the decorative dispatch input and the dangling field
+   |     +-- 078b2b3 docs(repo): record the artifact flow defects in the report
+   |     +-- ef1ccd0 fix(repo): pass the artifact from the build job to the deploy job
+   |     +-- c8185ec docs(repo): add the critic findings to the risk register
+   |     +-- 4b39876 docs(repo): record the critic findings and the final verdict
+   |     +-- 66515d4 fix(repo): read the concurrency protection in the release decision
+   |     +-- 23e96e1 fix(repo): restore the reusable trigger and split the release controls
+   |     +-- d40f7d5 docs(repo): write the integration report and the release runbook
    |     +-- b00cb8b chore(repo): gate the pages deployment on the required CI
-   |     +-- (this documentation commit)  docs(repo): record the yaml blocker
-   |     +-- (the final documentation commit)  docs(repo): close the pre-publication closure
 ```
 
     25 commits on top of the published Phase 3: the release
