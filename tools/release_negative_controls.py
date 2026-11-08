@@ -225,6 +225,15 @@ def prop_07_no_stale_deployment(release, test):
 
 
 # The properties, by control name.
+# The properties of the GATE, one per control. NC-REL-06 and
+# NC-REL-08 are NOT here: they measure the ARTIFACT VALIDATOR, not the
+# gate, and they have their own branches. The registry carries only
+# the gate properties, so every entry really is checked by the
+# property it names.
+#
+# NC-REL-09 covers the artifact FLOW: the job that builds the
+# artifact uploads it, and the deploy job does not upload a directory
+# it does not have.
 PROPERTIES = {
     "NC-REL-01": prop_01_battle_ecs_dependency,
     "NC-REL-02": prop_02_save_dependency,
@@ -232,6 +241,7 @@ PROPERTIES = {
     "NC-REL-04": prop_04_sha_identity,
     "NC-REL-05": prop_05_no_manual_bypass,
     "NC-REL-07": prop_07_no_stale_deployment,
+    "NC-REL-09": prop_06_artifact_validation,
 }
 
 
@@ -301,6 +311,19 @@ MUTATIONS = [
        "            fail(\"the index.html references %s, which the artifact "
        "does \"\n"
        "                 \"not carry\" % os.path.basename(ref), problems)")]),
+
+    ("NC-REL-09",
+     "upload the artifact from the deploy job instead of the build job",
+     "release.yml",
+     [("      - uses: actions/upload-pages-artifact@v3\n"
+       "        with:\n"
+       "          path: build/\n",
+       ""),
+      ("      - uses: actions/configure-pages@v5",
+       "      - uses: actions/upload-pages-artifact@v3\n"
+       "        with:\n"
+       "          path: build/\n"
+       "      - uses: actions/configure-pages@v5")]),
 
     ("NC-REL-07",
      "allow a stale deployment to supersede a newer commit",
