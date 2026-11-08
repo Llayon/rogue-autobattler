@@ -8,7 +8,10 @@
 
     master            02fe83ef378d13965184c6224a512a91ae6263a1
     phase3            4316a32e210b8660b77a6eda916fb28c4f3bcb8a
-    the candidate     (the final commit of this series)
+    the candidate     (the tip of the branch: read it with
+                      `git rev-parse HEAD` at the moment of the
+                      publication -- a document that carries a SHA it
+                      can outlive is a document that will be wrong)
     branch            integration/phase3-master-release-rehearsal
     the merge-base    02fe83ef (== master: a strict fast-forward)
     ahead / behind    0 / 298

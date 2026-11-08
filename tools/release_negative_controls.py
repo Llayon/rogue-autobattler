@@ -7,11 +7,35 @@
     NC-REL-05  allow a manual deployment bypass           -> RED
     NC-REL-06  accept a missing index.html                -> RED
     NC-REL-07  allow a stale deployment to supersede a newer commit -> RED
+    NC-REL-08  accept a reference to a path the artifact does not carry -> RED
+    NC-REL-09  upload the artifact from the wrong job     -> RED
 
 Every mutation is applied to an ISOLATED TEMPORARY COPY of the
 workflow files. The production workflows are never written to.
 
-WHY THESE ARE STRUCTURAL AND NOT TEXTUAL
+WHAT EACH CONTROL MEASURES
+
+    The GATE controls -- NC-REL-01..05, 07 and 09 -- mutate the
+    WORKFLOWS and assert a PROPERTY of the result:
+
+      - the deploy job's `needs` really contains the required call;
+      - a required job carries NO condition at all, because a
+        condition is the only way to take a job out of the run;
+      - no job carries `continue-on-error: true`;
+      - the deploy job really checks out, so the tip check can read
+        a remote;
+      - ONE condition really compares the published SHA with the
+        branch tip, and really refuses;
+      - the concurrency group really is per ref;
+      - the job that BUILDS the artifact uploads it, and the deploy
+        job does not upload a directory it does not have.
+
+    The VALIDATOR controls -- NC-REL-06 and NC-REL-08 -- mutate the
+    ARTIFACT VALIDATOR and compare two validator invocations. They
+    say nothing about the gate: they say that the artifact gate
+    itself cannot be weakened.
+
+WHY THEY ARE STRUCTURAL AND NOT TEXTUAL
 
     The first version of this harness evaluated a "decision function"
     that read the workflow as TEXT. That was worthless, and the
@@ -21,27 +45,21 @@ WHY THESE ARE STRUCTURAL AND NOT TEXTUAL
     exact mutation.
 
     A textual decision function cannot separate "the gate is broken"
-    from "the mutation text is unusual". So the controls here are
-    STRUCTURAL: the workflows are PARSED AS DATA (YAML), and each
-    control asserts a PROPERTY of the parsed graph:
+    from "the mutation text is unusual". So each control here
+    asserts a PROPERTY, and the mutation must BREAK that property:
+    the CLEAN gate satisfies it, the MUTATED gate must not. A
+    mutation that does not open anything is reported as MISSED and
+    counts as a problem, so the harness exits 0 only when every
+    control is a real RED.
 
-      - the deploy job's `needs` really contains the required call;
-      - no required job carries `if:` that could skip it;
-      - no job carries `continue-on-error: true`;
-      - the deploy job really checks out, so the tip check can read
-        a remote;
-      - the tip really compares the published SHA with the branch
-        tip, and an unreadable tip really HOLDs;
-      - the concurrency group really is per ref;
-      - the artifact is really uploaded by the job that built it and
-        published by the job that downloads it;
-      - the validator really rejects an artifact without an
-        index.html.
+HOW THE WORKFLOWS ARE READ
 
-    A mutation breaks a PROPERTY, so the assertion fails, so the
-    control is a real RED. And the CLEAN gate is asserted to satisfy
-    every property, so a control that passes for the wrong reason is
-    visible.
+    Not with a YAML library. This file was the only one in the
+    repository that imported yaml, and no CI workflow installs
+    pyyaml, so the step would have failed on the runner and turned
+    the REQUIRED battle-ecs job RED. The reader here is a small
+    indentation scanner that returns the job names and the body of
+    each job, which is what the properties need.
 """
 
 import io

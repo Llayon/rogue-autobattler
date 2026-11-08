@@ -15,6 +15,14 @@ the Phase 3 CI            https://github.com/Llayon/rogue-autobattler/actions/ru
                           120 suites, 9174 assertions, 0 failures, 0 unparsed
 ```
 
+    NOTE: `canonical` and `origin` are TWO DIFFERENT REPOSITORIES.
+    `canonical` is Llayon/rogue-autobattler -- the repository this
+    series targets. `origin` is Llayon/rogue-autobattler2, a
+    different one, which is why its master is at a different SHA. The
+    divergence is NOT a divergence of master: the master of the
+    target repository is 02fe83ef, and that is the value every
+    publication gate checks.
+
     The published Phase 3 baseline was verified against the remote
     BEFORE any work: the SHA matched, and both required jobs of the
     published run were green.
@@ -319,7 +327,11 @@ the absolute paths    0
 
 ```
 the master SHA        02fe83ef378d13965184c6224a512a91ae6263a1
-the candidate SHA     (the final commit of this series)
+the candidate SHA     (the tip of this branch: read it with
+                       `git rev-parse HEAD` at the moment of the
+                       publication -- a document that carries a SHA
+                       it can outlive is a document that will be
+                       wrong)
 the merge-base        02fe83ef == master -> the fast-forward is eligible
 ahead / behind        0 / 298
 the merge commits     1 (the historical one, inside Phase 3)
