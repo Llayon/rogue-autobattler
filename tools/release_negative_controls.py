@@ -298,6 +298,18 @@ MUTATIONS = [
      [('REQUIRED = [\n    "index.html",\n]',
        'REQUIRED = []')]),
 
+    ("NC-REL-08",
+     "accept a reference to a path the artifact does not carry",
+     "tools/validate_web_artifact.py",
+     [("        if not os.path.isfile(target):\n"
+       "            fail(\"the index.html references %s, which the artifact "
+       "does \"\n"
+       "                 \"not carry at that path\" % ref, problems)",
+       "        if os.path.basename(ref) not in files:\n"
+       "            fail(\"the index.html references %s, which the artifact "
+       "does \"\n"
+       "                 \"not carry\" % os.path.basename(ref), problems)")]),
+
     ("NC-REL-07",
      "allow a stale deployment to supersede a newer commit",
      "release.yml",
@@ -346,6 +358,25 @@ def make_fake_artifact(with_html=True):
     return root
 
 
+def make_reference_artifact(reference):
+    """An artifact whose index.html references a path the artifact does
+    not carry: "index.js" sits at the root, the html points into a
+    subdirectory."""
+    root = tempfile.mkdtemp(prefix="rel_ref_")
+    with io.open(os.path.join(root, "index.html"), "w",
+                 encoding="utf-8") as f:
+        f.write("<html><body>x</body></html>\n" * 200)
+        f.write("<script src='%s'></script>\n" % reference)
+    with io.open(os.path.join(root, "index.wasm"), "wb") as f:
+        f.write(b"\x00asm" + b"\0" * (2 * 1024 * 1024))
+    with io.open(os.path.join(root, "index.js"), "w",
+                 encoding="utf-8") as f:
+        f.write("var x = 1;\n")
+    with io.open(os.path.join(root, "index.pck"), "wb") as f:
+        f.write(b"\0" * (256 * 1024))
+    return root
+
+
 def run_control(name, description, target, edits):
     """Runs one control in an isolated copy.
 
@@ -379,6 +410,28 @@ def run_control(name, description, target, edits):
             f.write(text)
 
         failures = []
+
+        if name == "NC-REL-08":
+            # The reference check must compare the PATH. The clean
+            # validator denies a reference to "subdir/index.js" when
+            # the artifact carries only "index.js" at the root; the
+            # mutated one compares the basename and allows it.
+            clean = load_validator_from(
+                os.path.join(REPO, "tools", "validate_web_artifact.py"))
+            mutated_validator = load_validator_from(copy_validator)
+            clean_problems = clean.validate(
+                make_reference_artifact("subdir/index.js"))
+            mutated_problems = mutated_validator.validate(
+                make_reference_artifact("subdir/index.js"))
+            if not clean_problems:
+                failures.append("the clean validator ALLOWED a reference "
+                                "to a path it does not carry")
+            if mutated_problems:
+                failures.append("the mutation did not open the validator: %s"
+                                % "; ".join(mutated_problems))
+            if failures:
+                return "MISSED", 1, len(failures), 0
+            return "RED", 0, 0, 0
 
         if name == "NC-REL-06":
             # The validator, not the gate.

@@ -113,10 +113,25 @@ def check_html_references(files, problems, root):
     # engine start-up block.
     for match in re.finditer(r"[\w./-]+\.(?:js|wasm|pck|wasm\.gz)", html):
         ref = match.group(0)
-        base = os.path.basename(ref)
-        if base not in files:
-            fail("the index.html references %s, which the artifact does not carry"
-                 % base, problems)
+        # The reference must resolve INSIDE the artifact, relative to
+        # the deployment root. Comparing only the basename would pass
+        # a reference to "subdir/index.js" when "index.js" sat at the
+        # root -- and the site would 404 in production.
+        if ref.startswith("/"):
+            fail("the index.html references the absolute path %s: the site "
+                 "is served from the deployment root" % ref, problems)
+            continue
+        target = os.path.normpath(os.path.join(root, ref))
+        # The resolved path must stay inside the artifact.
+        root_abs = os.path.abspath(root)
+        target_abs = os.path.abspath(target)
+        if os.path.commonpath([root_abs, target_abs]) != root_abs:
+            fail("the index.html references %s, which resolves outside the "
+                 "artifact" % ref, problems)
+            continue
+        if not os.path.isfile(target):
+            fail("the index.html references %s, which the artifact does "
+                 "not carry at that path" % ref, problems)
 
 
 def check_no_local_paths(files, problems, root):

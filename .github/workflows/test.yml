@@ -210,6 +210,14 @@ jobs:
       - name: Check the battle entry negative controls
         run: python tools/entry_negative_controls.py
 
+      - name: Run the release negative controls
+        # These prove that the RELEASE GATE itself still refuses a
+        # red CI, a skipped job, a different SHA, a stale deployment
+        # and a manual bypass. A control that only runs locally can be
+        # bypassed by a future edit that nobody runs, so they run in
+        # the required job the deployment depends on.
+        run: python tools/release_negative_controls.py
+
       - name: Audit the standalone harness exit contract
         run: python tools/audit_test_exit_contract.py
 
