@@ -27,6 +27,36 @@
 
 ## HIGH
 
+### H-03 — the release negative controls proved nothing
+
+    Status:  PROVEN DEFECT — FIXED
+    Found:   the controls evaluated a decision function that read the
+             workflow as TEXT. Every "RED" came from a rule that
+             RECOGNISED the exact mutation text, so a genuinely broken
+             deploy was reported as a PASS. The harness exited 0
+             exactly when the controls were vacuous.
+             Found by the independent critic, and it is the most
+             important finding of this gauntlet.
+    Fix:     the controls are STRUCTURAL: the workflows are parsed as
+             data and each control asserts a property of the parsed
+             graph. The accounting is inverted to the honest
+             direction: a mutation that does NOT open the gate is a
+             MISSED control and counts as a problem.
+    Proof:   a genuinely broken deploy is now caught (RED), where the
+             old harness reported a PASS.
+
+### H-04 — the artifact validator accepted an incomplete export
+
+    Status:  PROVEN DEFECT — FIXED
+    Found:   a 4-byte WASM passed, and an artifact with no resource
+             bundle passed. The WASM check only asked whether a
+             filename contained ".wasm".
+    Fix:     the WASM must be at least a megabyte with the
+             WebAssembly magic bytes, and the resource bundle must
+             exist and be at least 64 KB.
+    Proof:   the measured verdicts: the full artifact PASS, and every
+             incomplete variant DENY.
+
 ### H-02 — the release decision did not read the concurrency protection
 
     Status:  PROVEN DEFECT — FIXED

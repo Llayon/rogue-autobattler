@@ -333,6 +333,47 @@ the browser smoke       16 of 18 PASS, 2 NOT REACHED
     artifact instead of a directory that does not exist there. The
     decision function now requires the tip check to be READABLE.
 
+    ### The release controls proved NOTHING — and that was the
+    ### fundamental finding
+
+    The critic proved the seven release negative controls were
+    vacuous. They evaluated a "decision function" that read the
+    workflow as TEXT, and every "RED" was produced by a rule inside
+    that function that RECOGNISED the exact mutation text. A
+    genuinely broken deploy -- the deploy losing the required call and
+    gaining `if: always()` -- was reported as a **PASS**, because the
+    harness reported success exactly when the controls proved nothing.
+    NC-REL-06 was vacuous by construction: both branches of its `if`
+    appended to the failures list, so it was always RED.
+
+    **Closed.** The controls are now STRUCTURAL: the workflows are
+    parsed as DATA and each control asserts a PROPERTY of the parsed
+    graph -- the needs graph, the job conditions, the permissions, the
+    checkout, the SHA comparison, the concurrency group, the artifact
+    flow. A mutation breaks a property, so the assertion fails, so the
+    control is a real RED. The accounting is honest in the other
+    direction too: a mutation that does NOT open the gate is a MISSED
+    control and counts as a problem, so the harness exits 0 only when
+    every control is a real RED.
+
+    The proof that the harness works now: a genuinely broken deploy
+    is caught, where the old harness reported a PASS.
+
+    ### The validator accepted an incomplete artifact
+
+    The critic showed that the validator passed an artifact with a
+    4-byte WASM, and one with no `.pck` at all. The WASM check only
+    asked whether a filename CONTAINED ".wasm", and the minimum size
+    was applied to index.html alone. A partially failed export would
+    have been published as a blank page.
+
+    **Closed.** The validator now requires a WASM of at least a
+    megabyte with the WebAssembly magic bytes, a resource bundle of at
+    least 64 KB, and the JavaScript bootstrap. The measured verdicts:
+    the full artifact PASS; the missing index.html, the 4-byte WASM,
+    the 64 KB WASM, the wrong magic bytes and the missing `.pck` all
+    DENY.
+
     ### What the critic confirmed clean
 
     The critic ran the full regression itself: 120 suites, 9174
