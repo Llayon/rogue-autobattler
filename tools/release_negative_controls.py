@@ -597,7 +597,61 @@ def run_control(name, description, target, edits):
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def check_registry():
+    """The registry must cover every control, and every property
+    function must be reachable.
+
+    The independent critic found a property function that was DEFINED
+    and never REGISTERED, so the artifact flow had no control at all.
+    This assertion is what prevents that class of defect from coming
+    back: a control that no mechanism covers, or a property that
+    nothing calls.
+
+    Returns a list of violations.
+    """
+    violations = []
+
+    # The controls that measure the VALIDATOR rather than the gate.
+    validator_controls = {"NC-REL-06", "NC-REL-08"}
+
+    mutation_names = set(m[0] for m in MUTATIONS)
+    covered = set(PROPERTIES.keys()) | validator_controls
+
+    for name in sorted(mutation_names - covered):
+        violations.append("the control %s is covered by no mechanism" % name)
+    for name in sorted(covered - mutation_names):
+        violations.append("the mechanism for %s has no control" % name)
+
+    # Every defined property function must be registered.
+    defined = set()
+    for key, value in globals().items():
+        if key.startswith("prop_") and callable(value):
+            defined.add(key)
+    registered = set(v.__name__ for v in PROPERTIES.values())
+    for name in sorted(defined - registered):
+        violations.append("the property %s is defined but not registered" % name)
+
+    # Every registered property must be a distinct function.
+    seen = {}
+    for control, fn in PROPERTIES.items():
+        if fn.__name__ in seen:
+            violations.append("the controls %s and %s share the property %s"
+                              % (seen[fn.__name__], control, fn.__name__))
+        seen[fn.__name__] = control
+
+    return violations
+
+
 def main():
+    registry_problems = check_registry()
+    if registry_problems:
+        print("")
+        print("THE REGISTRY IS INCOMPLETE:")
+        for problem in registry_problems:
+            print("   ", problem)
+        print("")
+        return 2
+
     print("")
     print("MUTATION     VERDICT       rc  fails  errs")
     results = []
