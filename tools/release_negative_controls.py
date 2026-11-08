@@ -44,12 +44,10 @@ WHY THESE ARE STRUCTURAL AND NOT TEXTUAL
     visible.
 """
 
-import copy
 import io
-import json
 import os
+import re
 import shutil
-import subprocess
 import sys
 import tempfile
 
@@ -59,10 +57,6 @@ RELEASE = os.path.join(WORKFLOWS, "release.yml")
 TEST = os.path.join(WORKFLOWS, "test.yml")
 VALIDATOR = os.path.join(REPO, "tools", "validate_web_artifact.py")
 
-try:
-    import yaml
-except ImportError:  # pragma: no cover
-    yaml = None
 
 
 # =====================================================================
@@ -73,29 +67,47 @@ except ImportError:  # pragma: no cover
 # the property VIOLATIONS APPEAR.
 # =====================================================================
 
-def _job(data, name):
-    return (data.get("jobs") or {}).get(name) or {}
+def _needs_of(jobs, job_name):
+    """The `needs:` list of a job.
+
+    The job reader already returns the BODY of the job, so the list is
+    simply inside it. Both the inline form ("needs: [a, b]") and the
+    block form ("needs:\n  - a") are read.
+    """
+    body = jobs.get(job_name) or ""
+    inline = re.search(r"needs:\s*\[([^\]]*)\]", body)
+    if inline:
+        return inline.group(1)
+    block = re.search(r"needs:\s*\n((?:\s+-\s*\S+\s*\n?)+)", body)
+    if block:
+        return " ".join(re.findall(r"-\s*(\S+)", block.group(1)))
+    plain = re.search(r"needs:\s*(\S+)", body)
+    if plain:
+        return plain.group(1)
+    return ""
 
 
-def _block(data, job_name):
+def _job(jobs, name):
+    """The body of a job, as text."""
+    return jobs.get(name) or ""
+
+
+def _block(jobs, job_name):
     """The body of a job as a text block, for the line-level checks."""
-    text = json.dumps(data.get("jobs") or {}, indent=1, default=str)
-    return text
+    return jobs.get(job_name) or ""
 
 
 def prop_01_battle_ecs_dependency(release, test):
-    """The release calls the reusable workflow AND that workflow runs
+    """The release CALLS the reusable workflow AND that workflow runs
     the battle-ecs job."""
     out = []
-    jobs = (release.get("jobs") or {})
-    required = _job(release, "required-tests")
-    if required.get("uses") != "./.github/workflows/test.yml":
+    release_text = release["text"]
+    if "uses: ./.github/workflows/test.yml" not in release_text:
         out.append("the release does not call the reusable test workflow")
-    test_jobs = (test.get("jobs") or {})
-    if "battle-ecs" not in test_jobs:
+    if "battle-ecs" not in test["jobs"]:
         out.append("the reusable workflow carries no battle-ecs job")
     else:
-        block = _block(test, "battle-ecs")
+        block = test["jobs"]["battle-ecs"]
         if "if: false" in block:
             out.append("the battle-ecs job never runs")
     return out
@@ -104,11 +116,10 @@ def prop_01_battle_ecs_dependency(release, test):
 def prop_02_save_dependency(release, test):
     """The save-battle-migration job exists and really runs."""
     out = []
-    test_jobs = (test.get("jobs") or {})
-    if "save-battle-migration" not in test_jobs:
+    if "save-battle-migration" not in test["jobs"]:
         out.append("the reusable workflow carries no save-battle-migration job")
     else:
-        block = _block(test, "save-battle-migration")
+        block = test["jobs"]["save-battle-migration"]
         if "if: false" in block:
             out.append("the save-battle-migration job never runs")
     return out
@@ -118,14 +129,7 @@ def prop_03_no_failure_tolerance(release, test):
     """No job may continue on error, and no required job may be
     conditioned so that a failure does not block."""
     out = []
-    for name, job in (release.get("jobs") or {}).items():
-        if job.get("continue-on-error") is True:
-            out.append("the %s job continues on error" % name)
-        block = _block(release, name)
-        if "continue-on-error: true" in block:
-            out.append("the %s job continues on error" % name)
-    for name in ("save-battle-migration", "battle-ecs"):
-        block = _block(test, name)
+    for name, block in list(release["jobs"].items()) + list(test["jobs"].items()):
         if "continue-on-error: true" in block:
             out.append("the %s job continues on error" % name)
     return out
@@ -140,31 +144,23 @@ def prop_04_sha_identity(release, test):
     refusal must not be mistaken for the identity check.
     """
     out = []
-    deploy = _job(release, "deploy")
-    steps = deploy.get("steps") or []
-    body = json.dumps(steps, indent=1, default=str)
+    deploy = release["jobs"].get("deploy", "")
 
     # The published SHA and the branch tip must be compared with EACH
     # OTHER, in ONE condition, and that condition must refuse.
     #
     # The check is per CONDITION, not per file: the step has three
     # separate statements, and a mutation that removes only the
-    # comparison leaves the other two intact. Looking for the tokens
-    # anywhere in the script would have found them.
+    # comparison leaves the other two intact.
     compares = False
-    for step in steps:
-        run = str((step or {}).get("run", ""))
-        for line in run.split("\n"):
-            if "if" not in line:
-                continue
-            # The condition names BOTH sides of the comparison.
-            if "TIP" in line and "github.sha" in line:
-                if "exit 1" in run:
-                    compares = True
-                else:
-                    out.append("the SHA comparison never refuses")
-                break
-        if compares:
+    for line in deploy.split("\n"):
+        if "if" not in line:
+            continue
+        if "TIP" in line and "github.sha" in line:
+            if "exit 1" in deploy:
+                compares = True
+            else:
+                out.append("the SHA comparison never refuses")
             break
     if not compares and not out:
         out.append("the deploy job never compares the published SHA "
@@ -172,9 +168,8 @@ def prop_04_sha_identity(release, test):
 
     # The identity of the built and the deployed SHA is carried in the
     # artifact.
-    build = _job(release, "web-build")
-    build_body = json.dumps(build.get("steps") or [], indent=1, default=str)
-    if "BUILD_SHA" not in build_body:
+    build = release["jobs"].get("web-build", "")
+    if "BUILD_SHA" not in build:
         out.append("the build does not record its provenance")
     return out
 
@@ -182,16 +177,16 @@ def prop_04_sha_identity(release, test):
 def prop_05_no_manual_bypass(release, test):
     """The deploy reaches the pages only through the required call."""
     out = []
-    deploy = _job(release, "deploy")
-    needs = deploy.get("needs") or []
-    if isinstance(needs, str):
-        needs = [needs]
+    deploy = release["jobs"].get("deploy", "")
+    needs = _needs_of(release["jobs"], "deploy")
     if "required-tests" not in needs:
         out.append("the deploy does not need the required tests")
     # A deployment that is conditioned on the manual trigger could
     # publish without them.
-    if deploy.get("if"):
-        out.append("the deploy job is conditioned")
+    for line in deploy.split("\n"):
+        if line.strip().startswith("if:"):
+            out.append("the deploy job is conditioned")
+            break
     return out
 
 
@@ -199,17 +194,15 @@ def prop_06_artifact_validation(release, test):
     """The artifact is validated, and it is the validated bytes that
     are published."""
     out = []
-    build = _job(release, "web-build")
-    build_body = json.dumps(build.get("steps") or [], indent=1, default=str)
-    if "validate_web_artifact.py" not in build_body:
+    build = release["jobs"].get("web-build", "")
+    if "validate_web_artifact.py" not in build:
         out.append("the build does not validate the artifact")
     # The job that BUILDS the artifact uploads it.
-    if "upload-pages-artifact" not in build_body:
+    if "upload-pages-artifact" not in build:
         out.append("the build job does not upload the artifact")
     # The deploy job must not upload a directory it does not have.
-    deploy = _job(release, "deploy")
-    deploy_body = json.dumps(deploy.get("steps") or [], indent=1, default=str)
-    if "upload-pages-artifact" in deploy_body:
+    deploy = release["jobs"].get("deploy", "")
+    if "upload-pages-artifact" in deploy:
         out.append("the deploy job uploads a build/ directory it does "
                    "not have")
     return out
@@ -219,14 +212,13 @@ def prop_07_no_stale_deployment(release, test):
     """The concurrency group is per ref, and the deploy job has a
     repository, so the tip check can read the remote."""
     out = []
-    group = release.get("concurrency") or {}
-    if not str(group.get("group", "")).startswith("pages-"):
+    release_text = release["text"]
+    if "group: pages-" not in release_text:
         out.append("the concurrency group does not separate the branches")
-    if "github.ref" not in str(group.get("group", "")):
+    if "github.ref" not in release_text:
         out.append("the concurrency group is not per ref")
-    deploy = _job(release, "deploy")
-    uses = [str(s.get("uses", "")) for s in (deploy.get("steps") or [])]
-    if not any("actions/checkout" in u for u in uses):
+    deploy = release["jobs"].get("deploy", "")
+    if "actions/checkout" not in deploy:
         out.append("the deploy job has no checkout: the tip check cannot "
                    "read a remote")
     return out
@@ -323,9 +315,56 @@ MUTATIONS = [
 ]
 
 
-def load_yaml(path):
+def load_jobs(path):
+    """The workflows of the repository, read WITHOUT a YAML library.
+
+    The repository's CI tools deliberately avoid a YAML dependency:
+    this file was the only one that imported yaml, and no workflow
+    installs pyyaml, so a yaml import here would have failed on the
+    runner and turned the REQUIRED battle-ecs job RED.
+
+    The reader understands what the properties need: the job names and
+    the body of each job, with the two-space indentation the workflows
+    use.
+
+    Returns {job_name: body_text}.
+    """
     with io.open(path, encoding="utf-8") as f:
-        return yaml.safe_load(f)
+        text = f.read()
+
+    jobs = {}
+    lines = text.split("\n")
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        # A job header is "  name:" at the two-space indentation.
+        match = re.match(r"^  ([A-Za-z0-9_-]+):\s*$", line)
+        if match:
+            name = match.group(1)
+            body = []
+            i += 1
+            while i < len(lines):
+                nxt = lines[i]
+                if nxt.strip() == "":
+                    body.append(nxt)
+                    i += 1
+                    continue
+                # A line that is less indented ends the job.
+                if not nxt.startswith("    ") and not nxt.startswith("  "):
+                    break
+                if re.match(r"^  [A-Za-z0-9_-]+:\s*$", nxt):
+                    break
+                body.append(nxt)
+                i += 1
+            jobs[name] = "\n".join(body)
+            continue
+        i += 1
+    return jobs
+
+
+def load_text(path):
+    with io.open(path, encoding="utf-8") as f:
+        return f.read()
 
 
 def load_validator_from(path):
@@ -450,15 +489,21 @@ def run_control(name, description, target, edits):
         else:
             property_fn = PROPERTIES[name]
             # The CLEAN gate must satisfy the property.
-            clean_violations = property_fn(load_yaml(RELEASE), load_yaml(TEST))
+            clean_violations = property_fn(
+                {"text": load_text(RELEASE), "jobs": load_jobs(RELEASE)},
+                {"text": load_text(TEST), "jobs": load_jobs(TEST)})
             if clean_violations:
                 failures.append("the clean gate already violates the "
                                 "property: %s" % "; ".join(clean_violations))
             # The MUTATED gate must VIOLATE it: that is what the
             # mutation did.
+            mutated_release = os.path.join(copy_wf, "release.yml")
+            mutated_test = os.path.join(copy_wf, "test.yml")
             mutated_violations = property_fn(
-                load_yaml(os.path.join(copy_wf, "release.yml")),
-                load_yaml(os.path.join(copy_wf, "test.yml")))
+                {"text": load_text(mutated_release),
+                 "jobs": load_jobs(mutated_release)},
+                {"text": load_text(mutated_test),
+                 "jobs": load_jobs(mutated_test)})
             if not mutated_violations:
                 failures.append("the mutation did not break the property")
 
@@ -474,10 +519,6 @@ def run_control(name, description, target, edits):
 
 
 def main():
-    if yaml is None:
-        print("pyyaml is required: the controls parse the workflows")
-        return 2
-
     print("")
     print("MUTATION     VERDICT       rc  fails  errs")
     results = []
