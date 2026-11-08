@@ -55,7 +55,8 @@ the merge-base            02fe83ef == master  -> a strict fast-forward
 ```
 
     By area: tests 173, core 77, docs 19, tools 12, content 6, scenes 4,
-    .github 3, the root 3.
+    .github 3, .hermes 1 (the run integrity ledger), the root 2
+    (.gitignore and ARCHITECTURE.md).
 
     THE ARITHMETIC, RECONCILED. The previous revision of this report
     said 274 commits and 294 files. Those were the values of the
@@ -302,14 +303,18 @@ the CI gates            10 / 10 clean
 the A-H differential    PASS (8 + 8 fixtures, both rc=0)
 the CI-01 self-tests    13 / 0 failed
 the CI-02 self-tests    20 / 0 failed
-the release NC          7 / 7 RED, the clean gate ALLOWs
+the release NC          8 / 8 RED, the clean gate ALLOWs
 the hardening NC        14 / 14 RED
 the ledger controls     7 / 7 RED, the ledger VALID
 the historical NC       44 RED, 0 SKIP, 0 INVALID
 the reachability audit  180 declared / 180 reachable / 0 dead
 the exit-contract audit 125 suites / 0 unsafe exit paths
 the Web export          the full artifact, the validation PASS
-the browser smoke       16 of 18 PASS, 2 NOT REACHED
+the clean checkout      the import 0 errors, the export complete,
+                        the artifact validation PASS, the html/js/wasm
+                        byte-for-byte identical to the worktree build
+the browser smoke       17 of 18 PASS (the settings are NOT VERIFIED:
+                        the Settings button is never created)
 ```
 
     The counts are NOT hard-coded: the runner contract requires a
@@ -321,9 +326,20 @@ the browser smoke       16 of 18 PASS, 2 NOT REACHED
 
 ## M. INDEPENDENT CRITIC
 
-    An independent critic read the diff, the new workflows and the
-    harness, and hunted the twenty listed classes of defect. It found
-    no HIGH. Two findings were real and are closed.
+    TWO independent critic passes read the diff, the new workflows and
+    the harnesses, and hunted the twenty listed classes of defect.
+
+    The SECOND pass found a defect that only the REAL CI could have
+    shown: tools/release_negative_controls.py was the only file in the
+    repository that imported yaml, and no workflow installs pyyaml.
+    The step would have failed with an ImportError on the runner and
+    turned the REQUIRED battle-ecs job RED. Every other CI tool of the
+    repository deliberately avoids yaml, and now the release controls
+    do too. They were re-run under a python where importing yaml
+    raises: 8 of 8 RED, exit 0.
+
+    The FIRST pass found no HIGH in the workflow itself. Two of its
+    findings were real and are closed.
 
     ### The concurrency protection was not part of the decision
 
