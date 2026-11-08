@@ -52,11 +52,11 @@ the tracked tree          clean throughout
 
 ```
 the published Phase 3 over master   273
-the candidate over the Phase 3        30
+the candidate over the Phase 3        32
 --------------------------------------------
-the candidate over master            303   (273 + 30)
+the candidate over master            305   (273 + 32)
 
-ahead / behind            0 / 303
+ahead / behind            0 / 305
 the changed files         297
 the merge commits         1      (the historical one, inside Phase 3)
 the merge-base            02fe83ef == master  -> a strict fast-forward
@@ -70,7 +70,7 @@ the merge-base            02fe83ef == master  -> a strict fast-forward
     said 274 commits and 294 files. Those were the values of the
     FIRST commit of the series (b00cb8b), written when the series
     consisted of one commit and never updated. The final numbers are
-    303 commits and 297 files. The 30 commits of the series are all
+    305 commits and 297 files. The 32 commits of the series are all
     listed in section O; none of them is a filler, and the history
     was NOT touched to make a number look right.
 
@@ -334,9 +334,9 @@ the candidate SHA     (the tip of this branch: read it with
                        it can outlive is a document that will be
                        wrong)
 the merge-base        02fe83ef == master -> the fast-forward is eligible
-ahead / behind        0 / 303
+ahead / behind        0 / 305
 the merge commits     1 (the historical one, inside Phase 3)
-the new work          30 commits on top of the published Phase 3
+the new work          32 commits on top of the published Phase 3
 the changed files     11 over the published Phase 3
 ```
 
@@ -636,16 +636,20 @@ the browser smoke       17 of 18 PASS (the settings are NOT VERIFIED:
       +-- 3e694fd docs(repo): record the critic findings and the final counts
          |
       +-- 4b3d18a docs(repo): correct the uid facts in the register and the smoke document
+         |
+      +-- 4138eb1 fix(repo): close the re-review findings in the controls
+         |
+      +-- b205143 docs(repo): state the closure findings in the final verdict
 ```
 
-    30 commits on top of the published Phase 3: the release
+    32 commits on top of the published Phase 3: the release
     gate, the documents, and the fixes that the checks and the
     independent critic forced. Every one of them is a single parent,
     so the chain is linear and the candidate remains a strict
     fast-forward of master.
 
-    The arithmetic: 273 (the published Phase 3) + 30 (this series) =
-    303 commits over master.
+    The arithmetic: 273 (the published Phase 3) + 32 (this series) =
+    305 commits over master.
 
     The 11 files the series changed over the published Phase 3:
 
