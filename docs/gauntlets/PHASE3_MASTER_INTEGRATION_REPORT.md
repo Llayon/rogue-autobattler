@@ -43,14 +43,27 @@ the tracked tree          clean throughout
     The numbers in the brief were OUT OF DATE. The measured values:
 
 ```
-ahead / behind            0 / 274          (the brief said 254)
-the changed files         294              (the brief said 278)
-the merge commits         1
+the published Phase 3 over master   273
+the candidate over the Phase 3        14
+--------------------------------------------
+the candidate over master            287   (273 + 14)
+
+ahead / behind            0 / 287
+the changed files         297
+the merge commits         1      (the historical one, inside Phase 3)
 the merge-base            02fe83ef == master  -> a strict fast-forward
 ```
 
-    By area: tests 173, core 77, docs 15, tools 10, content 6, scenes 4,
-    workflows 2, the root 1.
+    By area: tests 173, core 77, docs 19, tools 12, content 6, scenes 4,
+    .github 3, the root 3.
+
+    THE ARITHMETIC, RECONCILED. The previous revision of this report
+    said 274 commits and 294 files. Those were the values of the
+    FIRST commit of the series (b00cb8b), written when the series
+    consisted of one commit and never updated. The final numbers are
+    287 commits and 297 files. The 14 commits of the series are all
+    listed in section O; none of them is a filler, and the history
+    was NOT touched to make a number look right.
 
 ## D. PRODUCTION RISK AUDIT
 
@@ -234,12 +247,13 @@ the absolute paths    0
     A DRY RUN: nothing was merged and nothing was pushed.
 
 ```
-the master SHA        02fe83ef
-the candidate SHA     b00cb8b
+the master SHA        02fe83ef378d13965184c6224a512a91ae6263a1
+the candidate SHA     7681c39e4e169619a4d97291fff90679d20da127
 the merge-base        02fe83ef == master -> the fast-forward is eligible
-ahead / behind        0 / 274
-the merge commits     1 (the historical one)
-the new work          ONE commit on top of the published Phase 3
+ahead / behind        0 / 287
+the merge commits     1 (the historical one, inside Phase 3)
+the new work          14 commits on top of the published Phase 3
+the changed files     11 over the published Phase 3
 ```
 
     The candidate carries the published Phase 3, the release workflow
@@ -440,7 +454,7 @@ the browser smoke       16 of 18 PASS, 2 NOT REACHED
 ```
 02fe83ef  master (the base)
    |
-   +-- 4316a32  the published Phase 3 (274 commits over master)
+   +-- 4316a32  the published Phase 3 (273 commits over master)
    |     |
    |     +-- b00cb8b  chore(repo): gate the pages deployment on the
    |     |            required CI
@@ -467,12 +481,42 @@ the browser smoke       16 of 18 PASS, 2 NOT REACHED
    |     +-- 5f6a89b  docs(repo): record the critic findings in the report
    |     |            and the register
    |     +-- d9276bd  fix(repo): check the html references by path and
-   |                  gate the release
+   |     |            gate the release
+   |     +-- 7681c39  docs(repo): record the critic verdict and the
+   |                  accepted risks
 ```
 
-    Four commits on top of the published Phase 3: the release gate,
-    the documents, and the two fixes the checks and the critic forced.
-    The candidate remains a strict fast-forward of master.
+    FOURTEEN commits on top of the published Phase 3: the release
+    gate, the documents, and the fixes that the checks and the
+    independent critic forced. Every one of them is a single parent,
+    so the chain is linear and the candidate remains a strict
+    fast-forward of master.
+
+    The 11 files the series changed over the published Phase 3:
+
+```
+.github/workflows/release.yml                    NEW
+.github/workflows/test.yml                       the reusable trigger
+.github/workflows/web-build.yml                  DELETED
+.gitignore                                       the build output
+content/reactions/attack_of_opportunity.tres      the dangling field
+docs/gauntlets/LOCAL_WEB_SMOKE.md                NEW
+docs/gauntlets/PHASE3_MASTER_INTEGRATION_REPORT.md   NEW
+docs/gauntlets/PHASE3_PUBLICATION_RUNBOOK.md     NEW
+docs/gauntlets/PHASE3_RELEASE_RISK_REGISTER.md   NEW
+tools/release_negative_controls.py               NEW
+tools/validate_web_artifact.py                   NEW
+```
+
+    The ONLY production file among them is the AoO resource, and the
+    change is the removal of a field that no longer exists in the
+    class: `melee_only` was removed from `ReactionDef` in Phase 3,
+    and the resource still carried it. Godot loads the resource and
+    silently drops the unknown property, so the field was a no-op --
+    but it was a reference to something that no longer exists, and it
+    misleads the next reader. `melee_only` appears NOWHERE in the
+    production code: only in a historical plan document and in one
+    test comment.
 
 ## P. PUBLICATION INSTRUCTIONS
 
