@@ -79,6 +79,62 @@
              manual staging/phase3/feature/tag/pull_request/schedule
              DENY, a failed required job DENY.
 
+### H-31 — the twelfth review: the reusable workflow is certified too
+
+    Status:  PROVEN DEFECT — FIXED
+    Found:   the twelfth reviewer worked in a clone of its own, and it
+             found the one HIGH of the series -- plus five more:
+
+               the REUSABLE WORKFLOW was never certified as a
+                 publisher. It is a TOP-LEVEL workflow: it has
+                 "on: push / pull_request / workflow_call", so it runs
+                 on EVERY push to EVERY branch. But the permission
+                 rule read the RELEASE workflow's jobs only, and the
+                 no-other-publisher rule skipped test.yml by name. So
+                 nothing stopped test.yml from gaining pages: write +
+                 id-token: write and a deploy-pages step: a SECOND
+                 publisher on every branch, with no branch guard, no
+                 tip check and no dependency on the required jobs.
+
+                 The rule is a property now: every job of every
+                 workflow in the directory may carry an elevated scope
+                 only if it is the deploy job of the release
+                 workflow.
+
+               the condition as a SINGLE-QUOTED YAML scalar: inside
+                 one, '' is the escape for one '. The reader stripped
+                 only the outer quotes, so the tokenizer mis-paired
+                 them and the rule read an EMPTY literal. The escape
+                 is collapsed now -- in BOTH readers of the value,
+                 which had learned to disagree about the same line
+                 once already.
+
+               a CONTINUATION line of a plain scalar:
+                 "run: python tools/x.py \" followed by "|| true".
+                 The shell joins them, so the gate's failure is
+                 discarded. The block was read by searching BACKWARDS
+                 from the gate line for the run: key -- but here the
+                 gate line IS the run: line, so the continuation was
+                 never examined.
+
+               the FLOW-MAPPING and quoted-key forms of the
+                 permissions were not read: the pattern could not
+                 match "{pages: write", so the deploy job's scopes
+                 read as EMPTY and the two rules about them degraded
+                 to no-ops -- a coverage hole in the SECURITY rule.
+
+               the trigger key with a TRAILING COMMENT: the regex
+                 required the line to end after the colon, so a legal
+                 "on:  # the triggers" made the block invisible.
+
+    Fix:     all six, in commits 23f8523, 8813458 and 31cb653.
+    Proof:   the controls are 33 of 33 RED, with and without pyyaml.
+
+    NOTE:   the twelfth reviewer also adjudicated two of the earlier
+             batteries' cases as FALSE POSITIVES: "; exit 0" is not an
+             opening under "bash -e {0}", and the r9 "R9-08"/"X17"
+             mutation is not valid YAML at all.
+
 ### H-30 — the eleventh review: the operator, the module, the comment
 
     Status:  PROVEN DEFECT — FIXED
