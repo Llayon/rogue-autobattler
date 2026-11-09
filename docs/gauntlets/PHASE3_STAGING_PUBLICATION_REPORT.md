@@ -104,6 +104,13 @@ Remote staging SHA:    f42e68ed8d671a022e3f77b8984fe6e3a4afeec4
     step would have failed with an ImportError if it were still
     there.
 
+    NOTE: the run above is the REAL REMOTE EVIDENCE for the staging
+    candidate f42e68e, and it ran the controls AS THEY WERE AT THAT
+    SHA -- ten of them. The branch authorization work that followed
+    added eight more, and those eighteen have run LOCALLY only. A
+    republication of the fixed candidate is what would make them
+    REMOTE VERIFIED.
+
 ## SAVE/BATTLE MIGRATION
 
     the job        save-battle-migration | completed | success
