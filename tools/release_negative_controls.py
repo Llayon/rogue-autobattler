@@ -416,7 +416,13 @@ def _value(token, context):
     if token == "always()":
         return True
     if token == "cancelled()":
-        return context.get("success") is False
+        # cancelled() is TRUE only when the WORKFLOW was cancelled.
+        # The context does not model a cancellation of the workflow
+        # itself, and the needs failing is NOT a cancellation: a
+        # failed need makes failure() true and cancelled() false.
+        return bool(context.get("cancelled"))
+    if token == "!cancelled()":
+        return not bool(context.get("cancelled"))
     if token == "failure()":
         return context.get("success") is False
     if token == "github.ref":
@@ -480,6 +486,9 @@ def deploy_is_authorized(release, event, ref, required_ok):
 
     context = {
         "success": bool(required_ok),
+        # The workflow itself is not cancelled in this model: the
+        # needs failing is a FAILURE, not a cancellation.
+        "cancelled": False,
         "ref": ref,
         "event": event,
         "sha": "0" * 40,
