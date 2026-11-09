@@ -206,7 +206,7 @@
                  stages what the deployment publishes.
 
     Fix:     all six, in commits 83eaedc and 06b1192.
-    Proof:   the controls are 33 of 33 RED, with and without pyyaml.
+    Proof:   the controls are 34 of 34 RED, with and without pyyaml.
 
     NOTE:   the thirteenth reviewer also proved, with PyYAML, that a
              "#" inside a folded block is LITERAL TEXT and not a
@@ -264,7 +264,7 @@
                  "on:  # the triggers" made the block invisible.
 
     Fix:     all six, in commits 23f8523, 8813458 and 31cb653.
-    Proof:   the controls are 33 of 33 RED, with and without pyyaml.
+    Proof:   the controls are 34 of 34 RED, with and without pyyaml.
 
     NOTE:   the twelfth reviewer also adjudicated two of the earlier
              batteries' cases as FALSE POSITIVES: "; exit 0" is not an
@@ -295,7 +295,7 @@
 
     Fix:     all three, in commit 3d78a25. The ${VAR} spelling and
              the single-line refusal were closed in 5f28f66.
-    Proof:   the controls are 33 of 33 RED, with and without pyyaml.
+    Proof:   the controls are 34 of 34 RED, with and without pyyaml.
 
     NOTE:   two of the earlier batteries' cases are FALSE POSITIVES,
              and the eleventh reviewer proved it with real bash:
@@ -345,7 +345,7 @@
                  that does not run.
 
     Fix:     all six, in commit 9cf59c2.
-    Proof:   the controls are 33 of 33 RED, with and without pyyaml,
+    Proof:   the controls are 34 of 34 RED, with and without pyyaml,
              and the tenth reviewer's own battery now reports MISSED
              0. Its one remaining disagreement is a case it calls
              legal -- "the gate piped into tee and its output read
@@ -947,7 +947,7 @@
              one. A mechanism's refusal must be inside its own step.
     Proof:   NC-RB-11 is the new control for the permissions. All of
              the critic's scenarios are detected, and the controls are
-             33 of 33 RED.
+             34 of 34 RED.
 
 ### H-11 — four bypasses were invisible to the controls
 

@@ -384,7 +384,7 @@ the CI gates            10 / 10 clean
 the A-H differential    PASS (8 + 8 fixtures, both rc=0)
 the CI-01 self-tests    13 / 0 failed
 the CI-02 self-tests    20 / 0 failed
-the release NC          33 / 33 RED, the clean gate ALLOWs
+the release NC          34 / 34 RED, the clean gate ALLOWs
 the hardening NC        14 / 14 RED
 the ledger controls     7 / 7 RED, the ledger VALID
 the historical NC       44 RED, 0 SKIP, 0 INVALID
