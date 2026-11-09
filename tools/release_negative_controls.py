@@ -551,18 +551,20 @@ def prop_04_sha_identity(release, test):
     # comparison leaves the other two intact.
     compares = False
     code = _code_lines(deploy)
-    for line in code.split("\n"):
+    # The comparison must be a CONDITION that refuses. An echo that
+    # merely MENTIONS the comparison is not a check: it prints a
+    # message and continues.
+    for index, line in enumerate(code.split("\n")):
         if "if" not in line:
             continue
-        if "TIP" in line and "github.sha" in line:
-            if "exit 1" in code:
-                compares = True
-            else:
-                out.append("the SHA comparison never refuses")
+        if "TIP" not in line or "github.sha" not in line:
+            continue
+        if line.strip().startswith("if"):
+            compares = True
             break
     if not compares and not out:
         out.append("the deploy job never compares the published SHA "
-                   "with the branch tip")
+                   "with the branch tip in a condition that refuses")
 
     # The identity of the built and the deployed SHA is carried in the
     # artifact.
@@ -821,8 +823,11 @@ def prop_07_branch_authorization(release, test):
     if master_read:
         compares = False
         for line in code.split("\n"):
-            if ("MASTER_SHA" in line and "github.sha" in line
-                    and ("!=" in line or "==" in line)):
+            stripped = line.strip()
+            if not stripped.startswith("if"):
+                continue
+            if ("MASTER_SHA" in stripped and "github.sha" in stripped
+                    and ("!=" in stripped or "==" in stripped)):
                 compares = True
                 break
         if not compares:
@@ -913,6 +918,31 @@ def prop_12_permissions_are_minimal(release, test):
     if "pages: write" not in deploy:
         out.append("the deploy job has no pages: write: it could not "
                    "publish")
+
+    # There must be exactly ONE publication step. A second one would
+    # publish without the checks that guard the first: the checks look
+    # at the job's body, and one guarded path plus one unguarded path
+    # is an unguarded path.
+    publications = deploy.count("actions/deploy-pages")
+    if publications != 1:
+        out.append("the deploy job has %d publication steps: there must "
+                   "be exactly one" % publications)
+
+    # The publication must be the LAST thing the job does: a step
+    # after it could publish again, or undo what it did.
+    lines = [l.strip() for l in deploy.split("\n") if l.strip()]
+    publish_index = None
+    for index, line in enumerate(lines):
+        if "actions/deploy-pages" in line:
+            publish_index = index
+            break
+    if publish_index is not None:
+        after = lines[publish_index + 1:]
+        # The trailing "id:" belongs to the step itself.
+        after = [l for l in after if not l.startswith("id:")]
+        if after:
+            out.append("the deploy job does something after the "
+                       "publication: %s" % after[0][:60])
     return out
 
 
