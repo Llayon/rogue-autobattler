@@ -72,6 +72,26 @@
              manual staging/phase3/feature/tag/pull_request/schedule
              DENY, a failed required job DENY.
 
+### H-10 — the string comparison of the ref is case insensitive
+
+    Status:  PROVEN DEFECT — FIXED
+    Found:   GitHub Actions compares strings with == IGNORING THE CASE.
+             So `github.ref == 'refs/heads/master'` is also true for a
+             branch named "Master" or "MASTER", and such a branch is a
+             DISTINCT branch on a case-sensitive repository. The string
+             comparison alone was therefore NOT a sufficient guard.
+             Found by the independent critic.
+    Fix:     the deploy job carries a SECOND, case-INDEPENDENT guard:
+             it reads the tip of master from the remote -- whose ref
+             path is case sensitive -- and compares the SHA with the
+             SHA being published. The question it asks, "is this the
+             same COMMIT as master?", cannot be changed by the case.
+             The check is fail-closed.
+    Proof:   NC-RB-08 removes that check and the control is RED. The
+             model reproduces the platform: the string comparison folds
+             the case, so the model reports exactly what Actions would
+             do.
+
 ### H-08 — the concurrency comment described a cancellation that did not happen
 
     Status:  PROVEN DEFECT — FIXED
