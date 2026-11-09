@@ -1761,7 +1761,8 @@ def prop_19_the_gate_is_not_swallowed(release, test):
             # outside it passed.
             is_gate = any(gate in line for gate in GATE_COMMANDS)
             if not is_gate:
-                is_gate = bool(re.search(r"\btools/[\w./-]+\.py\b", line))
+                is_gate = bool(re.search(
+                r"\b(?:tools|tests|scripts)/[\w./-]*\.py\b", line))
             if not is_gate:
                 continue
             out.append("the %s swallows the gate's result with '|| true': %s"
@@ -1973,6 +1974,12 @@ def prop_18_no_other_publisher(release, test):
                 break
             if "deploy-pages" in stripped:
                 reason = "it deploys the Pages: %r" % stripped
+                break
+            # A workflow that CALLS the release workflow is a second
+            # path to the same publication: it would run the release
+            # workflow from its own trigger, on its own ref.
+            if re.search(r"uses:\s*\S*release\.ya?ml", stripped):
+                reason = "it calls the release workflow: %r" % stripped
                 break
         if reason:
             out.append("the workflow %s could publish the Pages -- %s. The "
