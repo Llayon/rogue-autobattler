@@ -910,6 +910,40 @@ PHASE 3 -> MASTER INTEGRATION & RELEASE SAFETY
     The controls are 33 of 33 RED, with and without pyyaml, and the
     CLEAN gate ALLOWs every scenario.
 
+    The ninth review's two batteries added nine more classes, and the
+    pattern held: every one of them was a rule that recognised only
+    the spellings it was written for. The needs were a SUBSTRING, so
+    "web-build-extra" satisfied the check for "web-build" and the real
+    build was not a dependency of the publication. A step of the
+    reusable workflow that CONTINUES ON ERROR kept the job green on a
+    red suite. A publisher can be a COMMAND -- a curl to the Pages API
+    publishes with the token the deploy job already carries, and a push
+    to the Pages branch needs no token at all. The concurrency group
+    carried the SHA, so two runs of the same ref did not queue behind
+    each other. The rule that a job may continue on error searched the
+    whole job body for the literal text, so a COMMENT naming the key
+    satisfied it and the real spellings did not. The check that the
+    deploy can publish searched for the text "pages: write", so the
+    quoted form was reported as a deploy that could not publish. The
+    gate may be invoked as a MODULE. The model did not know two
+    standard GitHub Actions fields -- github.ref_name and contains() --
+    so a legitimate condition on them failed CLOSED and the harness
+    reported the legitimate master push as REFUSED. And a job header
+    may carry a TRAILING COMMENT, which made the job invisible to the
+    reader.
+
+    All nine are closed. Three cases of that battery remain uncaught,
+    and NONE of them is an opening: a pipeline into "tee" keeps the
+    gate's status, so it discards nothing; one case is not valid YAML
+    at all; and the third is a condition on
+    contains(github.ref, 'master'), which really does admit
+    "feature/master" -- so the controls catching it is the correct
+    verdict, not a false red.
+
+    The tenth review runs against a FROZEN HEAD on a separate clone,
+    because the branch moved three times under the ninth reviewer and
+    a review of a moving target is not a review.
+
     The three residual risks that are accepted, with their reasons:
 
       - the A-H baseline is pinned rather than HEAD^: stable, and the
