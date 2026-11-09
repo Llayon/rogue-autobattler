@@ -1506,6 +1506,11 @@ def _workflow_permissions(release):
     return [(value, value)]
 
 
+# The pattern of a scope and its value, with the optional quotes and
+# any case: "contents: write", "'contents': 'write'", "Contents: Write".
+SCOPE_PATTERN = r'^[\"\']?([\w-]+)[\"\']?\s*:\s*(\S+)$'
+
+
 def _job_permissions(job_body):
     """The permissions of a job, as (scope, value) pairs.
 
@@ -1536,7 +1541,7 @@ def _job_permissions(job_body):
                         part = _unquote(part.strip())
                         if not part:
                             continue
-                        match = re.match(r"^([\w-]+)\s*:\s*(\S+)$", part)
+                        match = re.match(SCOPE_PATTERN, part)
                         if match:
                             permissions.append((match.group(1),
                                                _unquote(match.group(2))))
@@ -1553,7 +1558,7 @@ def _job_permissions(job_body):
                 if len(follow) - len(follow.lstrip()) <= base:
                     break
                 scope_line = follow.strip()
-                match = re.match(r"^([\w-]+)\s*:\s*(\S+)$", scope_line)
+                match = re.match(SCOPE_PATTERN, scope_line)
                 if match:
                     permissions.append((match.group(1), match.group(2)))
     return permissions
@@ -1908,8 +1913,13 @@ def prop_19_the_gate_is_not_swallowed(release, test):
             # "| true" (a pipeline whose exit status is true's). And
             # "set +e" disables errexit, so the step exits 0 even
             # when the gate fails.
-            swallowed = ("|| true" in line or "||true" in line
-                         or "| true" in line or "|true" in line)
+            # The swallow has more spellings than "|| true". The
+            # shell's "|| :" (the do-nothing command) and "|| exit 0"
+            # (an explicit success) discard the gate's failure in
+            # exactly the same way, and each of them has the same
+            # shape with any spacing.
+            swallowed = bool(re.search(
+                r"\|\|\s*(?:true\b|:|exit\s+0\b)", line))
             # "set +e" disables errexit, so the STEP exits 0 even when
             # the gate fails. In the workflow it is a line of its own
             # and the gate command is on the next one -- so the rule
@@ -2162,7 +2172,11 @@ def prop_18_no_other_publisher(release, test):
             # block: the flow mapping "permissions: {contents: write}",
             # the quoted keys, the different case -- a textual regex
             # over the line misses every one of them.
-            if _declares_an_elevated_scope(stripped):
+            # And the TRAILING COMMENT is cut off first: the same
+            # lesson as everywhere else in this series -- a comment
+            # can carry the text that satisfies a check.
+            if _declares_an_elevated_scope(
+                    _without_trailing_comment(stripped)):
                 reason = "it carries the elevated permission %r" % stripped
                 break
             # The Pages branch, however it is reached.
