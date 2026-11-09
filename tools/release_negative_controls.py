@@ -1717,7 +1717,15 @@ def prop_19_the_gate_is_not_swallowed(release, test):
             # exits with a warning, and it is not a gate.
             if "|| true" not in line and "||  true" not in line:
                 continue
-            if not any(gate in line for gate in GATE_COMMANDS):
+            # Every gate command, not a list of them: a step that
+            # RUNS a python script from the tools directory and
+            # swallows its result is a gate that cannot report. The
+            # list of names was a token list, and a gate command
+            # outside it passed.
+            is_gate = any(gate in line for gate in GATE_COMMANDS)
+            if not is_gate:
+                is_gate = bool(re.search(r"\btools/[\w./-]+\.py\b", line))
+            if not is_gate:
                 continue
             out.append("the %s swallows the gate's result with '|| true': %s"
                        % (label, line.strip()[:60]))
@@ -1820,9 +1828,37 @@ def prop_18_no_other_publisher(release, test):
             continue
         code = "\n".join(l for l in text.replace("\r\n", "\n").split("\n")
                           if l.strip() and not l.strip().startswith("#"))
-        if "actions/deploy-pages" in code or "pages: write" in code:
-            out.append("the workflow %s could publish the Pages: the "
-                       "release gate is the only publisher" % name)
+        # The rule is not a list of tokens. A publisher that writes to
+        # the Pages branch directly carries neither "deploy-pages" nor
+        # "pages: write" -- and a third-party Pages action carries
+        # neither either. So the check is a RULE: no other workflow
+        # may carry an elevated permission, name the Pages branch, or
+        # use a Pages action.
+        reason = None
+        for line in code.split("\n"):
+            stripped = line.strip()
+            # Any write scope at all.
+            if re.search(r"^[\w-]+\s*:\s*write\b", stripped):
+                reason = "it carries the elevated permission %r" % stripped
+                break
+            if re.search(r"write-all", stripped):
+                reason = "it carries %r" % stripped
+                break
+            # The Pages branch, however it is reached.
+            if "gh-pages" in stripped:
+                reason = "it names the Pages branch: %r" % stripped
+                break
+            # A Pages action, whoever wrote it.
+            if re.search(r"uses:\s*\S*gh-pages", stripped):
+                reason = "it uses a Pages action: %r" % stripped
+                break
+            if "deploy-pages" in stripped:
+                reason = "it deploys the Pages: %r" % stripped
+                break
+        if reason:
+            out.append("the workflow %s could publish the Pages -- %s. The "
+                       "release gate is the only publisher"
+                       % (name, reason))
     return out
 
 
