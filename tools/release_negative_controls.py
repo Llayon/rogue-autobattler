@@ -565,6 +565,21 @@ def _value(token, context):
     return None
 
 
+def _names_a_status_function(tokens):
+    """Does this condition name one of the status functions?
+
+    The status functions are success(), failure(), always() and
+    cancelled(). A condition that names NONE of them inherits the
+    platform's default status check of success().
+    """
+    for token in tokens:
+        if token in ("success()", "failure()", "always()", "cancelled()"):
+            return True
+        if token == "!cancelled()":
+            return True
+    return False
+
+
 def deploy_is_authorized(release, event, ref, required_ok):
     """Does the deploy job run for this event and ref?
 
@@ -610,6 +625,16 @@ def deploy_is_authorized(release, event, ref, required_ok):
     tree = _parse(tokens)
     if tree is None:
         return False, "the deploy condition cannot be parsed"
+
+    # The IMPLICIT success(): "A default status check of success() is
+    # applied unless you include one of these functions." So a
+    # condition that names no status function is
+    # "success() && <the condition>" -- and without this the model
+    # evaluated the ref and the event on their own, and reported a
+    # false assertion about the platform: a FALSE RED on a legal
+    # edit.
+    if not _names_a_status_function(tokens):
+        tree = ("and", ("name", None, None, "success()"), tree)
 
     context = {
         "success": bool(required_ok),
@@ -1530,6 +1555,14 @@ def _condition_runs_after_a_failure(condition):
     if tree is None:
         return True
 
+    # The IMPLICIT success(): "A default status check of success() is
+    # applied unless you include one of these functions." So a
+    # condition with no status function keeps it -- and is false
+    # after a failure, so the step is skipped. The helper's own
+    # docstring said so, but the evaluation did not APPLY it.
+    if not _names_a_status_function(tokens):
+        tree = ("and", ("name", None, None, "success()"), tree)
+
     context = {
         "success": False,
         "cancelled": False,
@@ -2198,7 +2231,11 @@ def _declares_an_elevated_scope(line):
 
     stripped = line.strip()
     if stripped.startswith("permissions:"):
-        value = _unquote(stripped[len("permissions:"):].strip())
+        # The value is what follows the FIRST colon: a quoted key
+        # ("'permissions':") has its colon in a different place, and
+        # slicing by the length of the unquoted key read the key
+        # itself as the value.
+        value = _unquote(_the_value_of_the_key(stripped))
         if value.lower() in ("write", "write-all"):
             return True
         if value.startswith("{") and value.endswith("}"):
@@ -2227,6 +2264,33 @@ def _declares_an_elevated_scope(line):
     return False
 
 
+def _the_value_of_the_key(line):
+    """The value of a YAML key on this line.
+
+    The colon that ends the KEY is not always the first colon: in
+    "'permissions':" the key is quoted, and the first colon is the
+    one that closes the quote. So the key is matched first, and the
+    value is what follows it.
+    """
+    match = re.match(r"^\s*['\"]?([^'\":\s]+)['\"]?\s*:(.*)$",
+                     line.rstrip("\n"))
+    if not match:
+        return ""
+    return match.group(2).strip()
+
+
+def _is_the_key(line, name):
+    """Is this line the given YAML key?
+
+    The key may be QUOTED: "'permissions':" and "'deploy':" are legal
+    YAML and resolve to the same key. A reader that gated on the
+    literal text made every quoted key INVISIBLE -- which is the
+    class this series has closed eleven times over.
+    """
+    match = re.match(r"^['\"]?([^'\":\s]+)['\"]?\s*:", line.strip())
+    return bool(match) and match.group(1) == name
+
+
 def _workflow_permissions(release):
     """The WORKFLOW-LEVEL permissions, which live outside every job.
 
@@ -2247,11 +2311,18 @@ def _workflow_permissions(release):
     # the platform takes the last one.
     for index, line in enumerate(lines):
         stripped = line.strip()
-        if not stripped.startswith("permissions:"):
+        # The key may be QUOTED: "'permissions':" is legal YAML and
+        # resolves to the same key -- exactly like the quoted job key
+        # that R13-05 closed. A reader that gated on the literal
+        # text made a quoted key INVISIBLE: the deploy job's quoted
+        # key became a FALSE RED on a legal edit, and the workflow
+        # level's quoted key carrying "pages: write" was certified
+        # by EVERY rule.
+        if not _is_the_key(stripped, "permissions"):
             continue
         if line[:1].isspace():
             continue
-        value = _unquote(stripped[len("permissions:"):].strip())
+        value = _unquote(_the_value_of_the_key(stripped))
         if value:
             permissions = None
             break
@@ -2313,8 +2384,9 @@ def _job_permissions(job_body):
     lines = job_body.split("\n")
     for index, line in enumerate(lines):
         stripped = line.strip()
-        if stripped.startswith("permissions:"):
-            value = _unquote(stripped[len("permissions:"):].strip())
+        # The key may be QUOTED -- see _is_the_key.
+        if _is_the_key(stripped, "permissions"):
+            value = _unquote(_the_value_of_the_key(stripped))
             if value:
                 # The FLOW MAPPING is a valid spelling:
                 # "permissions: {pages: write}". Its scopes are read
