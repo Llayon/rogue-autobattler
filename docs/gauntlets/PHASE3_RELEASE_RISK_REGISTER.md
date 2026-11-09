@@ -72,6 +72,51 @@
              manual staging/phase3/feature/tag/pull_request/schedule
              DENY, a failed required job DENY.
 
+### H-23 — the seventh review: three HIGH and four more
+
+    Status:  PROVEN DEFECT — FIXED
+    Found:   the seventh reviewer found the same class for the
+             seventh time, and three HIGH findings:
+
+               R7-01  the job-level exclusion was TEXTUAL: a step's
+                      mapping form "if: false" strips to "if: false",
+                      which matched the exclusion and was DROPPED as
+                      the job-level guard. The reusable workflow's
+                      steps are read ONLY through that filter, so a
+                      mapping-form disablement was invisible. The
+                      distinction is INDENTATION, not text.
+               R7-02  the publisher rule was still a spelling list:
+                      "permissions: {contents: write}", quoted keys
+                      and a different case were all missed.
+               R7-03  the swallow rule read only the literal
+                      "|| true": the same swallow has "| true",
+                      "||true" and "set +e", which disables the
+                      errexit so the step exits 0 on a failing gate.
+               R7-04  the named list of the reusable workflow's steps
+                      covered 8 of 25, so 16 steps were DELETABLE
+                      with the harness green -- including the A-H
+                      differential and the ledger validator.
+               R7-05  the branch filter check only asked whether
+                      "master" was PRESENT, so a widened filter
+                      passed.
+               R7-06  the deploy's permissions check only rejected a
+                      scope that was present and wrong; a MISSING
+                      scope was never checked.
+               R7-07  the readers used the plain "utf-8", so a BOM
+                      became part of the first line -- a FALSE RED
+                      on a legitimate commit. A BOM is valid YAML and
+                      GitHub accepts it.
+               R7-08  the documents quoted the counts' outputs as
+                      literals, and the file list missed a file.
+
+    Fix:     the distinction between the job level and the step level
+             is the INDENTATION; the scopes are extracted and judged;
+             the swallow has three spellings and the run block is
+             read; the step list is complete and the rule is a
+             difference; the filter must be exactly master; the
+             deploy must hold all three scopes; the BOM is stripped.
+    Proof:   the controls are 33 of 33 RED, with and without pyyaml.
+
 ### H-22 — the seventh review: two more shapes of the same class
 
     Status:  PROVEN DEFECT — FIXED

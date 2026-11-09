@@ -72,9 +72,14 @@ the merge-base
     git merge-base master HEAD
 ```
 
-    At the time of writing those commands returned 273, 67, 340,
-    0/340, 298 and 1 -- a strict fast-forward over master. The
-    merge commit is the historical one, inside Phase 3.
+    At the time of writing those commands returned the values of an
+    earlier commit. They are NOT written down here on purpose: every
+    documentation commit changes them, so a literal is stale by the
+    next commit -- the defect the sixth reviewer found in this very
+    block, where the numbers sat beside a claim that they were not
+    hard-coded. Run the commands; the answer is the answer.
+
+    The merge commit is the historical one, inside Phase 3.
 
     By area: tests 173, core 77, docs 19, tools 12, content 6, scenes 4,
     .github 3, .hermes 1 (the run integrity ledger), the root 2
