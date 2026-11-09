@@ -21,7 +21,7 @@
     Proof:   tools/release_negative_controls.py — NC-REL-01..10 and NC-RB-01..07, all
              semantic RED; the clean gate ALLOWs the good scenario
              only.
-             EIGHT of the TWENTY ONE are GATE controls: they mutate the
+             EIGHT of the TWENTY TWO are GATE controls: they mutate the
              workflows and assert a property of the parsed result.
              NC-REL-06 and NC-REL-08 are VALIDATOR controls: they
              mutate the validator itself and compare two validator
@@ -67,7 +67,7 @@
              Seven new controls, NC-RB-01..07, and the property
              asserts BOTH sides: the forbidden refs and events are
              refused AND the legitimate master push is still allowed.
-             21 of 21 controls are RED.
+             22 of 22 controls are RED.
              The matrix: push master ALLOW, manual master ALLOW,
              manual staging/phase3/feature/tag/pull_request/schedule
              DENY, a failed required job DENY.
@@ -112,7 +112,7 @@
              code reader cuts the trailing comments off, with the
              quotes tracked; the model reproduces the platform
              exactly.
-    Proof:   the controls are 21 of 21 RED, with and without pyyaml,
+    Proof:   the controls are 22 of 22 RED, with and without pyyaml,
              and every scenario of the reviewer is detected.
 
 ### H-16 — the publication could come before the checks
@@ -203,7 +203,7 @@
              one. A mechanism's refusal must be inside its own step.
     Proof:   NC-RB-11 is the new control for the permissions. All of
              the critic's scenarios are detected, and the controls are
-             21 of 21 RED.
+             22 of 22 RED.
 
 ### H-11 — four bypasses were invisible to the controls
 
@@ -241,7 +241,7 @@
              and that the checks fail closed.
     Proof:   NC-RB-09 and NC-RB-10 are the new controls. All eight of
              the critic's adversarial mutations are now detected, and
-             the controls are 21 of 21 RED.
+             the controls are 22 of 22 RED.
 
 ### H-10 — the string comparison of the ref is case insensitive
 
