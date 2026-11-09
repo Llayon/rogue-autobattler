@@ -1103,10 +1103,20 @@ def prop_12_permissions_are_minimal(release, test):
     # publish without the checks that guard the first: the checks look
     # at the job's body, and one guarded path plus one unguarded path
     # is an unguarded path.
-    publications = deploy.count("actions/deploy-pages")
-    if publications != 1:
+    # The count is a RULE, not a spelling: a step that PUBLISHES is
+    # counted -- by its action's capability, not by its name. A
+    # third-party Pages action is a second publication path, and the
+    # count of "actions/deploy-pages" would not see it.
+    publishing = 0
+    for line in deploy.split("\n"):
+        stripped = line.strip()
+        if "uses:" not in stripped:
+            continue
+        if _is_a_publication_step(stripped):
+            publishing += 1
+    if publishing != 1:
         out.append("the deploy job has %d publication steps: there must "
-                   "be exactly one" % publications)
+                   "be exactly one" % publishing)
 
     # The publication must be the LAST thing the job does, and it must
     # come AFTER the fail-closed checks. A publication placed BEFORE
@@ -1413,6 +1423,28 @@ def _step_lines(code, target):
             block.append(follow)
         return block
     return []
+
+
+def _is_a_publication_step(line):
+    """Does this step PUBLISH?
+
+    By its CAPABILITY, not by its name: the Pages are published by
+    the official action, by a third-party one, and by a plain "git
+    push" to the Pages branch. The count of one spelling would not
+    see the others.
+    """
+    action = line.split("uses:", 1)[-1].strip().strip("'\"")
+    action = action.split("@")[0].strip()
+    # The Pages are published by the official action, by a third-party
+    # one, and by a plain push to the Pages branch. The ordinary
+    # actions -- the checkout, the configuration -- publish nothing.
+    if "deploy-pages" in action:
+        return True
+    if action.endswith("gh-pages") or "/gh-pages" in action:
+        return True
+    if "pages" in action.lower() and "configure" not in action.lower():
+        return True
+    return False
 
 
 def _tests_variable(condition, variable):
@@ -1966,22 +1998,36 @@ def prop_19_the_gate_is_not_swallowed(release, test):
             # (an explicit success) discard the gate's failure in
             # exactly the same way, and each of them has the same
             # shape with any spacing.
+            # The swallow is SEMANTIC, not a list of spellings: any
+            # construct that discards the gate's status. So the
+            # command that runs the gate must be the LAST thing whose
+            # status decides the step.
             swallowed = bool(re.search(
-                r"\|\|\s*(?:true\b|:|exit\s+0\b)", line))
+                r"\|\|\s*(?:true\b|:|exit\s+0\b|/bin/true\b)", line))
+            if not swallowed and re.search(r";\s*exit\s+0\s*$", line):
+                swallowed = True
             # "set +e" disables errexit, so the STEP exits 0 even when
             # the gate fails. In the workflow it is a line of its own
             # and the gate command is on the next one -- so the rule
             # must look at the STEP, not at the single line.
             if not swallowed:
-                # "set +e" disables the errexit for the whole RUN
-                # BLOCK, and it comes BEFORE the gate command inside
-                # that block. So the block is read from the "run:"
-                # key -- the lines that follow it.
-                if "set +e" in line:
-                    swallowed = True
-                elif any("set +e" in other
-                         for other in _run_block(raw_body, line)):
-                    swallowed = True
+                # The whole RUN BLOCK is read, not the single line: a
+                # swallow on a CONTINUATION line of a multi-line block
+                # discards the status just as well, and "set +e"
+                # disables the errexit for the whole block.
+                block_lines = _run_block(raw_body, line)
+                for other in block_lines:
+                    if "set +e" in other:
+                        swallowed = True
+                        break
+                    if bool(re.search(
+                            r"\|\|\s*(?:true\b|:|exit\s+0\b|/bin/true\b)",
+                            other)):
+                        swallowed = True
+                        break
+                    if re.search(r";\s*exit\s+0\s*$", other):
+                        swallowed = True
+                        break
             if not swallowed:
                 continue
             # Every gate command, not a list of them: a step that
