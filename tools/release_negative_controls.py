@@ -776,12 +776,70 @@ def prop_07_branch_authorization(release, test):
                    "the tip of master: the ref string comparison is "
                    "case insensitive, so a branch named Master would "
                    "pass it")
+
+    # The check must FAIL CLOSED: an unreadable tip is a HOLD, never
+    # a GREEN. Without the refusal, a deployment whose tip could not
+    # be read would proceed -- and a check that compared nothing
+    # would approve everything.
+    if _has_master_sha_check(deploy):
+        if not re.search(r"exit\s+1", deploy):
+            out.append("the master check does not fail closed: an "
+                       "unreadable tip must be a HOLD, never a GREEN")
+    return out
+
+
+def prop_11_sha_checks_stay_real(release, test):
+    """The SHA checks must READ THE REMOTE.
+
+    A check that compares the published SHA with ITSELF always
+    succeeds, so it proves nothing: the stale publication would pass
+    it. Both checks must read the tip from the remote, and both must
+    fail closed.
+    """
+    out = []
+    deploy = release["jobs"].get("deploy", "")
+    # The CODE lines only: the workflow's own comments contain the
+    # text "git ls-remote origin refs/heads/master", so a search over
+    # the whole body matched the COMMENT and the control reported
+    # GREEN while the check it protects was gone.
+    code = []
+    for line in deploy.split("\n"):
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#"):
+            code.append(stripped)
+    code_text = "\n".join(code)
+
+    if "ls-remote" not in code_text:
+        out.append("the deploy does not read the remote: a SHA check "
+                   "that compares the published SHA with itself always "
+                   "succeeds")
+        return out
+
+    # The tip of the DISPATCHED branch.
+    if not re.search(r"ls-remote[^\n]*GITHUB_REF_NAME", code_text):
+        out.append("the deploy does not read the tip of the dispatched "
+                   "branch")
+    # The tip of master.
+    if not re.search(r"ls-remote[^\n]*refs/heads/master", code_text):
+        out.append("the deploy does not read the tip of master")
+    # The fail-closed refusal.
+    if not re.search(r"exit\s+1", code_text):
+        out.append("the SHA checks do not fail closed: an unreadable "
+                   "tip must be a HOLD, never a GREEN")
     return out
 
 
 def prop_08_required_jobs_stay_mandatory(release, test):
     """The deploy needs the required jobs, and a failed, skipped or
-    cancelled required job refuses the deployment."""
+    cancelled required job refuses the deployment.
+
+    The condition must depend on the OUTCOME of the required jobs.
+    The status functions are not interchangeable: success() is TRUE
+    only when every need succeeded, while !cancelled() is TRUE even
+    when a need FAILED -- GitHub documents it as running "even if the
+    workflow is cancelled". A deploy job guarded by !cancelled()
+    would publish the artifact of a SHA whose tests failed.
+    """
     out = []
     for event, ref in (("push", "refs/heads/master"),
                        ("workflow_dispatch", "refs/heads/master")):
@@ -794,6 +852,18 @@ def prop_08_required_jobs_stay_mandatory(release, test):
     for required in ("required-tests", "web-build"):
         if required not in needs:
             out.append("the deploy does not need %s" % required)
+
+    # The condition must carry success(). The other status functions
+    # are NOT equivalent: !cancelled() is true when a need failed.
+    deploy = release["jobs"].get("deploy", "")
+    condition = _job_condition(deploy)
+    if condition:
+        for function in ("!cancelled()", "failure()", "always()"):
+            if function in condition and "success()" not in condition:
+                out.append("the deploy condition uses %s instead of "
+                           "success(): it is true even when a required "
+                           "job failed" % function)
+                break
     return out
 
 
@@ -821,6 +891,25 @@ def prop_09_no_failure_tolerance(release, test):
         for line in body.split("\n"):
             if re.match(r"^\s*continue-on-error\s*:\s*true\s*$", line):
                 out.append("the %s job continues on error" % name)
+                break
+        # A STEP that runs REGARDLESS is the shape of a bypass: the
+        # deploy job would be skipped when a need failed, but the
+        # workflow still contains a step that runs no matter what.
+        # The condition is read at the STEP level here -- unlike the
+        # job level, where a condition is the guard.
+        #
+        # Both spellings of a step condition are read: the mapping
+        # form ("if: always()" under a step) and the list form
+        # ("- if: always()" inside the step itself).
+        for line in body.split("\n"):
+            match = re.match(r"^\s*(?:-\s*)?if\s*:\s*(.*)$", line)
+            if not match:
+                continue
+            value = match.group(1).strip()
+            if value.strip("'\"") in ("always()", "${{ always() }}",
+                                       "${{always()}}"):
+                out.append("the %s job carries a step that runs "
+                           "regardless: %s" % (name, value))
                 break
     return out
 
@@ -868,6 +957,8 @@ PROPERTIES = {
     "NC-RB-06": prop_07_branch_authorization,
     "NC-RB-07": prop_09_no_failure_tolerance,
     "NC-RB-08": prop_07_branch_authorization,
+    "NC-RB-09": prop_11_sha_checks_stay_real,
+    "NC-RB-10": prop_11_sha_checks_stay_real,
 }
 
 
@@ -995,6 +1086,18 @@ MUTATIONS = [
      "release.yml",
      [("        success() &&\n",
        "        (success() || always()) &&\n")]),
+
+    ("NC-RB-09",
+     "accept the published sha whatever the tip of the branch is",
+     "release.yml",
+     [("          TIP=\"$(git ls-remote origin \"refs/heads/${GITHUB_REF_NAME}\" | cut -f1)\"",
+       "          TIP=\"${{ github.sha }}\"")]),
+
+    ("NC-RB-10",
+     "accept the published sha whatever the tip of master is",
+     "release.yml",
+     [("          MASTER_SHA=\"$(git ls-remote origin refs/heads/master | cut -f1)\"",
+       "          MASTER_SHA=\"${{ github.sha }}\"")]),
 
     ("NC-RB-08",
      "remove the case-independent check against the tip of master",
