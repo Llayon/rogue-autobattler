@@ -1638,6 +1638,29 @@ def prop_14_the_ref_set_is_a_rule(release, test):
     return out
 
 
+def prop_17_the_test_jobs_are_not_disabled(release, test):
+    """The reusable test workflow must not have a job disabled.
+
+    The deploy job needs the reusable workflow, and its result is the
+    evidence that the commit is good. A job disabled with "if: false"
+    never runs -- and the release job would still be authorized,
+    because the deploy job's own condition only asks that the NEEDS
+    succeeded.
+
+    So the reusable workflow is part of the gate, and its jobs are
+    read too.
+    """
+    out = []
+    for name, body in test["jobs"].items():
+        if name in ("push", "workflow_dispatch", "pull_request"):
+            continue
+        # A job-level condition that is never true disables the job.
+        condition = _job_condition(body)
+        if condition and _condition_disables_the_step(condition):
+            out.append("the %s job is disabled: %s" % (name, condition))
+    return out
+
+
 def prop_13_no_yaml_anchors(release, test):
     """The workflow must be readable by the controls.
 
@@ -1818,6 +1841,7 @@ PROPERTIES = {
     "NC-RB-13": prop_14_the_ref_set_is_a_rule,
     "NC-RB-14": prop_15_the_triggers_are_certified,
     "NC-RB-15": prop_16_the_concurrency_group_is_real,
+    "NC-RB-16": prop_17_the_test_jobs_are_not_disabled,
 }
 
 
@@ -1945,6 +1969,12 @@ MUTATIONS = [
      "release.yml",
      [("        success() &&\n",
        "        (success() || always()) &&\n")]),
+
+    ("NC-RB-16",
+     "disable the battle-ecs job in the reusable workflow",
+     "test.yml",
+     [("  battle-ecs:\n    runs-on: ubuntu-latest",
+       "  battle-ecs:\n    if: false\n    runs-on: ubuntu-latest")]),
 
     ("NC-RB-14",
      "add a pull_request trigger",
