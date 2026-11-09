@@ -79,6 +79,51 @@
              manual staging/phase3/feature/tag/pull_request/schedule
              DENY, a failed required job DENY.
 
+### H-29 — the tenth review's six classes
+
+    Status:  PROVEN DEFECT — FIXED
+    Found:   the tenth reviewer's own battery carried about thirty
+             cases and found six classes still live:
+
+               the ERREXIT rule knew "set +e" and not the POSIX long
+                 form "set +o errexit", which disables the same thing
+                 for the whole block.
+               a BACKGROUNDED command's status is discarded: the gate
+                 could be run with a trailing ampersand and the step
+                 would exit 0 whatever it reported.
+               the CONCURRENCY group's deny-list named five context
+                 fields. It is a property now: the group carries the
+                 ref and nothing else, so ref_type, run_attempt and
+                 event.number are caught too.
+               a PUBLISHER can be a push to ANY branch: the Pages
+                 branch of a repository deployed from a branch is
+                 whatever the Pages setting names -- gh-pages, site,
+                 docs, main -- so any push in the deploy job
+                 publishes now.
+               the FAIL-CLOSED rule read the readability hold and
+                 stopped; it never looked at the COMPARISON that
+                 follows it. A comparison guarded by
+                 "[ -n \"$VAR\" ] &&" skips an unreadable tip, so the
+                 tip is never compared with the published SHA and the
+                 deployment proceeds. The comparison is part of the
+                 rule now, and the emptiness test is recognised in
+                 every spelling -- -z, = "", ! -s, test -z.
+               five HELPERS were defined and never called. One of
+                 them -- _the_gate_command_is_not_last -- was the
+                 implementation of the positional rule, superseded by
+                 a rule that misses the class. They are gone, and the
+                 registry now FAILS on a helper nobody calls: a rule
+                 that does not run.
+
+    Fix:     all six, in commit 9cf59c2.
+    Proof:   the controls are 33 of 33 RED, with and without pyyaml,
+             and the tenth reviewer's own battery now reports MISSED
+             0. Its one remaining disagreement is a case it calls
+             legal -- "the gate piped into tee and its output read
+             back" -- and the controls flag it. That is the CORRECT
+             verdict: without pipefail the pipeline's status is tee's,
+             so the gate's RED is lost whatever reads the log.
+
 ### H-28 — the tenth review: the pipeline and the platform's shell
 
     Status:  PROVEN DEFECT — FIXED
