@@ -1294,6 +1294,18 @@ def _uses_yaml_anchors(release):
     return False
 
 
+# The commands whose result IS the gate. A step that swallows their
+# result with "|| true" would let a RED gate pass.
+GATE_COMMANDS = (
+    "release_negative_controls.py",
+    "validate_web_artifact.py",
+    "run_battle_ecs_suites.py",
+    "run_ah_semantic_differential.py",
+    "ledger_validator",
+    "negative_controls.py",
+)
+
+
 def _workflow_permissions(release):
     """The WORKFLOW-LEVEL permissions, which live outside every job.
 
@@ -1687,6 +1699,95 @@ def prop_17_the_test_jobs_are_not_disabled(release, test):
     return out
 
 
+def prop_19_the_gate_is_not_swallowed(release, test):
+    """The gate's own result must not be swallowed.
+
+    "|| true" after the controls makes the step succeed whatever the
+    controls reported: the gate would run, say RED, and the CI would
+    carry on. The same shape applies to every mandatory step of the
+    reusable workflow.
+    """
+    out = []
+    for label, text in (("the release workflow", release["text"]),
+                        ("the reusable workflow", test["text"])):
+        code = _code_lines(text)
+        for line in code.split("\n"):
+            # Only the GATE's own result matters. "godot --editor --quit
+            # || true" is a legitimate way to close an editor that
+            # exits with a warning, and it is not a gate.
+            if "|| true" not in line and "||  true" not in line:
+                continue
+            if not any(gate in line for gate in GATE_COMMANDS):
+                continue
+            out.append("the %s swallows the gate's result with '|| true': %s"
+                       % (label, line.strip()[:60]))
+            break
+    return out
+
+
+def prop_20_the_needs_exist(release, test):
+    """The needs of the deploy job must be jobs that EXIST.
+
+    GitHub fails a workflow whose needs name a job that is not there,
+    so this is not an opening -- but the harness must see it, because
+    a harness that reads the needs without checking them would
+    certify a broken workflow.
+    """
+    out = []
+    names = set(release["jobs"].keys())
+    for job in ("deploy", "web-build", "required-tests"):
+        body = release["jobs"].get(job, "")
+        needs = _needs_of(release["jobs"], job)
+        for needed in needs.replace(",", " ").split():
+            needed = needed.strip().strip("'\"")
+            if needed and needed not in names:
+                out.append("the %s job needs %s, which does not exist"
+                           % (job, needed))
+    return out
+
+
+def prop_21_the_jobs_are_bounded(release, test):
+    """The deploy job must have a timeout.
+
+    Without one the job could hang forever and hold the Pages
+    deployment queue -- and the concurrency group would queue every
+    later run behind it.
+    """
+    out = []
+    for name, body in release["jobs"].items():
+        if name in ("push", "workflow_dispatch"):
+            continue
+        # A job that CALLS the reusable workflow has no timeout of
+        # its own -- the called workflow carries it. The test is a
+        # JOB-LEVEL "uses:" key, not a step's: the deploy job uses
+        # actions and still needs its timeout.
+        job_level_uses = re.search(r"^\s{2,4}uses\s*:", body,
+                                    re.MULTILINE)
+        if job_level_uses and "timeout-minutes:" not in body:
+            continue
+        if "timeout-minutes:" not in body:
+            out.append("the %s job has no timeout" % name)
+    return out
+
+
+def prop_22_the_release_workflow_is_named(release, test):
+    """The file the controls read must be the release workflow.
+
+    A workflow that is no longer named "Release" would still be the
+    one the controls read -- and the one that publishes.
+    """
+    out = []
+    code = _code_lines(release["text"])
+    for line in code.split("\n"):
+        if line.startswith("name:"):
+            if line.strip() != "name: Release":
+                out.append("the release workflow is named %r: the controls "
+                           "read this file, so it must be the release "
+                           "workflow" % line.strip()[6:].strip())
+            break
+    return out
+
+
 def prop_18_no_other_publisher(release, test):
     """There must be no OTHER workflow that could publish the Pages.
 
@@ -1907,6 +2008,10 @@ PROPERTIES = {
     "NC-RB-15": prop_16_the_concurrency_group_is_real,
     "NC-RB-16": prop_17_the_test_jobs_are_not_disabled,
     "NC-RB-17": prop_18_no_other_publisher,
+    "NC-RB-18": prop_19_the_gate_is_not_swallowed,
+    "NC-RB-19": prop_20_the_needs_exist,
+    "NC-RB-20": prop_21_the_jobs_are_bounded,
+    "NC-RB-21": prop_22_the_release_workflow_is_named,
 }
 
 
@@ -2034,6 +2139,28 @@ MUTATIONS = [
      "release.yml",
      [("        success() &&\n",
        "        (success() || always()) &&\n")]),
+
+    ("NC-RB-18",
+     "swallow the result of the controls",
+     "test.yml",
+     [("run: python tools/release_negative_controls.py",
+       "run: python tools/release_negative_controls.py || true")]),
+
+    ("NC-RB-19",
+     "need a job that does not exist",
+     "release.yml",
+     [("    needs: [required-tests, web-build]",
+       "    needs: [required-tests, web-build, ghost-job]")]),
+
+    ("NC-RB-20",
+     "remove the timeout of the deploy job",
+     "release.yml",
+     [("    timeout-minutes: 15\n", "")]),
+
+    ("NC-RB-21",
+     "rename the release workflow",
+     "release.yml",
+     [("name: Release\n", "name: Deploy\n")]),
 
     ("NC-RB-17",
      "add a second workflow that publishes the pages",
