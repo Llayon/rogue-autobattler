@@ -1795,8 +1795,13 @@ def _exit_is_a_refusal(block, condition):
             # refusal on the same line, which is legal and normal.
             if stripped == condition or stripped.startswith(condition + " "):
                 inside = True
-                tail = stripped[len(condition):]
-                match = re.match(r"^\s*exit\s+(\d+)", tail)
+                # The refusal may be after the "then" on the same
+                # line: "if [ ... ]; then exit 1; fi". And the caller
+                # may pass the WHOLE line as the condition -- so the
+                # exit is searched in the line itself, and the tail
+                # after the condition is searched too.
+                tail = stripped[len(condition):] or stripped
+                match = re.search(r"\bexit\s+(\d+)\b", tail)
                 if match:
                     return int(match.group(1)) != 0
             continue
