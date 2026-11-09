@@ -21,7 +21,7 @@
     Proof:   tools/release_negative_controls.py — NC-REL-01..10 and NC-RB-01..07, all
              semantic RED; the clean gate ALLOWs the good scenario
              only.
-             EIGHT of the TWENTY FIVE are GATE controls: they mutate the
+             EIGHT of the TWENTY SEVEN are GATE controls: they mutate the
              workflows and assert a property of the parsed result.
              NC-REL-06 and NC-REL-08 are VALIDATOR controls: they
              mutate the validator itself and compare two validator
@@ -72,6 +72,45 @@
              manual staging/phase3/feature/tag/pull_request/schedule
              DENY, a failed required job DENY.
 
+### H-19 — the fifth review: the harness could not see its own disablement
+
+    Status:  PROVEN DEFECT — FIXED
+    Found:   the fifth independent reviewer found the two most
+             valuable holes of the whole series, both in the evidence
+             harness, and both real:
+
+               R5-01  SELF-CONCEALING. The harness could not detect
+                      its OWN disablement. The step in test.yml that
+                      RUNS THE CONTROLS could be disabled with
+                      "if: false", and the thing that would have
+                      reported it was the thing that was switched off.
+                      The harness reported GREEN with the release
+                      controls disabled -- byte-identical to the
+                      baseline. The same hole covered every mandatory
+                      step of the reusable workflow: the A-H
+                      differential, the battle-ecs suites, the ledger
+                      validator, the lint, the legacy regression.
+               R5-02  an UNGATED SECOND PUBLISHER was invisible. The
+                      harness resolved its inputs by filename, so a
+                      workflow file it did not know about could not
+                      be checked -- and one that publishes on every
+                      branch with pages: write would pass every
+                      control. The premise "the old ungated publish
+                      path cannot survive the merge" is true for the
+                      DELETED web-build.yml and false for any NEW
+                      file.
+
+    Fix:     the reusable workflow is part of the gate: its jobs and
+             its step conditions are read, so a disabled job or step
+             is seen. The workflow directory is scanned for any other
+             publisher.
+    Proof:   the controls are 27 of 27 RED, with and without pyyaml.
+
+    NOTE:   across five passes the WORKFLOW was never found broken.
+             Every finding was in the proof. The distinction matters:
+             the gate is sound, the proof was not -- and a proof that
+             cannot see its own disablement certifies nothing.
+
 ### H-18 — the fourth review: eleven classes of mutation, and two false REDs
 
     Status:  PROVEN DEFECT — FIXED
@@ -116,7 +155,7 @@
              authorization set is asserted over a generated corpus;
              the needs and the condition are read in every valid
              spelling.
-    Proof:   the controls are 25 of 25 RED, with and without pyyaml,
+    Proof:   the controls are 27 of 27 RED, with and without pyyaml,
              and the legitimate edits -- the needs in the block form,
              the condition in quotes -- still pass.
 
@@ -160,7 +199,7 @@
              code reader cuts the trailing comments off, with the
              quotes tracked; the model reproduces the platform
              exactly.
-    Proof:   the controls are 25 of 25 RED, with and without pyyaml,
+    Proof:   the controls are 27 of 27 RED, with and without pyyaml,
              and every scenario of the reviewer is detected.
 
 ### H-16 — the publication could come before the checks
@@ -251,7 +290,7 @@
              one. A mechanism's refusal must be inside its own step.
     Proof:   NC-RB-11 is the new control for the permissions. All of
              the critic's scenarios are detected, and the controls are
-             25 of 25 RED.
+             27 of 27 RED.
 
 ### H-11 — four bypasses were invisible to the controls
 
@@ -289,7 +328,7 @@
              and that the checks fail closed.
     Proof:   NC-RB-09 and NC-RB-10 are the new controls. All eight of
              the critic's adversarial mutations are now detected, and
-             the controls are 25 of 25 RED.
+             the controls are 27 of 27 RED.
 
 ### H-10 — the string comparison of the ref is case insensitive
 
