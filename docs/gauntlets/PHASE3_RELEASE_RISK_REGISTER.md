@@ -21,7 +21,7 @@
     Proof:   tools/release_negative_controls.py — NC-REL-01..10 and NC-RB-01..07, all
              semantic RED; the clean gate ALLOWs the good scenario
              only.
-             EIGHT of the TWENTY SEVEN are GATE controls: they mutate the
+             EIGHT of the THIRTY ONE are GATE controls: they mutate the
              workflows and assert a property of the parsed result.
              NC-REL-06 and NC-REL-08 are VALIDATOR controls: they
              mutate the validator itself and compare two validator
@@ -67,10 +67,36 @@
              Seven new controls, NC-RB-01..07, and the property
              asserts BOTH sides: the forbidden refs and events are
              refused AND the legitimate master push is still allowed.
-             27 of 27 controls are RED.
+             31 of 31 controls are RED.
              The matrix: push master ALLOW, manual master ALLOW,
              manual staging/phase3/feature/tag/pull_request/schedule
              DENY, a failed required job DENY.
+
+### H-20 — the sixth review: the gate's result could be swallowed
+
+    Status:  PROVEN DEFECT — FIXED
+    Found:   four more gaps, found by probing the sixth reviewer's
+             list directly:
+
+               1. "|| true" after the controls made the step succeed
+                  whatever they reported: the gate would run, say RED,
+                  and the CI would carry on
+               2. the deploy's needs could name a job that does not
+                  exist -- not an opening, since GitHub fails such a
+                  workflow, but the harness must see it
+               3. a job's timeout could be removed: the deploy could
+                  then hang forever and hold the Pages deployment
+                  queue
+               4. the release workflow could be renamed: the file the
+                  controls read would still be the one that publishes
+
+    Fix:     only the GATE's own commands are checked for a swallowed
+             result -- "godot --editor --quit || true" is legitimate
+             and is not a gate. The needs are checked against the jobs
+             that exist. The timeout is required, except for a job
+             that CALLS the reusable workflow: the called workflow
+             carries it. The workflow's name is certified.
+    Proof:   the controls are 31 of 31 RED, with and without pyyaml.
 
 ### H-19 — the fifth review: the harness could not see its own disablement
 
@@ -104,7 +130,7 @@
              its step conditions are read, so a disabled job or step
              is seen. The workflow directory is scanned for any other
              publisher.
-    Proof:   the controls are 27 of 27 RED, with and without pyyaml.
+    Proof:   the controls are 31 of 31 RED, with and without pyyaml.
 
     NOTE:   across five passes the WORKFLOW was never found broken.
              Every finding was in the proof. The distinction matters:
@@ -155,7 +181,7 @@
              authorization set is asserted over a generated corpus;
              the needs and the condition are read in every valid
              spelling.
-    Proof:   the controls are 27 of 27 RED, with and without pyyaml,
+    Proof:   the controls are 31 of 31 RED, with and without pyyaml,
              and the legitimate edits -- the needs in the block form,
              the condition in quotes -- still pass.
 
@@ -199,7 +225,7 @@
              code reader cuts the trailing comments off, with the
              quotes tracked; the model reproduces the platform
              exactly.
-    Proof:   the controls are 27 of 27 RED, with and without pyyaml,
+    Proof:   the controls are 31 of 31 RED, with and without pyyaml,
              and every scenario of the reviewer is detected.
 
 ### H-16 — the publication could come before the checks
@@ -290,7 +316,7 @@
              one. A mechanism's refusal must be inside its own step.
     Proof:   NC-RB-11 is the new control for the permissions. All of
              the critic's scenarios are detected, and the controls are
-             27 of 27 RED.
+             31 of 31 RED.
 
 ### H-11 — four bypasses were invisible to the controls
 
@@ -328,7 +354,7 @@
              and that the checks fail closed.
     Proof:   NC-RB-09 and NC-RB-10 are the new controls. All eight of
              the critic's adversarial mutations are now detected, and
-             the controls are 27 of 27 RED.
+             the controls are 31 of 31 RED.
 
 ### H-10 — the string comparison of the ref is case insensitive
 
@@ -428,7 +454,7 @@
              audit, the reachability audit and the three other
              negative-control harnesses all avoid yaml).
     Proof:   the controls were run under a python where importing yaml
-             raises ImportError, exactly as on a bare runner: 27 of 27
+             raises ImportError, exactly as on a bare runner: 31 of 31
              RED, exit 0. There is no "import yaml" anywhere in the
              repository now.
 
