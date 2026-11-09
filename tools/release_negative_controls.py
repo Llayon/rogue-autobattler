@@ -1791,8 +1791,14 @@ def _exit_is_a_refusal(block, condition):
     for line in lines:
         stripped = line.strip()
         if not inside:
-            if stripped == condition:
+            # The line must BE the condition: it may carry the
+            # refusal on the same line, which is legal and normal.
+            if stripped == condition or stripped.startswith(condition + " "):
                 inside = True
+                tail = stripped[len(condition):]
+                match = re.match(r"^\s*exit\s+(\d+)", tail)
+                if match:
+                    return int(match.group(1)) != 0
             continue
         match = re.match(r"^exit\s+(\d+)", stripped)
         if match:
