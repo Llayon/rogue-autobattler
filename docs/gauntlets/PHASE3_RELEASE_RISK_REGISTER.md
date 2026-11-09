@@ -72,6 +72,32 @@
              manual staging/phase3/feature/tag/pull_request/schedule
              DENY, a failed required job DENY.
 
+### H-22 — the seventh review: two more shapes of the same class
+
+    Status:  PROVEN DEFECT — FIXED
+    Found:   probing the seventh reviewer's list directly found two
+             more shapes of the hole the whole series has been about:
+
+               1. a workflow that CALLS the release workflow is a
+                  second path to the same publication: it would run
+                  the release workflow from its own trigger, on its
+                  own ref, with its own permissions
+               2. the swallowed-gate rule matched only the tools/
+                  prefix, so a gate command under tests/ci/ could
+                  swallow its exit code:
+                  "python tests/ci/standalone_runner_test.py || true"
+                  would make the standalone runner contract a no-op
+                  that always passes
+
+    Fix:     a workflow that calls the release workflow is refused,
+             and the gate rule is now "(tools|tests|scripts)/".
+
+    NOTE:   this is the SEVENTH pass in which the finding was the
+             same class. The pattern is stable, and it is the reason
+             the controls are structural rather than textual: a
+             textual rule is defeated by the next spelling, and a
+             spelling is always one more.
+
 ### H-21 — the sixth review: nine gaps, the same class again
 
     Status:  PROVEN DEFECT — FIXED
