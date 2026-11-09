@@ -14,8 +14,8 @@
                       can outlive is a document that will be wrong)
     branch            integration/phase3-master-release-rehearsal
     the merge-base    02fe83ef (== master: a strict fast-forward)
-    ahead / behind    0 / 301
-    the commits       32 over the published Phase 3, 305 over master
+    ahead / behind    0 / 311
+    the commits       38 over the published Phase 3, 311 over master
 
     The candidate SHA moves with every commit of the series. Read it
     from the repository at the moment of the publication; do NOT copy
