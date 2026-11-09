@@ -417,7 +417,7 @@ the browser smoke       17 of 18 PASS (the settings are NOT VERIFIED:
     turned the REQUIRED battle-ecs job RED. Every other CI tool of the
     repository deliberately avoids yaml, and now the release controls
     do too. They were re-run under a python where importing yaml
-    raises: 33 of 33 RED, exit 0.
+    raises: every control RED, exit 0.
 
     It also found TWO HIGH findings in the HARNESS itself, which are
     the most important findings of the whole closure:
@@ -863,7 +863,7 @@ PHASE 3 -> MASTER INTEGRATION & RELEASE SAFETY
         the runner and turned the REQUIRED battle-ecs job RED. The
         controls now read the workflows as text, like every other CI
         tool of the repository, and they were run under a python where
-        importing yaml raises: 33 of 33 RED, exit 0.
+        importing yaml raises: every control RED, exit 0.
 
     The SETTINGS scenario remains NOT VERIFIED: the Settings button is
     declared and never created, so the panel cannot be opened. It is
@@ -907,8 +907,14 @@ PHASE 3 -> MASTER INTEGRATION & RELEASE SAFETY
     unregistered property a hard failure, and the condition check
     distinguishes the job level from the step level by INDENTATION.
 
-    The controls are 33 of 33 RED, with and without pyyaml, and the
-    CLEAN gate ALLOWs every scenario.
+    Every control is RED, with and without pyyaml, and the CLEAN gate
+    ALLOWs every scenario. The count is read from the repository, not
+    written here:
+
+        python tools/release_negative_controls.py | tail -2
+        python -c "import sys; sys.path.insert(0, 'tools'); \
+          import release_negative_controls as nc; print(len(nc.MUTATIONS))"
+
 
     The ninth review's two batteries added nine more classes, and the
     pattern held: every one of them was a rule that recognised only

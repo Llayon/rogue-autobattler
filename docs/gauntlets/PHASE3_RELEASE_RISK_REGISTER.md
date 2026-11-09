@@ -21,8 +21,15 @@
     Proof:   tools/release_negative_controls.py — NC-REL-01..10 and NC-RB-01..07, all
              semantic RED; the clean gate ALLOWs the good scenario
              only.
-             EIGHT of the THIRTY THREE are GATE controls: they mutate the
-             workflows and assert a property of the parsed result.
+             The GATE controls mutate the workflows and assert a
+             property of the parsed result; the count is read from the
+             repository, not written here:
+
+                 python -c "import sys; sys.path.insert(0, 'tools'); \
+                   import release_negative_controls as nc; \
+                   print(len(nc.MUTATIONS), len([m for m in nc.MUTATIONS \
+                   if m[0] not in ('NC-REL-06', 'NC-REL-08')]))"
+
              NC-REL-06 and NC-REL-08 are VALIDATOR controls: they
              mutate the validator itself and compare two validator
              invocations. NC-REL-09 covers the artifact FLOW: the job
@@ -67,7 +74,7 @@
              Seven new controls, NC-RB-01..07, and the property
              asserts BOTH sides: the forbidden refs and events are
              refused AND the legitimate master push is still allowed.
-             33 of 33 controls are RED.
+             every control is RED.
              The matrix: push master ALLOW, manual master ALLOW,
              manual staging/phase3/feature/tag/pull_request/schedule
              DENY, a failed required job DENY.
@@ -101,7 +108,7 @@
              is the gate's, so that pipe is legitimate. The stale
              branch that exempted a logger is gone, so the rule is
              one place and not two.
-    Proof:   the controls are 33 of 33 RED, with and without pyyaml,
+    Proof:   every control is RED, with and without pyyaml,
              and the ninth reviewer's battery now reports 19 of its
              31 cases DETECTED -- the two that remain are not
              openings: one is not valid YAML, and the third is a
@@ -165,7 +172,7 @@
 
     Fix:     all nine, in commits cf01ea6, cc9d187, d808ca2, 7e8dcb7
              and 6dafd7a.
-    Proof:   the controls are 33 of 33 RED, with and without pyyaml,
+    Proof:   every control is RED, with and without pyyaml,
              and the ninth reviewer's own battery reports 18 of its
              31 cases DETECTED and every legitimate case as
              legal-ok, with no false red left but one.
@@ -213,7 +220,7 @@
                  renaming a job.
 
     Fix:     all six, in commit 6656f18.
-    Proof:   the controls are 33 of 33 RED, with and without pyyaml,
+    Proof:   every control is RED, with and without pyyaml,
              and the ninth reviewer's own battery reports every
              LEGAL case as legal-ok.
 
@@ -260,7 +267,7 @@
              their names; the readability check tests the RIGHT
              variable; a publication is counted by its action's
              CAPABILITY.
-    Proof:   the controls are 33 of 33 RED, with and without pyyaml,
+    Proof:   every control is RED, with and without pyyaml,
              and the eighth reviewer's own battery now reports zero
              false reds.
 
@@ -294,7 +301,7 @@
              publishes is counted by its action's CAPABILITY, so the
              official action, a third-party one and a plain push are
              all seen, and the ordinary actions are not.
-    Proof:   the controls are 33 of 33 RED, with and without pyyaml.
+    Proof:   every control is RED, with and without pyyaml.
 
     NOTE:   seven rounds, one class. The pattern is stable: a
              textual rule is defeated by the next spelling, and a
@@ -346,7 +353,7 @@
              read; the step list is complete and the rule is a
              difference; the filter must be exactly master; the
              deploy must hold all three scopes; the BOM is stripped.
-    Proof:   the controls are 33 of 33 RED, with and without pyyaml.
+    Proof:   every control is RED, with and without pyyaml.
 
 ### H-22 — the seventh review: two more shapes of the same class
 
@@ -420,7 +427,7 @@
              of steps that must be present; the deploy job holds
              exactly three scopes; both workflows' triggers are
              certified.
-    Proof:   the controls are 33 of 33 RED, with and without pyyaml.
+    Proof:   every control is RED, with and without pyyaml.
 
 ### H-20 — the sixth review: the gate's result could be swallowed
 
@@ -446,7 +453,7 @@
              that exist. The timeout is required, except for a job
              that CALLS the reusable workflow: the called workflow
              carries it. The workflow's name is certified.
-    Proof:   the controls are 33 of 33 RED, with and without pyyaml.
+    Proof:   every control is RED, with and without pyyaml.
 
 ### H-19 — the fifth review: the harness could not see its own disablement
 
@@ -480,7 +487,7 @@
              its step conditions are read, so a disabled job or step
              is seen. The workflow directory is scanned for any other
              publisher.
-    Proof:   the controls are 33 of 33 RED, with and without pyyaml.
+    Proof:   every control is RED, with and without pyyaml.
 
     NOTE:   across five passes the WORKFLOW was never found broken.
              Every finding was in the proof. The distinction matters:
@@ -531,7 +538,7 @@
              authorization set is asserted over a generated corpus;
              the needs and the condition are read in every valid
              spelling.
-    Proof:   the controls are 33 of 33 RED, with and without pyyaml,
+    Proof:   every control is RED, with and without pyyaml,
              and the legitimate edits -- the needs in the block form,
              the condition in quotes -- still pass.
 
@@ -575,7 +582,7 @@
              code reader cuts the trailing comments off, with the
              quotes tracked; the model reproduces the platform
              exactly.
-    Proof:   the controls are 33 of 33 RED, with and without pyyaml,
+    Proof:   every control is RED, with and without pyyaml,
              and every scenario of the reviewer is detected.
 
 ### H-16 — the publication could come before the checks
@@ -704,7 +711,9 @@
              and that the checks fail closed.
     Proof:   NC-RB-09 and NC-RB-10 are the new controls. All eight of
              the critic's adversarial mutations are now detected, and
-             the controls are 33 of 33 RED.
+             every control is RED -- the count at that commit was
+             thirty three, and the CURRENT count is read from the
+             repository.
 
 ### H-10 — the string comparison of the ref is case insensitive
 
@@ -782,9 +791,9 @@
     Fix:     the property is registered, and NC-REL-09 moves the
              upload from the build job to the deploy job, so the
              property really breaks.
-    Proof:   9 of 9 controls are RED, and the registry carries only
-             the gate properties, so every entry is really checked by
-             the property it names.
+    Proof:   every control was RED -- nine of them at that commit --
+             and the registry carries only the gate properties, so
+             every entry is really checked by the property it names.
 
 ### H-06 — the release controls imported yaml, and the CI installs no yaml
 

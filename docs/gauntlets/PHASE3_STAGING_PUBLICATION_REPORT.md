@@ -107,8 +107,13 @@ Remote staging SHA:    f42e68ed8d671a022e3f77b8984fe6e3a4afeec4
     NOTE: the run above is the REAL REMOTE EVIDENCE for the staging
     candidate f42e68e, and it ran the controls AS THEY WERE AT THAT
     SHA -- ten of them. The branch authorization work that followed
-    added twenty three more, and those thirty three have run LOCALLY only. A
-    republication of the fixed candidate is what would make them
+    added more, and all of them have run LOCALLY only. The count is
+    read from the repository:
+
+        python -c "import sys; sys.path.insert(0, 'tools'); \
+          import release_negative_controls as nc; print(len(nc.MUTATIONS))"
+
+    A republication of the fixed candidate is what would make them
     REMOTE VERIFIED.
 
 ## SAVE/BATTLE MIGRATION
