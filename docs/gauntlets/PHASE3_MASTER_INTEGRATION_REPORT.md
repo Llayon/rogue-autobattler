@@ -362,7 +362,8 @@ ahead / behind
     git rev-list --left-right --count master...HEAD
 the merge commits     1 (the historical one, inside Phase 3)
 the new work          the commits on top of the published Phase 3
-the changed files     11 over the published Phase 3
+                       git rev-list --count 4316a32..HEAD
+the changed files     git diff --name-only 4316a32..HEAD
 ```
 
     The candidate carries the published Phase 3, the release workflow
@@ -796,7 +797,10 @@ DENIED
     over master -- read with the commands in section C, not from here:
     commits over master.
 
-    The 11 files the series changed over the published Phase 3:
+    The files the series changed over the published Phase 3. The count
+and the list are READ from the repository -- `git diff --name-only
+4316a32..HEAD` -- because a list written down goes stale the moment
+the next file is added, and it went stale here once already:
 
 ```
 .github/workflows/release.yml                    NEW
@@ -808,6 +812,7 @@ docs/gauntlets/LOCAL_WEB_SMOKE.md                NEW
 docs/gauntlets/PHASE3_MASTER_INTEGRATION_REPORT.md   NEW
 docs/gauntlets/PHASE3_PUBLICATION_RUNBOOK.md     NEW
 docs/gauntlets/PHASE3_RELEASE_RISK_REGISTER.md   NEW
+docs/gauntlets/PHASE3_STAGING_PUBLICATION_REPORT.md NEW
 tools/release_negative_controls.py               NEW
 tools/validate_web_artifact.py                   NEW
 ```
