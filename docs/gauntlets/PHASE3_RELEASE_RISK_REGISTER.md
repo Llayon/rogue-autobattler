@@ -72,6 +72,47 @@
              manual staging/phase3/feature/tag/pull_request/schedule
              DENY, a failed required job DENY.
 
+### H-25 — the eighth review's battery, replayed
+
+    Status:  PROVEN DEFECT — FIXED
+    Found:   the eighth reviewer left its battery in the scratch
+             directory, and replaying it against the branch exposed
+             THIRTEEN openings and TWO false reds that the review
+             itself had not listed:
+
+               S1/S2  (SELF-CONCEALING) the gate commands were
+                      certified by the script name as a SUBSTRING, so
+                      an echo that mentioned the command satisfied
+                      them, and a step could be deleted with its name
+                      carried by a string
+               S3-S7  the swallow rule listed the commands that
+                      swallow; an arbitrary command after the gate and
+                      the gate inverted into a conditional were missed
+               S8-S11 the authorization set was a list -- a generated
+                      one, but still a list -- so authorizing another
+                      ref or another event passed
+               S12/S13 the trigger keys were read as SUBSTRINGS, so a
+                      quoted key or a key with a space before the colon
+                      hid a forbidden trigger
+               S15/S16 the readability check tested the wrong variable
+               S17    the publication count knew one action name
+               S18    a second upload of an unvalidated directory
+               L-o/L-t  two FALSE REDS: a quoted trigger key and a
+                      quoted step name are legal YAML
+
+    Fix:     the gate commands must RUN and the step names are read
+             as NAMES; the swallow rule is structural -- the gate
+             command must be the LAST thing whose status decides the
+             step, and the whole run block is read; the corpus is
+             GENERATED over the shapes of a ref and the names of an
+             event; the trigger keys are read as KEYS and judged by
+             their names; the readability check tests the RIGHT
+             variable; a publication is counted by its action's
+             CAPABILITY.
+    Proof:   the controls are 33 of 33 RED, with and without pyyaml,
+             and the eighth reviewer's own battery now reports zero
+             false reds.
+
 ### H-24 — the eighth review: the class is still live
 
     Status:  PROVEN DEFECT — FIXED
