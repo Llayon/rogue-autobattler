@@ -222,7 +222,13 @@ def _job_condition(block):
                     continue
                 if not follow.startswith("      "):
                     break
-                parts.append(follow.strip())
+                # The comment is cut from the BODY too: a legal
+                # "github.ref == '...' &&  # only master" inside a
+                # folded block is the same condition, and a rule that
+                # kept the comment could not read it -- so it failed
+                # CLOSED into "runs regardless", a FALSE RED in the
+                # required CI job.
+                parts.append(_without_trailing_comment(follow.strip()))
             return _unquote(" ".join(parts).strip())
         return _unquote(value)
     return ""
@@ -1128,6 +1134,29 @@ def prop_11_sha_checks_stay_real(release, test):
     return out
 
 
+def _every_workflow(release, test):
+    """Every workflow in the directory, as (name, {"jobs": ...}).
+
+    The reusable workflow is a TOP-LEVEL workflow -- it runs on every
+    push to every branch -- so it is part of what the rules must
+    judge. And a workflow that appears in the directory next to the
+    release one is part of the publication too.
+    """
+    workflows = []
+    directory = release.get("directory")
+    if not directory:
+        directory = os.path.dirname(os.path.abspath(RELEASE))
+    for name in sorted(os.listdir(directory)):
+        if not name.endswith(".yml") and not name.endswith(".yaml"):
+            continue
+        path = os.path.join(directory, name)
+        try:
+            workflows.append((name, {"jobs": load_jobs(path)}))
+        except OSError:
+            continue
+    return workflows
+
+
 def prop_12_permissions_are_minimal(release, test):
     """The elevated permissions belong to the deploy job alone.
 
@@ -1136,24 +1165,33 @@ def prop_12_permissions_are_minimal(release, test):
     whatever it likes, without the deploy job's checks.
     """
     out = []
-    for name, body in release["jobs"].items():
-        if name in ("push", "workflow_dispatch"):
-            continue
-        code = _code_lines(body)
-        # The rule is not a list of spellings: EVERY permission of every
-        # job other than the deploy job must be read-only. A sweep of
-        # named scopes would miss "write-all" and "contents: write".
-        #
-        # The permissions are read as the BLOCK they are: the scalar
-        # form "permissions: write-all" is elevated by itself, and the
-        # block form lists one scope per line.
-        permissions = _job_permissions(body)
-        for scope, value in permissions:
-            if value in ("write", "write-all"):
-                if name != "deploy":
-                    out.append("the %s job carries %s: %s"
-                               % (name, scope, value))
-                break
+    # EVERY workflow in the directory is examined, not only the
+    # release one. The reusable workflow is a TOP-LEVEL workflow: it
+    # has "on: push / pull_request / workflow_call", so it runs on
+    # EVERY push to EVERY branch. A rule that read only the release
+    # workflow's jobs could not see it gaining the Pages rights -- a
+    # SECOND publisher on every branch, with no branch guard and no
+    # tip check.
+    for workflow_name, workflow in _every_workflow(release, test):
+        for name, body in workflow["jobs"].items():
+            if name in ("push", "workflow_dispatch"):
+                continue
+            # The rule is not a list of spellings: EVERY permission of
+            # every job other than the deploy job must be read-only. A
+            # sweep of named scopes would miss "write-all" and
+            # "contents: write".
+            #
+            # The permissions are read as the BLOCK they are: the
+            # scalar form "permissions: write-all" is elevated by
+            # itself, and the block form lists one scope per line.
+            permissions = _job_permissions(body)
+            for scope, value in permissions:
+                if value in ("write", "write-all"):
+                    if not (workflow_name == "release.yml"
+                            and name == "deploy"):
+                        out.append("the %s job of %s carries %s: %s"
+                                   % (name, workflow_name, scope, value))
+                    break
 
     # The deploy job may hold EXACTLY the three scopes it needs. It
     # was exempt from the check above, so it could hold any elevated
