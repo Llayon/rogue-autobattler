@@ -1463,6 +1463,69 @@ def _tests_variable(condition, variable):
     return True
 
 
+def _runs_a_command(line, script):
+    """Does this line RUN the given script?
+
+    The command must be a COMMAND: the script is the argument of the
+    interpreter, and the interpreter is the first word of the line.
+    A line that merely MENTIONS the script -- in a string, in an
+    echo, in a comment -- does not run it. A certification that looks
+    for the name as a SUBSTRING is satisfied by an echo.
+    """
+    stripped = _without_trailing_comment(line.strip())
+    # The line may carry the "run:" key before the command, and the
+    # command may be the whole line.
+    stripped = re.sub(r"^run:\s*", "", stripped)
+    match = re.match(r"^(?:python3?|py)\s+(.*)$", stripped)
+    if not match:
+        return False
+    rest = match.group(1).strip()
+    if rest.startswith(("'", '"')):
+        return False
+    parts = rest.split()
+    if not parts:
+        return False
+    first = parts[0]
+    if first.startswith(("'", '"')):
+        return False
+    return script in first
+
+
+def _the_gate_command_is_not_last(line):
+    """Does something follow the gate command in its run block?
+
+    The gate command must be the LAST command of the block: anything
+    after it can discard its status, and the list of the constructs
+    that do so is never complete -- a pipeline, a conditional, an
+    explicit exit, a do-nothing command.
+    """
+    stripped = _without_trailing_comment(line.strip())
+    stripped = re.sub(r"^run:\s*", "", stripped)
+    if not re.match(r"^(?:python3?|py)\s+", stripped):
+        return False
+    # The gate command is on this line. What follows it, on this line
+    # or on the next lines of the block, decides the step's status.
+    # The gate commands are "python <script>": the tail after the
+    # script is what decides the status. An ARGUMENT is not a
+    # swallow -- "python tools/x.py --verbose" runs the gate -- but an
+    # OPERATOR is.
+    after = stripped.split(None, 2)
+    tail = after[2] if len(after) > 2 else ""
+    tail = tail.strip()
+    if not tail:
+        return False
+    # The operators that discard the status.
+    if re.match(r"^(?:\|\||\||&&|;|\||&|if\b|then\b|else\b|fi\b|\{)",
+                tail):
+        return True
+    # Anything else after the script on the same line is a wrapper --
+    # "if ! python ..." starts with "if", and a redirection is not a
+    # swallow.
+    if re.match(r"^(?:if\b|!\b|\()", tail):
+        return True
+    return False
+
+
 def _is_yaml_true(line, key):
     """Is this key's value the YAML boolean TRUE?
 
@@ -1791,7 +1854,7 @@ def prop_15_the_triggers_are_certified(release, test):
     text = release["text"]
 
     # The trigger block is at the top level, before "jobs:".
-    match = re.search(r"^on\s*:\s*$", text, re.MULTILINE)
+    match = re.search(r"^\s*['\"]?on['\"]?\s*:\s*$", text, re.MULTILINE)
     if not match:
         out.append("the workflow has no trigger block")
         return out
@@ -1803,6 +1866,16 @@ def prop_15_the_triggers_are_certified(release, test):
             break
         lines.append(line)
     trigger = "\n".join(lines)
+
+    # The trigger NAMES are read as keys: every key of the block is
+    # extracted and unquoted, and judged by its name. A quoted key or
+    # a space before the colon is a spelling, not a different
+    # trigger -- so it cannot hide one.
+    trigger_keys = []
+    for line in trigger.split("\n"):
+        key = re.match(r"^\s*['\"]?([\w-]+)['\"]?\s*:", line)
+        if key:
+            trigger_keys.append(key.group(1).lower())
 
     # The push trigger must be filtered to master -- and to master
     # ALONE. A widened filter ("[master, staging]") admits another
@@ -1826,11 +1899,17 @@ def prop_15_the_triggers_are_certified(release, test):
                            "be published from" % item)
 
     # The other triggers must not exist: they are the door through
-    # which a ref other than master could arrive.
-    for forbidden in ("pull_request:", "schedule:", "workflow_run:",
-                      "pull_request_target:", "issue_comment:"):
-        if forbidden in trigger:
-            out.append("the workflow has a %s trigger" % forbidden[:-1])
+    # which a ref other than master could arrive. They are judged by
+    # their NAME, read from the keys -- so a quoted key or a space
+    # before the colon cannot hide one.
+    for forbidden in ("pull_request", "schedule", "workflow_run",
+                      "pull_request_target", "issue_comment",
+                      "repository_dispatch", "release", "fork",
+                      "deployment", "page_build", "check_run",
+                      "check_suite", "status", "create", "delete",
+                      "watch"):
+        if forbidden in trigger_keys:
+            out.append("the workflow has a %s trigger" % forbidden)
 
     # The REUSABLE workflow's triggers are certified too. A
     # pull_request_target: trigger on it is the classic privilege
@@ -1881,6 +1960,56 @@ def prop_16_the_concurrency_group_is_real(release, test):
     return out
 
 
+# The branch names that are plausible in this repository, and the
+# shapes of a ref that GitHub can produce.
+BRANCH_NAMES = (
+    "master", "Master", "MASTER", "release", "Release", "main", "mainline",
+    "staging", "feature", "phase3", "hotfix", "develop", "production",
+    "master-2", "master2", "master2x", "release-1", "master_", "master.",
+    "site", "gh-pages", "pages", "test", "tmp", "backup", "old",
+    # The version names: a tag is a ref too.
+    "v1", "v1.0.0", "v2", "1.0", "release-1.0",
+)
+
+REF_SHAPES = (
+    "refs/heads/{name}",
+    "refs/heads/{name}/x",
+    "refs/heads/x/{name}",
+    "refs/tags/{name}",
+    "refs/pull/1/head",
+    "refs/pull/12/merge",
+    "refs/remotes/origin/{name}",
+    "{name}",
+    "refs/heads/",
+    "refs/heads/{name} ",
+    "refs/heads/{name}/",
+)
+
+# The events GitHub can deliver.
+EVENT_NAMES = (
+    "push", "workflow_dispatch", "pull_request", "pull_request_target",
+    "schedule", "workflow_run", "issue_comment", "release",
+    "repository_dispatch", "create", "delete", "fork", "watch",
+    "deployment", "status", "page_build", "check_run", "check_suite",
+)
+
+
+def _generate_ref_corpus():
+    """Every ref the corpus covers, generated from the shapes."""
+    refs = set()
+    for shape in REF_SHAPES:
+        for name in BRANCH_NAMES:
+            refs.add(shape.format(name=name))
+    for shape in REF_SHAPES:
+        refs.add(shape.format(name=""))
+    return sorted(refs)
+
+
+def _generate_event_corpus():
+    """Every event the corpus covers."""
+    return sorted(EVENT_NAMES)
+
+
 def prop_14_the_ref_set_is_a_rule(release, test):
     """The authorization set is a RULE, not a sample.
 
@@ -1898,37 +2027,27 @@ def prop_14_the_ref_set_is_a_rule(release, test):
     publication for those.
     """
     out = []
-    corpus = [
-        "refs/heads/master",
-        "refs/heads/master-2",
-        "refs/heads/master2",
-        "refs/heads/feature/master",
-        "refs/heads/feature/x",
-        "refs/heads/staging/phase3-master-verification",
-        "refs/heads/phase3/effect-status-trigger-gauntlet",
-        "refs/tags/v1",
-        "refs/tags/v1.0.0",
-        "refs/pull/1/head",
-        "refs/pull/12/merge",
-        "refs/remotes/origin/master",
-        "master",
-        "refs/heads/",
-        "refs/heads/master ",
-        "refs/heads/master/",
-        "refs/heads/Master2",
-    ]
-    # The master ref, folded the way the platform folds it.
+    # The corpus is GENERATED, not written down: the shapes of a ref
+    # and the names of an event are combined with the branch names
+    # that are plausible in this repository. A hand-written list is a
+    # list -- and a list is defeated by the one entry it omits.
+    corpus = _generate_ref_corpus()
+    events = _generate_event_corpus()
     allowed = set()
     for ref in corpus:
-        for event in ("push", "workflow_dispatch"):
+        for event in events:
             ok, _ = deploy_is_authorized(release, event, ref, True)
             if ok:
-                allowed.add(ref)
-    for ref in allowed:
+                allowed.add((ref, event))
+    for ref, event in sorted(allowed):
         if ref.strip().lower() != "refs/heads/master":
-            out.append("the deploy condition authorizes %s: the "
+            out.append("the deploy condition authorizes %s on %s: the "
                        "authorization set must be a subset of the "
-                       "master ref" % ref)
+                       "master ref" % (ref, event))
+        elif event not in ("push", "workflow_dispatch"):
+            out.append("the deploy condition authorizes %s on %s: the "
+                       "authorization set must be a subset of the "
+                       "push and dispatch events" % (ref, event))
     return out
 
 
@@ -1998,13 +2117,21 @@ def prop_19_the_gate_is_not_swallowed(release, test):
             # (an explicit success) discard the gate's failure in
             # exactly the same way, and each of them has the same
             # shape with any spacing.
-            # The swallow is SEMANTIC, not a list of spellings: any
-            # construct that discards the gate's status. So the
-            # command that runs the gate must be the LAST thing whose
-            # status decides the step.
+            # The swallow is SEMANTIC: the gate command must be the
+            # LAST thing whose status decides the step. So the RUN
+            # BLOCK is read as a sequence, and the gate command must
+            # be the last command of it.
+            #
+            # Anything AFTER the gate command can discard its status
+            # -- a pipeline, a conditional, an explicit exit, a
+            # do-nothing command -- and the list of such constructs
+            # is never complete. So the rule is the ORDER: the gate
+            # command must come last.
             swallowed = bool(re.search(
                 r"\|\|\s*(?:true\b|:|exit\s+0\b|/bin/true\b)", line))
             if not swallowed and re.search(r";\s*exit\s+0\s*$", line):
+                swallowed = True
+            if not swallowed and _the_gate_command_is_not_last(line):
                 swallowed = True
             # "set +e" disables errexit, so the STEP exits 0 even when
             # the gate fails. In the workflow it is a line of its own
@@ -2139,6 +2266,7 @@ MANDATORY_TEST_STEPS = (
     "Run the release negative controls",
     "Audit the standalone harness exit contract",
     "Audit the legacy test reachability",
+    "Save and Battle Migration",
 )
 
 
@@ -2195,17 +2323,22 @@ def prop_23_the_mandatory_steps_are_present(release, test):
     """
     out = []
     code = _code_lines(test["text"])
+    # The step names are read as NAMES -- the value of a "- name:"
+    # key, unquoted. A substring search was satisfied by an echo
+    # that MENTIONS the name, so the step could be deleted and its
+    # name carried by a string.
+    present = set()
+    for line in code.split("\n"):
+        match = re.match(r"^-?\s*name:\s*(.+)$", line)
+        if match:
+            present.add(_unquote(match.group(1).strip()))
     for step in MANDATORY_TEST_STEPS:
-        if not any(step in line for line in code.split("\n")):
+        if step not in present:
             out.append("the reusable workflow has no %r step: a deleted "
                        "gate is a removed gate" % step)
     # And the steps that are PRESENT must be the ones that were
     # expected: the named list covers only part of the workflow, and a
     # step that is not on it can be deleted without the list noticing.
-    present = set()
-    for line in code.split("\n"):
-        if line.startswith("- name:"):
-            present.add(line[len("- name:"):].strip())
     for step in present:
         if step not in MANDATORY_TEST_STEPS:
             out.append("the reusable workflow has an unexpected step %r: "
@@ -2216,7 +2349,8 @@ def prop_23_the_mandatory_steps_are_present(release, test):
     # runs in the RELEASE workflow's build job.
     for command in ("release_negative_controls.py",
                     "run_battle_ecs_suites.py"):
-        if not any(command in line for line in code.split("\n")):
+        if not any(_runs_a_command(line, command)
+                   for line in code.split("\n")):
             out.append("the reusable workflow never runs %s" % command)
     return out
 
