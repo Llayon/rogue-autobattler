@@ -1400,6 +1400,23 @@ def _step_lines(code, target):
     return []
 
 
+def _is_yaml_true(line, key):
+    """Is this key's value the YAML boolean TRUE?
+
+    YAML has several spellings of it: true, True, TRUE, yes, on --
+    and the quoted forms, which are strings but that GitHub accepts
+    as the boolean. A check that reads the string "true" misses
+    every spelling but one.
+
+    So the value is read as a YAML boolean, in every spelling.
+    """
+    match = re.match(r"^" + re.escape(key) + r"\s*:\s*(.*)$", line.strip())
+    if not match:
+        return False
+    value = _unquote(match.group(1).strip()).lower()
+    return value in ("true", "yes", "on")
+
+
 def _declares_an_elevated_scope(line):
     """Does this line declare an ELEVATED permission?
 
@@ -2282,7 +2299,7 @@ def prop_09_no_failure_tolerance(release, test):
         # not as a substring: a step that echoes the word is not the
         # same thing as the key.
         for line in body.split("\n"):
-            if re.match(r"^\s*continue-on-error\s*:\s*true\s*$", line):
+            if _is_yaml_true(line, "continue-on-error"):
                 out.append("the %s job continues on error" % name)
                 break
         # A STEP that runs REGARDLESS is the shape of a bypass: the
