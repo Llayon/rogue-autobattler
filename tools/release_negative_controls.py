@@ -937,8 +937,10 @@ def prop_12_permissions_are_minimal(release, test):
         out.append("the deploy job has %d publication steps: there must "
                    "be exactly one" % publications)
 
-    # The publication must be the LAST thing the job does: a step
-    # after it could publish again, or undo what it did.
+    # The publication must be the LAST thing the job does, and it must
+    # come AFTER the fail-closed checks. A publication placed BEFORE
+    # them would publish the artifact while the checks then HOLD the
+    # job -- the refusal would be theatre.
     lines = [l.strip() for l in deploy.split("\n") if l.strip()]
     publish_index = None
     for index, line in enumerate(lines):
@@ -952,6 +954,17 @@ def prop_12_permissions_are_minimal(release, test):
         if after:
             out.append("the deploy job does something after the "
                        "publication: %s" % after[0][:60])
+
+        # The checks must come BEFORE the publication. The order is
+        # what makes the refusal real.
+        before = "\n".join(lines[:publish_index])
+        for check in ("ls-remote", "exit 1"):
+            if check not in before:
+                out.append("the deploy job publishes BEFORE the %s: the "
+                           "refusal would come after the publication"
+                           % ("tip checks" if check == "ls-remote"
+                              else "refusal"))
+                break
     return out
 
 
