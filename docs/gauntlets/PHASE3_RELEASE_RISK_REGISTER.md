@@ -79,6 +79,49 @@
              manual staging/phase3/feature/tag/pull_request/schedule
              DENY, a failed required job DENY.
 
+### H-32 — the thirteenth review: the reusable workflow may not publish
+
+    Status:  PROVEN DEFECT — FIXED
+    Found:   the thirteenth reviewer worked in a clone of its own and
+             found the REST of F-1 -- the same hole on the axis F-1
+             did not close -- plus six more:
+
+               the reusable workflow's WORKFLOW-LEVEL permissions were
+                 never read: the F-1 fix read the JOB-level scopes of
+                 every workflow and the workflow-level scopes only of
+                 the release one. So "permissions: {pages: write}" at
+                 the workflow level of test.yml -- which every one of
+                 its jobs inherits -- was certified.
+               and the no-other-publisher rule still exempted
+                 test.yml BY NAME, so a deploy-pages step inside it
+                 was invisible. It is a TOP-LEVEL workflow: it runs on
+                 every push to every branch.
+               a TRAILING SPACE on the trigger key -- the most
+                 routine formatter artefact there is -- made the
+                 whole trigger block invisible, and with it the
+                 branch-filter check.
+               a QUOTED job key -- "'deploy':" -- is legal YAML and
+                 legal GitHub Actions, and the reader required an
+                 unquoted key, so the deploy job VANISHED and
+                 fourteen properties fired at once on a legal edit.
+               the rule that derives the authorization set from the
+                 EXPRESSION read only the literals compared against
+                 github.ref. A condition on github.ref_name names the
+                 same branch in a different spelling, so the text
+                 rule saw no ref at all.
+               an UPLOAD of the Pages artifact is a publisher too: it
+                 stages what the deployment publishes.
+
+    Fix:     all six, in commits 83eaedc and 06b1192.
+    Proof:   the controls are 33 of 33 RED, with and without pyyaml.
+
+    NOTE:   the thirteenth reviewer also proved, with PyYAML, that a
+             "#" inside a folded block is LITERAL TEXT and not a
+             comment -- so the rules that strip it from the block's
+             body are stripping something the platform does not
+             strip. That is a false red in the making, and the
+             thirteenth reviewer reported it as one.
+
 ### H-31 — the twelfth review: the reusable workflow is certified too
 
     Status:  PROVEN DEFECT — FIXED
