@@ -72,6 +72,72 @@
              manual staging/phase3/feature/tag/pull_request/schedule
              DENY, a failed required job DENY.
 
+### H-27 — the ninth review: nine more classes
+
+    Status:  PROVEN DEFECT — FIXED
+    Found:   the ninth reviewer's second battery carried thirty-one
+             cases and found nine classes still live, five of them
+             openings and four false reds:
+
+               the NEEDS were checked with a SUBSTRING on the joined
+                 value, so "web-build-extra" satisfied the check for
+                 "web-build" -- and the real build was not a
+                 dependency of the publication. They are a LIST now,
+                 and each item is matched exactly.
+               a STEP of the reusable workflow that CONTINUES ON
+                 ERROR lets the job stay green on a red suite, and
+                 the deploy publishes. Every step is checked now, and
+                 the value is read as a YAML boolean.
+               a PUBLISHER can be a COMMAND, not only an action: a
+                 curl to the Pages API publishes with the token the
+                 deploy job already carries, and a push to the Pages
+                 branch needs no token at all. The scan is over the
+                 whole body, because the URL may be on a
+                 continuation line.
+               the CONCURRENCY GROUP carried the SHA, so two runs of
+                 the SAME ref did not queue behind each other. The
+                 group must carry the ref and nothing else that
+                 separates two runs of it.
+               the RULE that a job may continue on error searched the
+                 whole job body for the literal text, so a COMMENT
+                 naming the key satisfied it and the real spellings
+                 did not. It reads the CODE lines now.
+               the CHECK that the deploy can publish searched for the
+                 text "pages: write", so the quoted form was
+                 reported as a deploy that could not publish. The
+                 scope is read as a scope.
+               the GATE may be invoked as a MODULE -- "python -m
+                 tools.release_negative_controls" -- and the check
+                 wanted the script name as the first argument.
+               the MODEL did not know two standard GitHub Actions
+                 fields -- github.ref_name and contains() -- so a
+                 legitimate condition on them failed CLOSED and the
+                 harness reported the legitimate master push as
+                 REFUSED. The model knows them now, and the master's
+                 spellings -- the full ref and the branch name -- are
+                 both accepted.
+               a JOB HEADER may carry a TRAILING COMMENT -- "deploy:
+                 # the deployment" -- and the reader required the
+                 header line to END after the colon, so the job
+                 became INVISIBLE and fourteen properties reported
+                 violations.
+
+    Fix:     all nine, in commits cf01ea6, cc9d187, d808ca2, 7e8dcb7
+             and 6dafd7a.
+    Proof:   the controls are 33 of 33 RED, with and without pyyaml,
+             and the ninth reviewer's own battery reports 18 of its
+             31 cases DETECTED and every legitimate case as
+             legal-ok, with no false red left but one.
+
+    NOTE:   three cases of that battery remain MISSED, and NONE of
+             them is an opening. A pipeline into "tee" keeps the
+             gate's status, so it discards nothing. One case is not
+             valid YAML at all, and the reviewer marks it so. The
+             third is a condition on contains(github.ref,
+             'master'), which really does admit "feature/master" --
+             and the controls catch it, which is the correct
+             verdict, not a false red.
+
 ### H-26 — the ninth review: six more classes
 
     Status:  PROVEN DEFECT — FIXED
