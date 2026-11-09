@@ -1786,8 +1786,15 @@ def _compared_refs(condition):
     escape it.
     """
     refs = []
+    # The branch may be named in EITHER spelling: the full ref
+    # ("github.ref") or the branch name ("github.ref_name"). They
+    # name the same branch, so a rule that read only one of them saw
+    # no ref at all -- and the authorization set is derived from the
+    # EXPRESSION, so every spelling of the branch must be read.
     for pattern in (r"github\.ref\s*(?:==|!=)\s*'([^']*)'",
                     r'github\.ref\s*(?:==|!=)\s*"([^"]*)"',
+                    r"github\.ref_name\s*(?:==|!=)\s*'([^']*)'",
+                    r'github\.ref_name\s*(?:==|!=)\s*"([^"]*)"',
                     r"(?:startsWith|contains)\s*\(\s*github\.ref\s*,\s*'([^']*)'",
                     r'(?:startsWith|contains)\s*\(\s*github\.ref\s*,\s*"([^"]*)"'):
         for match in re.finditer(pattern, condition):
@@ -2467,7 +2474,7 @@ def prop_15_the_triggers_are_certified(release, test):
     text = release["text"]
 
     # The trigger block is at the top level, before "jobs:".
-    match = re.search(r"^\s*['\"]?on['\"]?\s*:(?:\s*#.*)?$", text, re.MULTILINE)
+    match = re.search(r"^\s*['\"]?on['\"]?\s*:(?:\s*#.*)?\s*$", text, re.MULTILINE)
     if not match:
         out.append("the workflow has no trigger block")
         return out
@@ -2496,7 +2503,7 @@ def prop_15_the_triggers_are_certified(release, test):
     # the workflow's own privileges, and the gate would be reachable
     # from a pull request.
     reusable = test["text"]
-    reusable_match = re.search(r"^\s*['\"]?on['\"]?\s*:(?:\s*#.*)?$", reusable,
+    reusable_match = re.search(r"^\s*['\"]?on['\"]?\s*:(?:\s*#.*)?\s*$", reusable,
                                re.MULTILINE)
     if reusable_match is None:
         out.append("the reusable workflow has no trigger block")
@@ -3739,7 +3746,12 @@ def load_jobs(path):
     while i < len(lines):
         line = lines[i]
         # A job header is "  name:" at the two-space indentation.
-        match = re.match(r"^  ([A-Za-z0-9_-]+):\s*(?:#.*)?$", line)
+        # The key may be QUOTED: "'deploy':" is legal YAML and
+        # legal GitHub Actions, and a reader that required an
+        # unquoted key made the job VANISH -- so fourteen
+        # properties fired at once on a legal edit.
+        match = re.match(r"^  ['\"]?([A-Za-z0-9_-]+)['\"]?:\s*"
+                         r"(?:#.*)?$", line)
         if match:
             name = match.group(1)
             body = []
@@ -3753,7 +3765,8 @@ def load_jobs(path):
                 # A line that is less indented ends the job.
                 if not nxt.startswith("    ") and not nxt.startswith("  "):
                     break
-                if re.match(r"^  [A-Za-z0-9_-]+:\s*(?:#.*)?$", nxt):
+                if re.match(r"^  ['\"]?[A-Za-z0-9_-]+['\"]?:\s*"
+                            r"(?:#.*)?$", nxt):
                     break
                 body.append(nxt)
                 i += 1
