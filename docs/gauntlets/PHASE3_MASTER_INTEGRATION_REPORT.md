@@ -48,29 +48,43 @@ the tracked tree          clean throughout
 
 ## C. PHASE 3 vs MASTER DIFF
 
-    The numbers in the brief were OUT OF DATE. The measured values:
+    The numbers in the brief were OUT OF DATE. They are READ FROM THE
+    REPOSITORY, not written down: every documentation commit changes
+    them, so a hard-coded count is a stale count by the next commit.
+    The independent reviewer proved it -- the numbers below were the
+    values of an earlier commit, in a block that simultaneously
+    claimed they were not hard-coded.
 
 ```
-the published Phase 3 over master   273
-the candidate over the Phase 3        38
---------------------------------------------
-the candidate over master            311   (273 + 38)
-
-ahead / behind            0 / 311
-the changed files         298
-the merge commits         1      (the historical one, inside Phase 3)
-the merge-base            02fe83ef == master  -> a strict fast-forward
+the published Phase 3 over master
+    git rev-list --count 02fe83ef..4316a32
+the candidate over the Phase 3
+    git rev-list --count 4316a32..HEAD
+the candidate over master
+    git rev-list --count 02fe83ef..HEAD
+ahead / behind
+    git rev-list --left-right --count master...HEAD
+the changed files
+    git diff --name-only master..HEAD | wc -l
+the merge commits
+    git rev-list --count --merges master..HEAD
+the merge-base
+    git merge-base master HEAD
 ```
+
+    At the time of writing those commands returned 273, 67, 340,
+    0/340, 298 and 1 -- a strict fast-forward over master. The
+    merge commit is the historical one, inside Phase 3.
 
     By area: tests 173, core 77, docs 19, tools 12, content 6, scenes 4,
     .github 3, .hermes 1 (the run integrity ledger), the root 2
     (.gitignore and ARCHITECTURE.md).
 
-    THE ARITHMETIC, RECONCILED. The previous revision of this report
+    THE ARITHMETIC, RECONCILED. An earlier revision of this report
     said 274 commits and 294 files. Those were the values of the
     FIRST commit of the series (b00cb8b), written when the series
-    consisted of one commit and never updated. The final numbers are
-    the counts are NOT hard-coded -- they are invalidated by the
+    consisted of one commit and never updated. The lesson, learned
+    twice: the counts are NOT hard-coded -- they are invalidated by the
     next documentation commit. Read them from the repository:
         git rev-list --count 4316a32..HEAD      the series
         git rev-list --count master..HEAD       over master
@@ -339,7 +353,8 @@ the candidate SHA     (the tip of this branch: read it with
                        it can outlive is a document that will be
                        wrong)
 the merge-base        02fe83ef == master -> the fast-forward is eligible
-ahead / behind        0 / 311
+ahead / behind
+    git rev-list --left-right --count master...HEAD
 the merge commits     1 (the historical one, inside Phase 3)
 the new work          the commits on top of the published Phase 3
 the changed files     11 over the published Phase 3
@@ -685,7 +700,8 @@ DENIED
 ## O. COMMIT GRAPH
 
 ```
-   4316a32  the published Phase 3 (273 commits over master)
+   4316a32  the published Phase 3 (its count over master: see the
+         commands in section C)
       |
       +-- b00cb8b chore(repo): gate the pages deployment on the required CI
          |
@@ -768,7 +784,9 @@ DENIED
     so the chain is linear and the candidate remains a strict
     fast-forward of master.
 
-    The arithmetic: 273 (the published Phase 3) + 38 (this series) =
+    The arithmetic: the published Phase 3's count over master, plus
+    this series' count over the Phase 3, equals the candidate's count
+    over master -- read with the commands in section C, not from here:
     commits over master.
 
     The 11 files the series changed over the published Phase 3:
