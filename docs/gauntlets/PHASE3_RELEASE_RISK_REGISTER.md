@@ -72,6 +72,50 @@
              manual staging/phase3/feature/tag/pull_request/schedule
              DENY, a failed required job DENY.
 
+### H-26 — the ninth review: six more classes
+
+    Status:  PROVEN DEFECT — FIXED
+    Found:   the ninth reviewer built a second battery of about
+             thirty-five cases and found six classes still live:
+
+               the SWALLOW rule was a list of spellings. It is now
+                 POSITIONAL: the gate command must be the last thing
+                 whose status decides the step. The run block is read
+                 from the "run:" key, a continuation chain belongs to
+                 its command, and a command that CHECKS the gate's
+                 output -- "grep -q 'RUNNER: GREEN' log" -- is the
+                 gate being used, not swallowed.
+               the CONCURRENCY flag was the literal text
+                 "cancel-in-progress: true". It is read as a YAML
+                 boolean now, so True, TRUE and yes are caught.
+               the VALIDATED-BYTES rule read only the FIRST upload.
+                 Every upload is read now, so a second upload of an
+                 unvalidated directory cannot overwrite the artifact.
+               the REUSABLE WORKFLOW's triggers were never certified.
+                 They are now, by their names. Its own push and
+                 pull_request triggers are legitimate -- that is what
+                 it is for.
+               the PUBLICATION count read the steps that USE an
+                 action. A publisher can also be a plain COMMAND:
+                 "git push origin HEAD:gh-pages" publishes with no
+                 action and no token.
+               the NEEDS were checked by their NAME. They are checked
+                 by WHAT THEY DO now: the required-tests job must
+                 call the reusable workflow that runs the CI, so the
+                 CI cannot be decoupled from the publication by
+                 renaming a job.
+
+    Fix:     all six, in commit 6656f18.
+    Proof:   the controls are 33 of 33 RED, with and without pyyaml,
+             and the ninth reviewer's own battery reports every
+             LEGAL case as legal-ok.
+
+    NOTE:   the class is stable across nine rounds: a textual rule
+             is defeated by the next spelling. Every rule is now
+             structural -- it reads the mechanism, its subject, its
+             order and its scope -- and the remaining work is to
+             prove that on a FROZEN branch.
+
 ### H-25 — the eighth review's battery, replayed
 
     Status:  PROVEN DEFECT — FIXED
