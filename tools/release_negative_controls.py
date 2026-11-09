@@ -483,6 +483,31 @@ def _loose_equal(left, right):
     return left == right
 
 
+def _split_arguments(text):
+    """The arguments of a function call, split on the commas that
+    are not inside a string."""
+    parts = []
+    current = []
+    quote = None
+    for character in text:
+        if quote:
+            current.append(character)
+            if character == quote:
+                quote = None
+            continue
+        if character in ("'", '"'):
+            quote = character
+            current.append(character)
+            continue
+        if character == ",":
+            parts.append("".join(current))
+            current = []
+            continue
+        current.append(character)
+    parts.append("".join(current))
+    return [part for part in parts if part.strip()]
+
+
 def _value(token, context):
     """The value of a name or a literal in the run context."""
     if token is None:
@@ -505,6 +530,31 @@ def _value(token, context):
         return context.get("success") is False
     if token == "github.ref":
         return context.get("ref")
+    if token == "github.ref_name":
+        # The branch name: "master" for a push to master. It is a
+        # STANDARD field, and a condition on it is legal GitHub
+        # Actions -- so the model must know it.
+        ref = context.get("ref")
+        if ref is None:
+            return None
+        if ref.startswith("refs/heads/"):
+            return ref[len("refs/heads/"):]
+        return ref
+    if token.startswith("contains("):
+        # contains(a, b): whether the string a contains b. It is a
+        # standard function, and a condition on it is legal GitHub
+        # Actions.
+        inner = token[len("contains("):]
+        if not inner.endswith(")"):
+            return None
+        parts = _split_arguments(inner[:-1])
+        if len(parts) != 2:
+            return None
+        left = _value(parts[0].strip(), context)
+        right = _value(parts[1].strip(), context)
+        if left is None or right is None:
+            return None
+        return str(right).lower() in str(left).lower()
     if token == "github.event_name":
         return context.get("event")
     if token == "github.sha":
@@ -614,8 +664,13 @@ def prop_03_no_failure_tolerance(release, test):
     conditioned so that a failure does not block."""
     out = []
     for name, block in list(release["jobs"].items()) + list(test["jobs"].items()):
-        if "continue-on-error: true" in block:
-            out.append("the %s job continues on error" % name)
+        # The CODE lines only: a COMMENT naming the key satisfied the
+        # old substring search. And the value is read as a YAML
+        # boolean, so True, TRUE, yes and on are caught too.
+        for line in _code_lines(block).split("\n"):
+            if _is_yaml_true(line, "continue-on-error"):
+                out.append("the %s job continues on error" % name)
+                break
     return out
 
 
@@ -1585,6 +1640,23 @@ def _tests_variable(condition, variable):
     return True
 
 
+def _runs_a_module(line, script):
+    """Does this line run the given script as a MODULE?
+
+    "python -m tools.release_negative_controls" is the same gate as
+    "python tools/release_negative_controls.py".
+    """
+    stripped = _without_trailing_comment(line.strip())
+    stripped = re.sub(r"^run:\s*", "", stripped)
+    match = re.match(r"^(?:python3?|py)\s+-m\s+(\S+)", stripped)
+    if not match:
+        return False
+    module = match.group(1).strip()
+    if module.startswith(("'", '"')):
+        return False
+    return script[:-3] in module or module.endswith(script)
+
+
 def _runs_a_command(line, script):
     """Does this line RUN the given script?
 
@@ -2372,10 +2444,14 @@ def prop_14_the_ref_set_is_a_rule(release, test):
                    "authorized")
         return out
 
+    # The condition may name the master branch in any of the legal
+    # ways -- the full ref, the branch name, a contains() over the
+    # ref. What it may NOT do is name ANOTHER branch.
     for ref in _compared_refs(condition):
-        if ref.strip().lower() != "refs/heads/master":
-            out.append("the deploy condition compares against %s: it "
-                       "may compare only against refs/heads/master" % ref)
+        if ref.strip().lower() in ("refs/heads/master", "master"):
+            continue
+        out.append("the deploy condition compares against %s: it "
+                   "may compare only against the master branch" % ref)
     for event in _compared_events(condition):
         if event not in ("push", "workflow_dispatch"):
             out.append("the deploy condition compares against the %s "
@@ -2786,8 +2862,10 @@ def prop_23_the_mandatory_steps_are_present(release, test):
     # runs in the RELEASE workflow's build job.
     for command in ("release_negative_controls.py",
                     "run_battle_ecs_suites.py"):
-        if not any(_runs_a_command(line, command)
-                   for line in code.split("\n")):
+        if not (any(_runs_a_command(line, command)
+                    for line in code.split("\n"))
+                or any(_runs_a_module(line, command)
+                       for line in code.split("\n"))):
             out.append("the reusable workflow never runs %s" % command)
     return out
 
