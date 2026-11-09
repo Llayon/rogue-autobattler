@@ -57,7 +57,7 @@ the candidate over the Phase 3        38
 the candidate over master            311   (273 + 38)
 
 ahead / behind            0 / 311
-the changed files         297
+the changed files         298
 the merge commits         1      (the historical one, inside Phase 3)
 the merge-base            02fe83ef == master  -> a strict fast-forward
 ```
@@ -70,7 +70,7 @@ the merge-base            02fe83ef == master  -> a strict fast-forward
     said 274 commits and 294 files. Those were the values of the
     FIRST commit of the series (b00cb8b), written when the series
     consisted of one commit and never updated. The final numbers are
-    311 commits and 297 files. The 38 commits of the series are all
+    311 commits and 298 files. The 38 commits of the series are all
     listed in section O; none of them is a filler, and the history
     was NOT touched to make a number look right.
 
