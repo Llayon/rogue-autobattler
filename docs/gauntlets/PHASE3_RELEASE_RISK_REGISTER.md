@@ -341,7 +341,7 @@
              audit, the reachability audit and the three other
              negative-control harnesses all avoid yaml).
     Proof:   the controls were run under a python where importing yaml
-             raises ImportError, exactly as on a bare runner: 21 of 21
+             raises ImportError, exactly as on a bare runner: 22 of 22
              RED, exit 0. There is no "import yaml" anywhere in the
              repository now.
 
