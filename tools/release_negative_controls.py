@@ -85,6 +85,47 @@ VALIDATOR = os.path.join(REPO, "tools", "validate_web_artifact.py")
 # the property VIOLATIONS APPEAR.
 # =====================================================================
 
+def _needs_list(jobs, job_name):
+    """The `needs:` of a job, as a LIST of job names.
+
+    The needs are a LIST, not a string: a substring test on the
+    joined value accepts "web-build-extra" for "web-build", so a
+    trivial job with the right name satisfied the check while the
+    real build was not a dependency of the publication.
+    """
+    body = jobs.get(job_name) or ""
+    inline = re.search(r"needs:\s*\[([^\]]*)\]", body)
+    if inline:
+        items = []
+        for item in inline.group(1).split(","):
+            item = _unquote(item.strip())
+            if item:
+                items.append(item)
+        return items
+    block = re.search(r"^\s*needs\s*:\s*$", body, re.MULTILINE)
+    if block:
+        items = []
+        for line in body[block.end():].split("\n")[1:]:
+            if not line.strip():
+                continue
+            if not line.strip().startswith("-"):
+                break
+            item = _unquote(line.strip().lstrip("-").strip())
+            if item:
+                items.append(item)
+        if items:
+            return items
+    plain = re.search(r"needs\s*:\s*(.+)$", body, re.MULTILINE)
+    if plain:
+        items = []
+        for item in _unquote(plain.group(1).strip()).split(","):
+            item = item.strip()
+            if item:
+                items.append(item)
+        return items
+    return []
+
+
 def _needs_of(jobs, job_name):
     """The `needs:` list of a job.
 
@@ -492,7 +533,7 @@ def deploy_is_authorized(release, event, ref, required_ok):
     if deploy is None:
         return False, "there is no deploy job"
 
-    needs = _needs_of(release["jobs"], "deploy")
+    needs = _needs_list(release["jobs"], "deploy")
     if "required-tests" not in needs:
         return False, "the deploy does not need the required tests"
     if "web-build" not in needs:
@@ -661,7 +702,7 @@ def prop_05_no_manual_bypass(release, test):
     not succeed? If it can, the bypass is back.
     """
     out = []
-    needs = _needs_of(release["jobs"], "deploy")
+    needs = _needs_list(release["jobs"], "deploy")
     if "required-tests" not in needs:
         out.append("the deploy does not need the required tests")
     if "web-build" not in needs:
@@ -1123,6 +1164,10 @@ def prop_12_permissions_are_minimal(release, test):
                    "must be exactly one configuration" % configure_count)
 
     publishing = 0
+    # A publisher that is a COMMAND, not an action: the whole body is
+    # scanned, because the URL may be on a continuation line.
+    if _body_publishes(deploy):
+        publishing += 1
     for line in deploy.split("\n"):
         stripped = line.strip()
         if "uses:" in stripped:
@@ -1131,8 +1176,10 @@ def prop_12_permissions_are_minimal(release, test):
             continue
         # A publisher can also be a plain COMMAND: "git push origin
         # HEAD:gh-pages" publishes to the Pages branch with no action
-        # and no token -- it needs only the checkout's rights.
-        if _is_a_publishing_command(stripped):
+        # and no token -- it needs only the checkout's rights. And a
+        # curl to the Pages API publishes with the token the job
+        # already carries.
+        if _is_a_publishing_step(stripped):
             publishing += 1
     if publishing != 1:
         out.append("the deploy job has %d publication steps: there must "
@@ -1458,16 +1505,43 @@ def _step_lines(code, target):
     return []
 
 
-def _is_a_publishing_command(line):
-    """Does this COMMAND publish to the Pages?
+def _is_a_publishing_step(line):
+    """Does this step publish?
 
-    A plain push to the Pages branch publishes, and it needs no
-    action and no token: the checkout's rights are enough.
+    By its action's capability, or by its command: a push to the
+    Pages branch and a call to the Pages API both publish.
     """
-    if not re.match(r"^(?:run:\s*)?(?:git\s+push|gh\s+api)", line):
-        return False
-    return ("gh-pages" in line or "refs/heads/site" in line
-            or "pages" in line.lower())
+    stripped = line.strip()
+    stripped = re.sub(r"^run:\s*", "", stripped)
+    if re.match(r"^(?:git\s+push|gh\s+api|curl\b|wget\b|http\b)",
+                stripped):
+        return _body_publishes(stripped)
+    return False
+
+
+def _body_publishes(body):
+    """Does this job body publish to the Pages?
+
+    A publisher is not only an ACTION. A plain push to the Pages
+    branch publishes, and it needs no action and no token: the
+    checkout's rights are enough. And the Pages API publishes with
+    the token the deploy job already carries -- a curl to
+    "/pages/builds" is a publication.
+
+    The scan is over the WHOLE body: the URL of a curl may be on a
+    CONTINUATION line, and a line-by-line scan would miss it.
+    """
+    text = body.replace("\\\n", " ")
+    # A push to the Pages branch.
+    if re.search(r"git\s+push[^\n]*\b(?:gh-pages|refs/heads/site)\b",
+                 text):
+        return True
+    # A call to the Pages API.
+    if re.search(r"(?:curl|wget|gh\s+api|http\b)[^\n]*"
+                 r"(?:/pages|pages/builds|/repos/[^\s]*/pages)",
+                 text):
+        return True
+    return False
 
 
 def _is_a_publication_step(line):
@@ -2364,6 +2438,14 @@ def prop_17_the_test_jobs_are_not_disabled(release, test):
                 out.append("the %s job carries a step that runs "
                            "regardless: %s" % (name, value))
                 break
+        # A STEP that continues on error lets the job stay GREEN on a
+        # RED suite -- and the deploy publishes. The value is read as
+        # a YAML boolean, so True, TRUE, yes and on are caught too.
+        for line in _code_lines(body).split("\n"):
+            if _is_yaml_true(line, "continue-on-error"):
+                out.append("the %s job carries a step that continues on "
+                           "error: %s" % (name, line.strip()))
+                break
     return out
 
 
@@ -2824,7 +2906,7 @@ def prop_08_required_jobs_stay_mandatory(release, test):
             out.append("the deploy is authorized although a required job "
                        "did not succeed")
     # The needs must still be there.
-    needs = _needs_of(release["jobs"], "deploy")
+    needs = _needs_list(release["jobs"], "deploy")
     for required in ("required-tests", "web-build"):
         if required not in needs:
             out.append("the deploy does not need %s" % required)
