@@ -21,7 +21,7 @@
     Proof:   tools/release_negative_controls.py — NC-REL-01..10 and NC-RB-01..07, all
              semantic RED; the clean gate ALLOWs the good scenario
              only.
-             EIGHT of the SEVENTEEN are GATE controls: they mutate the
+             EIGHT of the TWENTY are GATE controls: they mutate the
              workflows and assert a property of the parsed result.
              NC-REL-06 and NC-REL-08 are VALIDATOR controls: they
              mutate the validator itself and compare two validator
@@ -67,10 +67,48 @@
              Seven new controls, NC-RB-01..07, and the property
              asserts BOTH sides: the forbidden refs and events are
              refused AND the legitimate master push is still allowed.
-             18 of 18 controls are RED.
+             20 of 20 controls are RED.
              The matrix: push master ALLOW, manual master ALLOW,
              manual staging/phase3/feature/tag/pull_request/schedule
              DENY, a failed required job DENY.
+
+### H-11 — four bypasses were invisible to the controls
+
+    Status:  PROVEN DEFECT — FIXED
+    Found:   the independent critic ran adversarial mutations against
+             the controls and four of them passed, so the harness
+             reported GREEN for workflows that carried a real bypass:
+
+               X1/X5  the SHA checks were neutered: a check that
+                      compares the published SHA with ITSELF always
+                      succeeds, so it proved nothing while the stale
+                      publication would pass it
+               X2     a step-level "if: always()" -- in both the
+                      mapping form and the list form -- was invisible.
+                      It is the shape of a bypass: the deploy job would
+                      be skipped when a need failed, but the workflow
+                      still carried a step that runs no matter what
+               X3     a job-level "if: !cancelled()" instead of
+                      "success()". The two are NOT equivalent:
+                      !cancelled() is true even when a required job
+                      FAILED, so the deploy job would publish the
+                      artifact of a SHA whose tests failed
+               X4     the fail-closed refusal was removable, so an
+                      unreadable tip would not have been a HOLD
+
+             The lesson repeated itself: the workflow's own COMMENTS
+             contain the text "git ls-remote origin refs/heads/master",
+             so a search over the whole body matched the COMMENT and
+             the control reported GREEN while the check it protects
+             was gone. The checks read CODE, never comments.
+    Fix:     the properties now require that the SHA checks READ THE
+             REMOTE, that the deploy job's condition carries
+             success() and refuses the other status functions, that no
+             step of the deploy job is conditioned to run regardless,
+             and that the checks fail closed.
+    Proof:   NC-RB-09 and NC-RB-10 are the new controls. All eight of
+             the critic's adversarial mutations are now detected, and
+             the controls are 20 of 20 RED.
 
 ### H-10 — the string comparison of the ref is case insensitive
 
@@ -170,7 +208,7 @@
              audit, the reachability audit and the three other
              negative-control harnesses all avoid yaml).
     Proof:   the controls were run under a python where importing yaml
-             raises ImportError, exactly as on a bare runner: 18 of 18
+             raises ImportError, exactly as on a bare runner: 20 of 20
              RED, exit 0. There is no "import yaml" anywhere in the
              repository now.
 
