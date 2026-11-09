@@ -358,7 +358,7 @@ the CI gates            10 / 10 clean
 the A-H differential    PASS (8 + 8 fixtures, both rc=0)
 the CI-01 self-tests    13 / 0 failed
 the CI-02 self-tests    20 / 0 failed
-the release NC          17 / 17 RED, the clean gate ALLOWs
+the release NC          18 / 18 RED, the clean gate ALLOWs
 the hardening NC        14 / 14 RED
 the ledger controls     7 / 7 RED, the ledger VALID
 the historical NC       44 RED, 0 SKIP, 0 INVALID
@@ -391,7 +391,7 @@ the browser smoke       17 of 18 PASS (the settings are NOT VERIFIED:
     turned the REQUIRED battle-ecs job RED. Every other CI tool of the
     repository deliberately avoids yaml, and now the release controls
     do too. They were re-run under a python where importing yaml
-    raises: 17 of 17 RED, exit 0.
+    raises: 18 of 18 RED, exit 0.
 
     It also found TWO HIGH findings in the HARNESS itself, which are
     the most important findings of the whole closure:
@@ -603,6 +603,22 @@ DENIED
     The required jobs stay mandatory in every allowed case: a failed,
     skipped or cancelled required job refuses the deployment.
 
+    THE COMPARISON IS CASE INSENSITIVE. GitHub Actions compares
+    strings with == IGNORING THE CASE, so the condition above is also
+    true for a branch named "Master" -- a DISTINCT branch on a
+    case-sensitive repository. The string comparison alone is
+    therefore NOT a sufficient guard, and the deploy job carries a
+    second, case-INDEPENDENT one: it reads the tip of master from the
+    remote, whose ref path is case sensitive, and compares the SHA
+    with the SHA being published. The question it asks -- is this the
+    same COMMIT as master? -- cannot be changed by the case. The
+    check is fail-closed: an unreadable master tip is a HOLD, never
+    a GREEN.
+
+    The tip-check that protects against STALENESS -- the SHA against
+    the tip of the DISPATCHED branch -- is kept. The two checks
+    answer different questions and both are needed.
+
     The controls check this BEHAVIOURALLY. The deploy job's condition
     is EVALUATED for each scenario, and the property asserts both
     sides: the forbidden refs and events are refused AND the
@@ -617,6 +633,7 @@ DENIED
     NC-RB-05  replace success() with a failure tolerance   RED
     NC-RB-06  block even the legitimate master push       RED
     NC-RB-07  let the build job continue on error         RED
+    NC-RB-08  remove the case-independent master check    RED
 
     ENVIRONMENT BRANCH RESTRICTION:
     NOT VERIFIED / OWNER ACTION REQUIRED
@@ -765,7 +782,7 @@ PHASE 3 -> MASTER INTEGRATION & RELEASE SAFETY
 ```
 
     Every gate was executed and none of them was taken on trust. The
-    BLOCKER of the release path is closed and proved by SEVENTEEN
+    BLOCKER of the release path is closed and proved by EIGHTEEN
     structural negative controls; the HIGH of the A-H baseline is
     closed and proved by the pinned baseline that HOLDs when it is
     unavailable; the MEDIUM of the export path is closed and proved by
@@ -786,7 +803,7 @@ PHASE 3 -> MASTER INTEGRATION & RELEASE SAFETY
         the runner and turned the REQUIRED battle-ecs job RED. The
         controls now read the workflows as text, like every other CI
         tool of the repository, and they were run under a python where
-        importing yaml raises: 17 of 17 RED, exit 0.
+        importing yaml raises: 18 of 18 RED, exit 0.
 
     The SETTINGS scenario remains NOT VERIFIED: the Settings button is
     declared and never created, so the panel cannot be opened. It is
@@ -830,7 +847,7 @@ PHASE 3 -> MASTER INTEGRATION & RELEASE SAFETY
     unregistered property a hard failure, and the condition check
     distinguishes the job level from the step level by INDENTATION.
 
-    The controls are 17 of 17 RED, with and without pyyaml, and the
+    The controls are 18 of 18 RED, with and without pyyaml, and the
     CLEAN gate ALLOWs every scenario.
 
     The three residual risks that are accepted, with their reasons:
