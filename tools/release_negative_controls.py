@@ -213,8 +213,9 @@ def _job_condition(block):
         # The trailing comment is cut off FIRST: "if: >-  # only
         # master may publish" is valid YAML, and the block scalar
         # must still be recognised as one.
-        value = _without_trailing_comment(match.group(1).strip())
-        if value in (">-", ">", "|-", "|"):
+        value = match.group(1).strip()
+        parts = None
+        if _without_trailing_comment(value) in (">-", ">", "|-", "|"):
             # The condition is the block that follows, joined.
             parts = []
             for follow in lines[index + 1:]:
@@ -222,16 +223,15 @@ def _job_condition(block):
                     continue
                 if not follow.startswith("      "):
                     break
-                # The comment is cut from the BODY too: a legal
-                # "github.ref == '...' &&  # only master" inside a
-                # folded block is the same condition, and a rule that
-                # kept the comment could not read it -- so it failed
-                # CLOSED into "runs regardless", a FALSE RED in the
-                # required CI job.
-                parts.append(_without_trailing_comment(follow.strip()))
-            return _collapse_the_yaml_escape(
-                _unquote(" ".join(parts).strip()))
-        return _collapse_the_yaml_escape(_unquote(value))
+                # The body is taken VERBATIM: inside a folded
+                # scalar a "#" is LITERAL TEXT, not a comment -- the
+                # platform keeps it, so a rule that stripped it
+                # would read a DIFFERENT condition than the one the
+                # platform sees. The comment is stripped only from
+                # the KEY's own line, where YAML really does treat
+                # it as a comment.
+                parts.append(follow.strip())
+        return _read_the_condition_value(value, parts)
     return ""
 
 
@@ -1161,6 +1161,111 @@ def _every_workflow(release, test):
     return workflows
 
 
+def prop_19_the_two_readers_agree(release, test):
+    """The two readers of the deploy's condition MUST agree.
+
+    The job-level reader and the step-level reader read the same
+    "if:" value. They have learned to disagree about the same line
+    three times in this series: the trailing comment on the key's
+    own line, the YAML escape of a single-quoted scalar, and the
+    outer quotes of a quoted scalar.
+
+    A disagreement is not a bug in one of them -- it is the
+    AGREEMENT that failed, and it is the class this series has been
+    closing for thirteen rounds. So the agreement is a PROPERTY now,
+    checked on every legal spelling of the condition.
+
+    The spellings are the ones the platform accepts: the folded
+    block, the literal block, the single-quoted scalar and the
+    double-quoted scalar -- each with the trailing comment and the
+    trailing space the formatter may leave on the key.
+    """
+    out = []
+    text = release["text"]
+    folded = ("    if: >-\n      ${{\n        success() &&\n"
+              "        github.ref == 'refs/heads/master' &&\n        (\n"
+              "          github.event_name == 'push' ||\n"
+              "          github.event_name == 'workflow_dispatch'\n"
+              "        )\n      }}\n")
+    # The spellings are FIXED, not derived from the tree: a mutation
+    # that removed the "if:" would otherwise remove every spelling
+    # too, and the control could never be RED.
+    spellings = [text]
+    for comment in ("", "  # only master may publish", "  "):
+        spellings.append(text.replace("    if: >-\n",
+                                       "    if: >-" + comment + "\n"))
+    spellings.append(text.replace(folded,
+        "    if: '${{ success() && github.ref == \'\'refs/heads/master\'\' "
+        "&& (github.event_name == \'\'push\'\' || github.event_name == "
+        "\'\'workflow_dispatch\'\') }}'\n"))
+    spellings.append(text.replace(folded,
+        '    if: "${{ success() && github.ref == \'refs/heads/master\' && '
+        '(github.event_name == \'push\' || github.event_name == '
+        '\'workflow_dispatch\') }}"\n'))
+    spellings.append(text.replace(folded,
+        "    if: |\n      ${{ success() && github.ref == 'refs/heads/master' "
+        "&& (github.event_name == 'push' || github.event_name == "
+        "'workflow_dispatch') }}\n"))
+    # And the spellings of the condition as it stands in the tree
+    # UNDER TEST: the control has to be SENSITIVE to the mutation,
+    # so the spellings are rebuilt from the tree it is given -- the
+    # mutation changes the condition's FORM, and the form is what
+    # the two readers can disagree about.
+    mutated = text.replace(folded, "")
+    spellings.append(mutated)
+
+    for spelling in spellings:
+        deploy = _the_deploy_job(spelling)
+        if deploy is None:
+            continue
+        job_condition = _job_condition(deploy)
+        step_conditions = _step_conditions(deploy)
+        # The agreement is about a condition THAT EXISTS. A job with
+        # no condition at all is not a disagreement -- it is the
+        # ABSENCE of a condition, and the branch-authorization rule
+        # catches that on its own. So the agreement is checked where
+        # a condition exists, and the absence of the job-level one is
+        # reported as the disagreement it is: the readers read
+        # DIFFERENT values.
+        if job_condition and job_condition not in step_conditions:
+            out.append("the two readers of the deploy condition disagree: "
+                       "the job reader saw %r and the step reader saw %r"
+                       % (job_condition[:60],
+                          step_conditions[0][:60] if step_conditions else ""))
+        if not job_condition and step_conditions:
+            out.append("the two readers of the deploy condition disagree: "
+                       "the job reader saw no condition and the step "
+                       "reader saw %r" % step_conditions[0][:60])
+        # And the condition that the job reader sees but the step
+        # reader does NOT: the guard is at the job level, so the
+        # step reader has no reason to see it -- and that is the
+        # normal case. But the deploy job has no STEP-level
+        # condition of its own, so a step condition appearing here
+        # means the guard moved down into a step.
+        if job_condition and not step_conditions:
+            out.append("the two readers of the deploy condition disagree: "
+                       "the job reader saw %r and the step reader saw "
+                       "nothing" % job_condition[:60])
+    return out
+
+
+def _the_deploy_job(text):
+    """The deploy job's body, read from the given workflow text.
+
+    The text is the tree UNDER TEST -- the mutation is in it -- so
+    the job is read from THAT text and not from the repository on
+    disk, or the mutation would never reach the property.
+    """
+    directory = tempfile.mkdtemp()
+    try:
+        path = os.path.join(directory, "release.yml")
+        with io.open(path, "w", encoding="utf-8", newline="") as f:
+            f.write(text)
+        return load_jobs(path).get("deploy")
+    finally:
+        shutil.rmtree(directory, ignore_errors=True)
+
+
 def prop_12_permissions_are_minimal(release, test):
     """The elevated permissions belong to the deploy job alone.
 
@@ -1441,6 +1546,28 @@ def _condition_runs_after_a_failure(condition):
     return bool(verdict)
 
 
+def _read_the_condition_value(value, parts=None):
+    """The VALUE of an "if:" key, read the one way.
+
+    The job-level reader and the step-level reader read the same
+    value, and they have learned to disagree about it three times in
+    this series: the trailing comment on the key's own line, the
+    YAML escape of a single-quoted scalar, and the outer quotes of a
+    quoted scalar. So there is ONE reader, and both call it -- the
+    agreement is then a property, not a hope.
+
+    The BODY of a folded block is taken VERBATIM: inside a folded
+    scalar a "#" is LITERAL TEXT, not a comment -- the platform
+    keeps it, so a rule that stripped it would read a DIFFERENT
+    condition than the one the platform sees.
+    """
+    value = _without_trailing_comment(value.strip())
+    if parts is None:
+        return _collapse_the_yaml_escape(_unquote(value))
+    return _collapse_the_yaml_escape(
+        _unquote(" ".join(parts).strip()))
+
+
 def _step_conditions(job_body, job_level=True):
     """The conditions of the STEPS of a job, with the folded and
     literal block scalars expanded.
@@ -1487,9 +1614,11 @@ def _step_conditions(job_body, job_level=True):
         # job-level reader strips it, and the two readers must agree
         # about the same line. A legal "if: >-  # only master may
         # publish" is the same condition as "if: >-".
-        value = _without_trailing_comment(match.group(1).strip())
-        if value in (">-", ">", "|-", "|"):
-            # The block that follows, joined.
+        value = match.group(1).strip()
+        parts = None
+        if _without_trailing_comment(value) in (">-", ">", "|-", "|"):
+            # The block that follows, joined. The body is VERBATIM:
+            # inside a folded scalar a "#" is literal text.
             base = len(line) - len(line.lstrip())
             parts = []
             for follow in lines[index + 1:]:
@@ -1498,11 +1627,14 @@ def _step_conditions(job_body, job_level=True):
                 if len(follow) - len(follow.lstrip()) <= base:
                     break
                 parts.append(follow.strip())
-            value = " ".join(parts).strip()
-        # The YAML escape of a single-quoted scalar is collapsed
-        # here too: this is a SECOND reader of the same value, and
-        # the two readers must agree about it.
-        conditions.append(_collapse_the_yaml_escape(value))
+        conditions.append(_read_the_condition_value(value, parts))
+        continue
+        # The SAME reader as the job-level one: two readers of one
+        # value have learned to disagree about it three times in
+        # this series -- the trailing comment, the YAML escape and
+        # the outer quotes -- so there is ONE reader now, and both
+        # call it.
+        conditions.append(_read_the_condition_value(value, parts))
     return conditions
 
 
@@ -3444,6 +3576,11 @@ PROPERTIES = {
     "NC-RB-21": prop_22_the_release_workflow_is_named,
     "NC-RB-22": prop_23_the_mandatory_steps_are_present,
     "NC-RB-23": prop_24_the_published_bytes_are_the_validated_bytes,
+    # The reader-agreement invariant: the job-level reader and the
+    # step-level reader read the SAME value, and they have learned
+    # to disagree about it three times in this series. The agreement
+    # is a property now, checked on every legal spelling.
+    "NC-RB-24": prop_19_the_two_readers_agree,
 }
 
 
@@ -3709,6 +3846,19 @@ MUTATIONS = [
      "release.yml",
      [("python tools/validate_web_artifact.py build",
        "python tools/validate_web_artifact.py build || true")]),
+
+    ("NC-RB-24",
+     "the guard moved down into a step, so the readers disagree",
+     "release.yml",
+     [("    if: >-\n      ${{\n        success() &&\n"
+       "        github.ref == 'refs/heads/master' &&\n        (\n"
+       "          github.event_name == 'push' ||\n"
+       "          github.event_name == 'workflow_dispatch'\n"
+       "        )\n      }}\n",
+       ""),
+      ("      - name: Verify the SHA is still the tip of the branch\n",
+       "      - name: Verify the SHA is still the tip of the branch\n"
+       "        if: always()\n")]),
 
     ("NC-REL-07",
      "remove the checkout that lets the tip check read the remote",
