@@ -229,8 +229,9 @@ def _job_condition(block):
                 # CLOSED into "runs regardless", a FALSE RED in the
                 # required CI job.
                 parts.append(_without_trailing_comment(follow.strip()))
-            return _unquote(" ".join(parts).strip())
-        return _unquote(value)
+            return _collapse_the_yaml_escape(
+                _unquote(" ".join(parts).strip()))
+        return _collapse_the_yaml_escape(_unquote(value))
     return ""
 
 
@@ -1491,7 +1492,10 @@ def _step_conditions(job_body, job_level=True):
                     break
                 parts.append(follow.strip())
             value = " ".join(parts).strip()
-        conditions.append(value)
+        # The YAML escape of a single-quoted scalar is collapsed
+        # here too: this is a SECOND reader of the same value, and
+        # the two readers must agree about it.
+        conditions.append(_collapse_the_yaml_escape(value))
     return conditions
 
 
@@ -1541,6 +1545,33 @@ GATE_COMMANDS = (
 )
 
 
+def _with_its_continuations(lines, index):
+    """The command at this index, joined with its CONTINUATION chain.
+
+    A plain scalar may be continued over several lines with a
+    trailing backslash:
+
+        run: python tools/release_negative_controls.py \
+          || true
+
+    That is legal YAML, and the shell sees a backslash continuation,
+    so the executed command is "python tools/release_negative_controls.py
+    || true". A rule that looked only at the physical line saw no
+    operator at all.
+    """
+    parts = []
+    position = index
+    while position < len(lines):
+        current = lines[position].strip()
+        parts.append(current)
+        if not current.endswith("\\"):
+            break
+        position += 1
+        if position >= len(lines):
+            break
+    return " ".join(parts)
+
+
 def _run_block(raw_body, command):
     """The RUN block of the step that runs the given command.
 
@@ -1573,6 +1604,11 @@ def _run_block(raw_body, command):
                 break
         key_base = len(lines[start]) - len(lines[start].lstrip())
         block = []
+        # The "run:" line ITSELF is part of the block: a plain scalar
+        # may carry its command on the key's own line and continue it
+        # over the next one. The block must therefore start at the
+        # key, and the gate's own line is read with its chain.
+        block.append(lines[start])
         for follow in lines[start + 1:]:
             if not follow.strip():
                 block.append(follow)
@@ -2106,8 +2142,8 @@ def _workflow_permissions(release):
 
 # The pattern of a scope and its value, with the optional quotes and
 # any case: "contents: write", "'contents': 'write'", "Contents: Write".
-SCOPE_PATTERN = (r'^[\"\']?([\w-]+)[\"\']?\s*:\s*'
-                 r'[\"\']?(\S+?)[\"\']?$')
+SCOPE_PATTERN = (r'^[\"\']?\{?\s*[\"\']?([\w-]+)[\"\']?\s*:\s*'
+                 r'[\"\']?(\S+?)[\"\']?\}?$')
 
 
 def _job_permissions(job_body):
@@ -2137,6 +2173,12 @@ def _job_permissions(job_body):
                 if value.startswith("{") and value.endswith("}"):
                     inner = value[1:-1]
                     for part in inner.split(","):
+                        # The part is read WHOLE: unquoting it before
+                        # the pattern saw it left the leading brace
+                        # of "{pages: write", so the scope did not
+                        # match and the deploy job's scopes read as
+                        # EMPTY -- and the two rules about them
+                        # degraded to no-ops.
                         part = part.strip()
                         if not part:
                             continue
@@ -2252,6 +2294,21 @@ def _guards_on_the_emptiness(condition, variable):
         # by the emptiness rule above.
         return True
     return False
+
+
+def _collapse_the_yaml_escape(text):
+    """Collapse the YAML escape of a SINGLE-QUOTED scalar.
+
+    Inside a single-quoted YAML scalar, '' is the escape for one
+    '. So
+
+        '${{ github.ref == ''refs/heads/master'' }}'
+
+    is the correct expression, and the reader must see it that way.
+    A reader that stripped only the outer quotes handed the tokenizer
+    a mis-paired quote -- and the rule read an EMPTY literal.
+    """
+    return text.replace("''", "'")
 
 
 def _condition_core(condition):
@@ -2790,6 +2847,11 @@ def prop_19_the_gate_is_not_swallowed(release, test):
                 # The gate's OWN line may carry the swallow:
                 # "python tools/x.py || true".
                 own = block_lines[index]
+                # The gate's own line may be CONTINUED over the next
+                # one: "run: python tools/x.py \" followed by
+                # "|| true". The shell joins them, so the rule must
+                # too.
+                own = _with_its_continuations(block_lines, index)
                 _, own_tail = _split_the_command_and_the_tail(own)
                 if own_tail and _discards_the_status(own_tail, block_lines):
                     swallowed = True
