@@ -1117,9 +1117,14 @@ def prop_12_permissions_are_minimal(release, test):
     publishing = 0
     for line in deploy.split("\n"):
         stripped = line.strip()
-        if "uses:" not in stripped:
+        if "uses:" in stripped:
+            if _is_a_publication_step(stripped):
+                publishing += 1
             continue
-        if _is_a_publication_step(stripped):
+        # A publisher can also be a plain COMMAND: "git push origin
+        # HEAD:gh-pages" publishes to the Pages branch with no action
+        # and no token -- it needs only the checkout's rights.
+        if _is_a_publishing_command(stripped):
             publishing += 1
     if publishing != 1:
         out.append("the deploy job has %d publication steps: there must "
@@ -1383,27 +1388,40 @@ def _run_block(raw_body, command):
     for index, line in enumerate(lines):
         if command.strip() not in line:
             continue
-        # The "run:" key is the nearest key above the command.
-        run_index = index - 1
-        while run_index >= 0:
-            stripped = lines[run_index].strip()
+        base = len(line) - len(line.lstrip())
+        # The "run:" key above the command: the block of a folded
+        # scalar is deeper than the command, so the key is the
+        # anchor of the block.
+        start = index
+        for candidate in range(index - 1, max(-1, index - 4), -1):
+            if candidate < 0:
+                break
+            stripped = lines[candidate].strip()
             if stripped.startswith("run:"):
+                start = candidate
                 break
-            if stripped.startswith("- "):
+            if stripped.startswith("- ") or stripped.startswith("name:"):
                 break
-            run_index -= 1
-        if run_index < 0 or not lines[run_index].strip().startswith("run:"):
-            return []
-        run_base = len(lines[run_index]) - len(lines[run_index].lstrip())
-        run_block = []
-        for follow in lines[run_index + 1:]:
+        key_base = len(lines[start]) - len(lines[start].lstrip())
+        block = []
+        for follow in lines[start + 1:]:
             if not follow.strip():
-                run_block.append(follow)
+                block.append(follow)
                 continue
-            if len(follow) - len(follow.lstrip()) <= run_base:
+            follow_indent = len(follow) - len(follow.lstrip())
+            if follow_indent <= key_base:
                 break
-            run_block.append(follow)
-        return run_block
+            # The NEXT STEP: a "- name:" line at the step's own
+            # indentation. Its commands belong to it, not to this
+            # one.
+            if follow_indent == key_base and follow.strip().startswith("- "):
+                break
+            block.append(follow)
+        if not block:
+            # A single-line "run: <command>": the command IS the
+            # block.
+            block = [line]
+        return block
     return []
 
 
@@ -1430,6 +1448,18 @@ def _step_lines(code, target):
             block.append(follow)
         return block
     return []
+
+
+def _is_a_publishing_command(line):
+    """Does this COMMAND publish to the Pages?
+
+    A plain push to the Pages branch publishes, and it needs no
+    action and no token: the checkout's rights are enough.
+    """
+    if not re.match(r"^(?:run:\s*)?(?:git\s+push|gh\s+api)", line):
+        return False
+    return ("gh-pages" in line or "refs/heads/site" in line
+            or "pages" in line.lower())
 
 
 def _is_a_publication_step(line):
@@ -1574,6 +1604,80 @@ def _compared_events(condition):
         for match in re.finditer(pattern, condition):
             events.append(match.group(1))
     return events
+
+
+def _reads_the_gate_result(line):
+    """Does this command CHECK the gate's output?
+
+    "grep -q 'RUNNER: GREEN' /tmp/log" reads what the gate wrote and
+    fails the step when the gate failed. It is the gate being USED,
+    not swallowed -- and the repository's own steps do exactly this.
+    """
+    stripped = line.strip()
+    if not re.match(r"^(?:grep|awk|sed|test\b|\[\b)", stripped):
+        return False
+    # It must read the gate's OUTPUT: the log the gate wrote, or the
+    # exit status of the gate.
+    return ("log" in stripped or "GREEN" in stripped
+            or "pass" in stripped.lower() or "fail" in stripped.lower())
+
+
+def _discards_the_status(tail):
+    """Does this tail discard the gate's status?
+
+    A pipeline into a LOGGER keeps the status: "tee" returns the
+    status of its input, and the repository's own suites use it to
+    keep the output. Any other pipeline, a separator, a conditional
+    or an explicit exit discards it.
+    """
+    if not tail:
+        return False
+    # A pipeline: the last stage decides. A logger keeps the status.
+    if "|" in tail:
+        stages = [stage.strip() for stage in tail.split("|")]
+        if len(stages) > 1:
+            last = stages[-1].split()[0] if stages[-1].split() else ""
+            if last in ("tee", "cat", "tee;", "cat;"):
+                return False
+            return True
+    # A tail that is only an ARGUMENT runs the gate and nothing else.
+    if re.match(r"^(?:--\S+|-\S+)(?:\s+--?\S+)*$", tail):
+        return False
+    # A separator, a conditional or an explicit exit.
+    if re.search(r"(?:^|\s)(?:&&|;|\|\||\|\s*exit\s+0\b|if\b|!\b|\()",
+                 tail):
+        return True
+    # A trailing line continuation is not a swallow.
+    if tail.strip() == "\\":
+        return False
+    return False
+
+
+def _runs_a_gate_command(line):
+    """Does this line run one of the GATE commands?
+
+    The gate commands are the ones whose result IS the gate: the
+    release controls, the artifact validator, the suites, the ledger
+    validator and the differential.
+    """
+    stripped = _without_trailing_comment(line.strip())
+    stripped = re.sub(r"^run:\s*", "", stripped)
+    match = re.match(r"^(?:python3?|py)\s+(.*)$", stripped)
+    if not match:
+        return False
+    rest = match.group(1).strip()
+    if rest.startswith(("'", '"')):
+        return False
+    parts = rest.split()
+    if not parts:
+        return False
+    first = parts[0]
+    if first.startswith(("'", '"')):
+        return False
+    for command in GATE_COMMANDS:
+        if command in first:
+            return True
+    return False
 
 
 def _is_yaml_true(line, key):
@@ -1953,6 +2057,40 @@ def prop_15_the_triggers_are_certified(release, test):
         if key:
             trigger_keys.append(key.group(1).lower())
 
+    # The REUSABLE workflow's triggers are certified too. It is part
+    # of the publication gate -- the deploy needs it -- so a
+    # "pull_request_target:" trigger on it would run a PR's code with
+    # the workflow's own privileges, and the gate would be reachable
+    # from a pull request.
+    reusable = test["text"]
+    reusable_match = re.search(r"^\s*['\"]?on['\"]?\s*:\s*$", reusable,
+                               re.MULTILINE)
+    if reusable_match is None:
+        out.append("the reusable workflow has no trigger block")
+    else:
+        reusable_body = reusable[reusable_match.end():]
+        reusable_lines = []
+        for line in reusable_body.split("\n")[1:]:
+            if line.strip() and not line.startswith(" "):
+                break
+            reusable_lines.append(line)
+        for line in reusable_lines:
+            key = re.match(r"^\s*['\"]?([\w-]+)['\"]?\s*:", line)
+            if not key:
+                continue
+            name = key.group(1).lower()
+            # The reusable workflow runs its own CI on push and on
+            # pull_request: that is its purpose, and the deploy needs
+            # it as a REUSABLE WORKFLOW, not as an event-driven run.
+            # The dangerous triggers are the ones that carry a PR's
+            # code with the workflow's own privileges, and the ones
+            # that can be fired from outside.
+            if name in ("pull_request_target", "schedule", "workflow_run",
+                        "issue_comment", "repository_dispatch", "release",
+                        "fork", "deployment", "page_build", "check_run",
+                        "check_suite", "status", "create", "delete", "watch"):
+                out.append("the reusable workflow has a %s trigger" % name)
+
     # The push trigger must be filtered to master -- and to master
     # ALONE. A widened filter ("[master, staging]") admits another
     # branch, and the check that only asked whether "master" was
@@ -2050,9 +2188,10 @@ def prop_16_the_concurrency_group_is_real(release, test):
     # cancel-in-progress: true the in-flight older run is CANCELLED,
     # which is a different and weaker guarantee than the one the
     # comment states -- so the comment would be a lie.
-    if "cancel-in-progress: true" in code:
-        out.append("the concurrency cancels the older run: the "
-                   "workflow's own comment states that it does not")
+    for line in code.split("\n"):
+        if _is_yaml_true(line, "cancel-in-progress"):
+            out.append("the concurrency cancels the older run: the "
+                       "workflow's own comment states that it does not")
     return out
 
 
@@ -2215,6 +2354,15 @@ def prop_19_the_gate_is_not_swallowed(release, test):
     controls reported: the gate would run, say RED, and the CI would
     carry on. The same shape applies to every mandatory step of the
     reusable workflow.
+
+    The rule is POSITIONAL, not a list of spellings. The command that
+    runs the gate must be the LAST command of its run block: whatever
+    follows it -- a pipeline, a conditional, an explicit exit, a
+    do-nothing command, an argument -- can discard its status, and
+    the list of such constructs is never complete.
+
+    So the run block is read, the gate's line is found in it, and
+    everything after that line in the block is a swallow.
     """
     out = []
     for label, text in (("the release workflow", release["text"]),
@@ -2224,74 +2372,88 @@ def prop_19_the_gate_is_not_swallowed(release, test):
         # delimited by it, and the code lines have it stripped.
         raw_body = _body_without_comments(text)
         for line in code.split("\n"):
-            # Only the GATE's own result matters. "godot --editor --quit
-            # || true" is a legitimate way to close an editor that
-            # exits with a warning, and it is not a gate.
-            # The swallow has more than one spelling: "|| true",
-            # "||true" (the same operator without the space) and
-            # "| true" (a pipeline whose exit status is true's). And
-            # "set +e" disables errexit, so the step exits 0 even
-            # when the gate fails.
-            # The swallow has more spellings than "|| true". The
-            # shell's "|| :" (the do-nothing command) and "|| exit 0"
-            # (an explicit success) discard the gate's failure in
-            # exactly the same way, and each of them has the same
-            # shape with any spacing.
-            # The swallow is SEMANTIC: the gate command must be the
-            # LAST thing whose status decides the step. So the RUN
-            # BLOCK is read as a sequence, and the gate command must
-            # be the last command of it.
-            #
-            # Anything AFTER the gate command can discard its status
-            # -- a pipeline, a conditional, an explicit exit, a
-            # do-nothing command -- and the list of such constructs
-            # is never complete. So the rule is the ORDER: the gate
-            # command must come last.
-            swallowed = bool(re.search(
-                r"\|\|\s*(?:true\b|:|exit\s+0\b|/bin/true\b)", line))
-            if not swallowed and re.search(r";\s*exit\s+0\s*$", line):
-                swallowed = True
-            if not swallowed and _the_gate_command_is_not_last(line):
-                swallowed = True
-            # "set +e" disables errexit, so the STEP exits 0 even when
-            # the gate fails. In the workflow it is a line of its own
-            # and the gate command is on the next one -- so the rule
-            # must look at the STEP, not at the single line.
-            if not swallowed:
-                # The whole RUN BLOCK is read, not the single line: a
-                # swallow on a CONTINUATION line of a multi-line block
-                # discards the status just as well, and "set +e"
-                # disables the errexit for the whole block.
-                block_lines = _run_block(raw_body, line)
-                for other in block_lines:
+            # Only the GATE's own result matters. "godot --editor
+            # --quit || true" is a legitimate way to close an editor
+            # that exits with a warning, and it is not a gate.
+            if not _runs_a_gate_command(line):
+                continue
+            swallowed = False
+            # The whole RUN BLOCK is read, not the single line.
+            block_lines = _run_block(raw_body, line)
+            # The gate's line inside the block, and everything after
+            # it: that is what decides the step's status.
+            index = None
+            for position, other in enumerate(block_lines):
+                if _runs_a_gate_command(other.strip()):
+                    index = position
+                    break
+            if index is None:
+                # The gate is not in the block: the line is the whole
+                # command, so only what follows it on the line counts.
+                tail = line.strip()
+                tail = re.sub(r"^run:\s*", "", tail)
+                tail = tail.split(None, 2)[2] if len(
+                    tail.split(None, 2)) > 2 else ""
+                if _discards_the_status(tail.strip()):
+                    swallowed = True
+            else:
+                # The gate's OWN line may carry the swallow:
+                # "python tools/x.py || true".
+                own = block_lines[index]
+                own_stripped = re.sub(r"^run:\s*", "",
+                                      _without_trailing_comment(own.strip()))
+                parts = own_stripped.split(None, 2)
+                own_tail = parts[2].strip() if len(parts) > 2 else ""
+                if own_tail and _discards_the_status(own_tail):
+                    swallowed = True
+                # A pipeline that ends in a LOGGER keeps the status.
+                elif own_tail and "|" in own_tail:
+                    stages = [s.strip() for s in own_tail.split("|")]
+                    last = stages[-1].split()[0] if stages[-1].split() else ""
+                    if last not in ("tee", "cat", "tee;", "cat;"):
+                        swallowed = True
+                # "set +e" may come BEFORE the gate command: it
+                # disables the errexit for the whole block, so the
+                # gate's failure does not stop the step.
+                for before in block_lines[:index]:
+                    if "set +e" in before:
+                        swallowed = True
+                        break
+                continued = False
+                for other in (block_lines[index + 1:] if not swallowed
+                              else []):
+                    if not other.strip():
+                        continue
+                    # A command may be continued over SEVERAL lines:
+                    # a line that ends with a backslash continues on
+                    # the next, and so on. The whole chain belongs to
+                    # the command, so it is part of the gate and not
+                    # a swallow.
+                    if continued:
+                        continued = other.rstrip().endswith("\\")
+                        continue
+                    if other.rstrip().endswith("\\"):
+                        continued = True
+                        continue
                     if "set +e" in other:
+                        # errexit is off: the step exits 0 even when
+                        # the gate fails.
                         swallowed = True
                         break
-                    if bool(re.search(
-                            r"\|\|\s*(?:true\b|:|exit\s+0\b|/bin/true\b)",
-                            other)):
-                        swallowed = True
-                        break
-                    if re.search(r";\s*exit\s+0\s*$", other):
-                        swallowed = True
-                        break
-            if not swallowed:
-                continue
-            # Every gate command, not a list of them: a step that
-            # RUNS a python script from the tools directory and
-            # swallows its result is a gate that cannot report. The
-            # list of names was a token list, and a gate command
-            # outside it passed.
-            is_gate = any(gate in line for gate in GATE_COMMANDS)
-            if not is_gate:
-                is_gate = bool(re.search(
-                r"\b(?:tools|tests|scripts)/[\w./-]*\.py\b", line))
-            if not is_gate:
-                continue
-            out.append("the %s swallows the gate's result with '|| true': %s"
-                       % (label, line.strip()[:60]))
-            break
+                    if _reads_the_gate_result(other):
+                        # The command READS the gate's output and
+                        # checks it -- "grep -q 'RUNNER: GREEN' log".
+                        # It fails the step when the gate failed, so
+                        # it is the gate being USED, not swallowed.
+                        continue
+                    swallowed = True
+                    break
+            if swallowed:
+                out.append("the %s swallows the gate's result: the gate "
+                           "command must be the last command of its run "
+                           "block" % label)
     return out
+
 
 
 def prop_20_the_needs_exist(release, test):
@@ -2312,6 +2474,34 @@ def prop_20_the_needs_exist(release, test):
             if needed and needed not in names:
                 out.append("the %s job needs %s, which does not exist"
                            % (job, needed))
+
+    # The needs must be checked by WHAT THEY DO, not by their NAME.
+    # The deploy needs a job named "required-tests" -- but that job
+    # can be a trivial one, while the reusable workflow that runs the
+    # actual CI is called by ANOTHER job the deploy does not need.
+    # The CI no longer gates the publication, and the check passed
+    # because it read the name.
+    for job in ("deploy", "web-build"):
+        body = release["jobs"].get(job, "")
+        needs = _needs_of(release["jobs"], job)
+        for needed in needs.replace(",", " ").split():
+            needed = needed.strip().strip("'\"")
+            if needed not in names:
+                continue
+            needed_body = release["jobs"].get(needed, "")
+            # The required-tests job must CALL the reusable workflow
+            # that runs the CI. A job that does not call it runs
+            # nothing, whatever it is named.
+            if needed == "required-tests":
+                if "uses:" not in needed_body or "test.yml" not in needed_body:
+                    out.append("the %s job does not call the reusable "
+                               "workflow that runs the CI: the CI does "
+                               "not gate the publication" % job)
+            if needed == "web-build":
+                if "uses:" not in needed_body:
+                    out.append("the %s job does not call the reusable "
+                               "workflow that builds the artifact"
+                               % job)
     return out
 
 
@@ -2411,21 +2601,26 @@ def prop_24_the_published_bytes_are_the_validated_bytes(release, test):
         out.append("the build job does not validate an artifact")
         return out
 
-    uploaded = None
-    for index, line in enumerate(code.split("\n")):
+    # EVERY upload is read: a second upload of another directory
+    # overwrites the artifact, so the rule that read only the FIRST
+    # one missed it.
+    uploaded = []
+    lines = code.split("\n")
+    for index, line in enumerate(lines):
         if "upload-pages-artifact" in line:
             # The path is the key below it.
-            for follow in code.split("\n")[index + 1:index + 4]:
+            for follow in lines[index + 1:index + 4]:
                 if "path:" in follow:
-                    uploaded = follow.split("path:", 1)[1].strip().strip("'\"")
+                    uploaded.append(follow.split("path:", 1)[1].strip()
+                                    .strip("'\""))
                     break
-            break
-    if uploaded is None:
+    if not uploaded:
         out.append("the build job does not upload the artifact")
-    elif uploaded.rstrip("/") != validated.rstrip("/"):
-        out.append("the build job validates %s but uploads %s: the "
-                   "published bytes are not the validated bytes"
-                   % (validated, uploaded))
+    for path in uploaded:
+        if path.rstrip("/") != validated.rstrip("/"):
+            out.append("the build job validates %s but uploads %s: the "
+                       "published bytes are not the validated bytes"
+                       % (validated, path))
     return out
 
 
