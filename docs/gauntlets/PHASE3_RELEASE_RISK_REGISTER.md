@@ -79,6 +79,43 @@
              manual staging/phase3/feature/tag/pull_request/schedule
              DENY, a failed required job DENY.
 
+### H-30 — the eleventh review: the operator, the module, the comment
+
+    Status:  PROVEN DEFECT — FIXED
+    Found:   the eleventh reviewer worked in a clone of its own -- the
+             isolation finally held -- and found three classes plus
+             two adjudicated disagreements:
+
+               the SWALLOW rule found the tail by WHITESPACE, so an
+                 operator GLUED to the command was thrown away with
+                 it. The shell accepts "cmd| tee log" exactly as it
+                 accepts "cmd | tee log". The tail is found by the
+                 OPERATOR now.
+               the rule did not know the MODULE form of the gate --
+                 "python -m tools.release_negative_controls" -- so
+                 "|| true" after it was invisible.
+               the STEP-CONDITION reader did not strip a trailing
+                 comment while the JOB-CONDITION reader did, so the
+                 two readers disagreed about the same line. A legal
+                 "if: >-  # only master may publish" was read as an
+                 unparseable value, which fails closed into "runs
+                 regardless": a FALSE RED in the required CI job.
+
+    Fix:     all three, in commit 3d78a25. The ${VAR} spelling and
+             the single-line refusal were closed in 5f28f66.
+    Proof:   the controls are 33 of 33 RED, with and without pyyaml.
+
+    NOTE:   two of the earlier batteries' cases are FALSE POSITIVES,
+             and the eleventh reviewer proved it with real bash:
+             "false ; exit 0" exits 1 under the platform's
+             "bash -e {0}", because errexit fires before the "; exit
+             0" is reached. The real openings are "||", "|" and "&",
+             and the controls catch all three in both the spaced and
+             the glued spelling. And the ninth reviewer's "I3" case
+             is mislabelled: it is filed as a legal edit, but it
+             drops the event check -- and the harness correctly flags
+             it.
+
 ### H-29 — the tenth review's six classes
 
     Status:  PROVEN DEFECT — FIXED
