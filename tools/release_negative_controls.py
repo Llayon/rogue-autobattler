@@ -2469,14 +2469,17 @@ def prop_14_the_ref_set_is_a_rule(release, test):
             if ok:
                 allowed.add((ref, event))
     for ref, event in sorted(allowed):
-        if ref.strip().lower() != "refs/heads/master":
-            out.append("the deploy condition authorizes %s on %s: the "
-                       "authorization set must be a subset of the "
-                       "master ref" % (ref, event))
-        elif event not in ("push", "workflow_dispatch"):
-            out.append("the deploy condition authorizes %s on %s: the "
-                       "authorization set must be a subset of the "
-                       "push and dispatch events" % (ref, event))
+        # The master's spellings: the full ref and the branch name,
+        # folded the way the platform folds the case.
+        if ref.strip().lower() in ("refs/heads/master", "master"):
+            if event not in ("push", "workflow_dispatch"):
+                out.append("the deploy condition authorizes %s on %s: the "
+                           "authorization set must be a subset of the "
+                           "push and dispatch events" % (ref, event))
+            continue
+        out.append("the deploy condition authorizes %s on %s: the "
+                   "authorization set must be a subset of the "
+                   "master ref" % (ref, event))
     return out
 
 
