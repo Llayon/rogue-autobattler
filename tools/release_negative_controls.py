@@ -1437,7 +1437,11 @@ def _step_conditions(job_body, job_level=True):
                 indent = len(line) - len(line.lstrip())
                 if indent <= 4:
                     continue
-        value = match.group(1).strip()
+        # The trailing comment is not part of the value: the
+        # job-level reader strips it, and the two readers must agree
+        # about the same line. A legal "if: >-  # only master may
+        # publish" is the same condition as "if: >-".
+        value = _without_trailing_comment(match.group(1).strip())
         if value in (">-", ">", "|-", "|"):
             # The block that follows, joined.
             base = len(line) - len(line.lstrip())
@@ -1859,29 +1863,74 @@ def _discards_the_status(tail, block=""):
     return False
 
 
+def _split_the_command_and_the_tail(line):
+    """The command and the tail of a shell line.
+
+    The tail is what FOLLOWS the command, and the operator that
+    starts it may be GLUED to the command: the shell accepts
+    "cmd| tee log" exactly as it accepts "cmd | tee log". So the tail
+    is found by the OPERATOR, not by the whitespace -- a rule that
+    split on whitespace lost every glued spelling.
+    """
+    stripped = _without_trailing_comment(line.strip())
+    stripped = re.sub(r"^run:\s*", "", stripped)
+    match = re.match(r"^(?:python3?|py)\s+(.*)$", stripped)
+    if not match:
+        return None, ""
+    rest = match.group(1)
+    for operator in ("||", "&&", "|", ";", "&"):
+        index = rest.find(operator)
+        if index < 0:
+            continue
+        if _is_inside_quotes(rest, index):
+            continue
+        return rest[:index].strip(), rest[index:].strip()
+    return rest.strip(), ""
+
+
+def _is_inside_quotes(text, index):
+    """Is this position inside a quoted string?"""
+    quote = None
+    for position, character in enumerate(text):
+        if position >= index:
+            break
+        if quote:
+            if character == quote:
+                quote = None
+            continue
+        if character in ("'", '"'):
+            quote = character
+    return quote is not None
+
+
 def _runs_a_gate_command(line):
     """Does this line run one of the GATE commands?
 
     The gate commands are the ones whose result IS the gate: the
     release controls, the artifact validator, the suites, the ledger
     validator and the differential.
+
+    The MODULE form -- "python -m tools.release_negative_controls" --
+    is the same gate, so it counts too.
     """
-    stripped = _without_trailing_comment(line.strip())
-    stripped = re.sub(r"^run:\s*", "", stripped)
-    match = re.match(r"^(?:python3?|py)\s+(.*)$", stripped)
-    if not match:
+    command, _ = _split_the_command_and_the_tail(line)
+    if not command:
         return False
-    rest = match.group(1).strip()
-    if rest.startswith(("'", '"')):
-        return False
-    parts = rest.split()
+    parts = command.split()
     if not parts:
         return False
     first = parts[0]
     if first.startswith(("'", '"')):
         return False
-    for command in GATE_COMMANDS:
-        if command in first:
+    # The module form: "python -m tools.release_negative_controls".
+    if first == "-m":
+        module = " ".join(parts[1:])
+        for name in GATE_COMMANDS:
+            if name[:-3] in module or module.endswith(name):
+                return True
+        return False
+    for name in GATE_COMMANDS:
+        if name in first:
             return True
     return False
 
@@ -2679,20 +2728,14 @@ def prop_19_the_gate_is_not_swallowed(release, test):
             if index is None:
                 # The gate is not in the block: the line is the whole
                 # command, so only what follows it on the line counts.
-                tail = line.strip()
-                tail = re.sub(r"^run:\s*", "", tail)
-                tail = tail.split(None, 2)[2] if len(
-                    tail.split(None, 2)) > 2 else ""
+                _, tail = _split_the_command_and_the_tail(line)
                 if _discards_the_status(tail.strip(), block_lines):
                     swallowed = True
             else:
                 # The gate's OWN line may carry the swallow:
                 # "python tools/x.py || true".
                 own = block_lines[index]
-                own_stripped = re.sub(r"^run:\s*", "",
-                                      _without_trailing_comment(own.strip()))
-                parts = own_stripped.split(None, 2)
-                own_tail = parts[2].strip() if len(parts) > 2 else ""
+                _, own_tail = _split_the_command_and_the_tail(own)
                 if own_tail and _discards_the_status(own_tail, block_lines):
                     swallowed = True
                 # "set +e" may come BEFORE the gate command: it
