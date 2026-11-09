@@ -550,11 +550,12 @@ def prop_04_sha_identity(release, test):
     # separate statements, and a mutation that removes only the
     # comparison leaves the other two intact.
     compares = False
-    for line in deploy.split("\n"):
+    code = _code_lines(deploy)
+    for line in code.split("\n"):
         if "if" not in line:
             continue
         if "TIP" in line and "github.sha" in line:
-            if "exit 1" in deploy:
+            if "exit 1" in code:
                 compares = True
             else:
                 out.append("the SHA comparison never refuses")
@@ -675,6 +676,39 @@ def prop_06b_validation_is_a_gate(release, test):
     return out
 
 
+def _body_without_comments(job_body):
+    """The body of a job with the comment lines dropped and the
+    INDENTATION kept.
+
+    The indentation is what delimits a step from the next one, so it
+    cannot be stripped.
+    """
+    body = []
+    for line in job_body.split("\n"):
+        stripped = line.strip()
+        if stripped and stripped.startswith("#"):
+            continue
+        body.append(line)
+    return "\n".join(body)
+
+
+def _code_lines(job_body):
+    """The CODE lines of a job: the comments are dropped.
+
+    The workflow's own comment blocks literally contain the text the
+    checks are looking for -- "refs/heads/master", "always()", "git
+    ls-remote origin refs/heads/master". A search over the whole body
+    therefore matches the COMMENT and the control reports GREEN while
+    the mechanism it protects is gone. Every check reads CODE.
+    """
+    code = []
+    for line in job_body.split("\n"):
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#"):
+            code.append(stripped)
+    return "\n".join(code)
+
+
 def _has_master_sha_check(deploy_body):
     """Is there a REAL step that compares the published SHA with the
     tip of master?
@@ -777,14 +811,41 @@ def prop_07_branch_authorization(release, test):
                    "case insensitive, so a branch named Master would "
                    "pass it")
 
-    # The check must FAIL CLOSED: an unreadable tip is a HOLD, never
-    # a GREEN. Without the refusal, a deployment whose tip could not
-    # be read would proceed -- and a check that compared nothing
-    # would approve everything.
-    if _has_master_sha_check(deploy):
-        if not re.search(r"exit\s+1", deploy):
-            out.append("the master check does not fail closed: an "
-                       "unreadable tip must be a HOLD, never a GREEN")
+    # The master check must be the WHOLE mechanism: it must READ the
+    # tip of master, COMPARE it with the published SHA, and REFUSE.
+    # A check that reads the tip and does nothing with it proves
+    # nothing -- and the case-insensitivity of the string comparison
+    # is exactly what the comparison is there to answer.
+    code = _code_lines(deploy)
+    master_read = re.search(r"ls-remote[^\n]*refs/heads/master", code)
+    if master_read:
+        compares = False
+        for line in code.split("\n"):
+            if ("MASTER_SHA" in line and "github.sha" in line
+                    and ("!=" in line or "==" in line)):
+                compares = True
+                break
+        if not compares:
+            out.append("the master check reads the tip of master but "
+                       "never compares it with the published SHA")
+        # The refusal must belong to THIS check: the tip-check's own
+        # "exit 1" is a different mechanism, and its presence would
+        # satisfy a global search even when the master check's refusal
+        # was deleted.
+        master_block = _step_block(_body_without_comments(deploy),
+                                    "master")
+        if master_block is not None:
+            # The refusal for an UNREADABLE tip must be SPECIFIC: a
+            # check that the tip is empty and then HOLDs. The global
+            # "exit 1" was satisfied by the OTHER refusal in the same
+            # step -- the comparison -- so deleting the unreadable
+            # case left the check green.
+            unreadable = re.search(
+                r"-z[^\n]*\n(?:[^\n]*\n){0,6}?[^\n]*exit\s+1",
+                master_block)
+            if not unreadable:
+                out.append("the master check does not fail closed: an "
+                           "unreadable tip must be a HOLD, never a GREEN")
     return out
 
 
@@ -827,6 +888,65 @@ def prop_11_sha_checks_stay_real(release, test):
         out.append("the SHA checks do not fail closed: an unreadable "
                    "tip must be a HOLD, never a GREEN")
     return out
+
+
+def prop_12_permissions_are_minimal(release, test):
+    """The elevated permissions belong to the deploy job alone.
+
+    pages: write and id-token: write must appear ONLY on the job that
+    publishes. On the build job they would let a build step publish
+    whatever it likes, without the deploy job's checks.
+    """
+    out = []
+    for name, body in release["jobs"].items():
+        if name in ("push", "workflow_dispatch"):
+            continue
+        code = _code_lines(body)
+        for elevated in ("pages: write", "id-token: write"):
+            if elevated in code:
+                if name != "deploy":
+                    out.append("the %s job carries %s" % (name, elevated))
+                break
+    # The deploy job must still carry them: without them it could
+    # not publish at all.
+    deploy = _code_lines(release["jobs"].get("deploy", ""))
+    if "pages: write" not in deploy:
+        out.append("the deploy job has no pages: write: it could not "
+                   "publish")
+    return out
+
+
+def _step_block(body, needle):
+    """The lines of the step whose name mentions the needle.
+
+    The block is the step's own lines: the name, its keys and its run
+    body. A mechanism's refusal must be INSIDE its own step: a global
+    search would be satisfied by another step's "exit 1".
+
+    The body is read with its INDENTATION: the step's keys are deeper
+    than the "- name:" line, and that depth is what delimits the step.
+    A stripped copy would lose it.
+    """
+    lines = body.split("\n")
+    for index, line in enumerate(lines):
+        if "- name:" not in line:
+            continue
+        if needle not in line:
+            continue
+        # The step's own keys and its run body are indented deeper
+        # than the "- name:" line itself.
+        base = len(line) - len(line.lstrip())
+        block = [line]
+        for follow in lines[index + 1:]:
+            if not follow.strip():
+                block.append(follow)
+                continue
+            indent = len(follow) - len(follow.lstrip())
+            if indent <= base:
+                break
+            block.append(follow)
+        return "\n".join(block)
+    return None
 
 
 def prop_08_required_jobs_stay_mandatory(release, test):
@@ -959,6 +1079,7 @@ PROPERTIES = {
     "NC-RB-08": prop_07_branch_authorization,
     "NC-RB-09": prop_11_sha_checks_stay_real,
     "NC-RB-10": prop_11_sha_checks_stay_real,
+    "NC-RB-11": prop_12_permissions_are_minimal,
 }
 
 
@@ -1086,6 +1207,15 @@ MUTATIONS = [
      "release.yml",
      [("        success() &&\n",
        "        (success() || always()) &&\n")]),
+
+    ("NC-RB-11",
+     "give the build job the pages write permission",
+     "release.yml",
+     [("    needs: required-tests\n    runs-on: ubuntu-latest\n"
+       "    timeout-minutes: 30\n    permissions:\n      contents: read",
+       "    needs: required-tests\n    runs-on: ubuntu-latest\n"
+       "    timeout-minutes: 30\n    permissions:\n"
+       "      pages: write\n      contents: read")]),
 
     ("NC-RB-09",
      "accept the published sha whatever the tip of the branch is",
