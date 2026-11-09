@@ -1024,6 +1024,19 @@ def prop_12_permissions_are_minimal(release, test):
                     out.append("the %s job carries %s: %s"
                                % (name, scope, value))
                 break
+
+    # The deploy job may hold EXACTLY the three scopes it needs. It
+    # was exempt from the check above, so it could hold any elevated
+    # scope at all -- contents: write, actions: write,
+    # pull-requests: write. An elevated scope on the publish job is a
+    # STANDING capability, not a one-off need.
+    allowed = {"pages": "write", "id-token": "write", "contents": "read"}
+    for scope, value in _job_permissions(release["jobs"].get("deploy", "")):
+        if allowed.get(scope) != value:
+            out.append("the deploy job carries %s: %s: it may hold only %s"
+                       % (scope, value,
+                          ", ".join("%s: %s" % (k, v)
+                                    for k, v in sorted(allowed.items()))))
     # The WORKFLOW-LEVEL permissions block lives outside every job
     # body, so it was never examined. A job's own block OVERRIDES the
     # workflow default, so the danger is a top-level elevation
@@ -1238,12 +1251,15 @@ def _step_conditions(job_body, job_level=True):
         if not match:
             continue
         if not job_level:
-            # The job-level key sits at four spaces; a step key sits
-            # deeper, and the list form carries the "- ".
+            # The job-level key is "if:" -- at four spaces in the
+            # deploy job. The old guard matched "if" and "if ", so the
+            # job-level condition was NOT excluded and came back as a
+            # step condition: the documented contract was not what the
+            # code did. The list form ("- if:") is a STEP condition
+            # and stays.
             stripped = line.strip()
-            if stripped == "if" or stripped.startswith("if "):
-                if not stripped.startswith("- "):
-                    continue
+            if stripped.startswith("if:") and not stripped.startswith("- "):
+                continue
         value = match.group(1).strip()
         if value in (">-", ">", "|-", "|"):
             # The block that follows, joined.
@@ -1582,6 +1598,19 @@ def prop_15_the_triggers_are_certified(release, test):
                       "pull_request_target:", "issue_comment:"):
         if forbidden in trigger:
             out.append("the workflow has a %s trigger" % forbidden[:-1])
+
+    # The REUSABLE workflow's triggers are certified too. A
+    # pull_request_target: trigger on it is the classic privilege
+    # escalation shape: it runs with write scope against the base
+    # repository, and the harness certified no trigger set for it at
+    # all.
+    reusable = test.get("text", "")
+    reusable_code = _code_lines(reusable)
+    for forbidden in ("pull_request_target:", "issue_comment:",
+                      "workflow_run:", "schedule:"):
+        if forbidden in reusable_code:
+            out.append("the reusable workflow has a %s trigger"
+                       % forbidden[:-1])
     return out
 
 
@@ -1608,6 +1637,14 @@ def prop_16_the_concurrency_group_is_real(release, test):
         out.append("the concurrency group %s is constant: the "
                    "deployments of different refs would queue behind "
                    "each other" % group)
+
+    # The flag the workflow's own comment depends on. With
+    # cancel-in-progress: true the in-flight older run is CANCELLED,
+    # which is a different and weaker guarantee than the one the
+    # comment states -- so the comment would be a lie.
+    if "cancel-in-progress: true" in code:
+        out.append("the concurrency cancels the older run: the "
+                   "workflow's own comment states that it does not")
     return out
 
 
@@ -1793,6 +1830,88 @@ def prop_22_the_release_workflow_is_named(release, test):
                            "read this file, so it must be the release "
                            "workflow" % line.strip()[6:].strip())
             break
+    return out
+
+
+# The steps of the reusable workflow that ARE the gate. Deleting one
+# of them is a removed gate -- the harness proved it cannot be
+# disabled, but it must also prove it cannot be DELETED.
+MANDATORY_TEST_STEPS = (
+    "Install Godot",
+    "Lint core and scenes",
+    "Parse project in editor mode",
+    "Run legacy regression suite",
+    "Run legacy characterization suite",
+    "Run legacy save fixture loader",
+    "Run save schema v4 suite",
+    "Run save schema v4 byte-for-byte determinism",
+)
+
+
+def prop_24_the_published_bytes_are_the_validated_bytes(release, test):
+    """The published artifact must be the VALIDATED artifact.
+
+    The validator checks the build/ directory, and the upload step
+    names a path. If the two differ, the bytes that are published are
+    not the bytes that were validated -- and the workflow's own
+    comment claims they are.
+    """
+    out = []
+    build = release["jobs"].get("web-build", "")
+    code = _code_lines(build)
+    validated = None
+    for line in code.split("\n"):
+        if "validate_web_artifact.py" in line:
+            parts = line.split()
+            if len(parts) >= 2:
+                validated = parts[-1].strip("'\"")
+    if validated is None:
+        out.append("the build job does not validate an artifact")
+        return out
+
+    uploaded = None
+    for index, line in enumerate(code.split("\n")):
+        if "upload-pages-artifact" in line:
+            # The path is the key below it.
+            for follow in code.split("\n")[index + 1:index + 4]:
+                if "path:" in follow:
+                    uploaded = follow.split("path:", 1)[1].strip().strip("'\"")
+                    break
+            break
+    if uploaded is None:
+        out.append("the build job does not upload the artifact")
+    elif uploaded.rstrip("/") != validated.rstrip("/"):
+        out.append("the build job validates %s but uploads %s: the "
+                   "published bytes are not the validated bytes"
+                   % (validated, uploaded))
+    return out
+
+
+def prop_23_the_mandatory_steps_are_present(release, test):
+    """Every mandatory step of the reusable workflow must EXIST.
+
+    The harness proved that a mandatory step cannot be DISABLED with
+    a condition. It did not prove that the step cannot be DELETED --
+    and deleting the step that runs the controls leaves the reusable
+    workflow succeeding, the required jobs succeeding, the deploy
+    publishing, and nothing running the controls at all.
+
+    So the steps are a NAMED LIST: the harness checks that each one
+    is there, not merely that none of them is disabled.
+    """
+    out = []
+    code = _code_lines(test["text"])
+    for step in MANDATORY_TEST_STEPS:
+        if not any(step in line for line in code.split("\n")):
+            out.append("the reusable workflow has no %r step: a deleted "
+                       "gate is a removed gate" % step)
+    # The gate commands themselves must run somewhere in the
+    # reusable workflow. The artifact validator is NOT among them: it
+    # runs in the RELEASE workflow's build job.
+    for command in ("release_negative_controls.py",
+                    "run_battle_ecs_suites.py"):
+        if not any(command in line for line in code.split("\n")):
+            out.append("the reusable workflow never runs %s" % command)
     return out
 
 
@@ -2048,6 +2167,8 @@ PROPERTIES = {
     "NC-RB-19": prop_20_the_needs_exist,
     "NC-RB-20": prop_21_the_jobs_are_bounded,
     "NC-RB-21": prop_22_the_release_workflow_is_named,
+    "NC-RB-22": prop_23_the_mandatory_steps_are_present,
+    "NC-RB-23": prop_24_the_published_bytes_are_the_validated_bytes,
 }
 
 
@@ -2175,6 +2296,16 @@ MUTATIONS = [
      "release.yml",
      [("        success() &&\n",
        "        (success() || always()) &&\n")]),
+
+    ("NC-RB-22",
+     "delete the step that runs the controls",
+     "test.yml",
+     [("        run: python tools/release_negative_controls.py\n\n", "")]),
+
+    ("NC-RB-23",
+     "upload a path that was not validated",
+     "release.yml",
+     [("          path: build/\n", "          path: other/\n")]),
 
     ("NC-RB-18",
      "swallow the result of the controls",
