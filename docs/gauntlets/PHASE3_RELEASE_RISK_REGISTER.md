@@ -79,6 +79,60 @@
              manual staging/phase3/feature/tag/pull_request/schedule
              DENY, a failed required job DENY.
 
+### H-34 — the fourteenth review: the quoted key and the implicit success
+
+    Status:  PROVEN DEFECT — FIXED
+    Found:   the fourteenth reviewer worked in a clone of its own and
+             found the class R13-05 left open, on the NEXT spelling:
+
+               the permissions KEY may be QUOTED. "'permissions':" is
+                 legal YAML and resolves to the same key -- exactly
+                 like the quoted job key that R13-05 closed. But the
+                 permissions reader gated on the literal text
+                 "permissions:", so a quoted key was INVISIBLE: the
+                 deploy job's quoted key made the reader see NO
+                 permissions, and the rule "it may hold only these
+                 three" fired -- a FALSE RED on a legal edit, in the
+                 required CI job. And the workflow-level quoted key
+                 carrying "pages: write" was invisible to EVERY rule,
+                 so the harness certified a workflow that publishes
+                 from every branch.
+
+               and the model did not implement the IMPLICIT
+                 success(). GitHub's own documentation: "A default
+                 status check of success() is applied unless you
+                 include one of these functions." So a condition with
+                 no status function is "success() && <the condition>"
+                 -- and the model evaluated the ref and the event on
+                 their own, and reported a false assertion about the
+                 platform: a FALSE RED on a legal edit.
+
+               and the workflow-level permissions block need not
+                 EXIST: a workflow with no block inherits the
+                 REPOSITORY default, whose value the harness cannot
+                 know -- and the reusable workflow's jobs carry no
+                 blocks of their own. And the reader BROKE at the
+                 first top-level permissions: whose value was a
+                 scalar, so it never met its own documented
+                 last-wins contract.
+
+               and the comparison must be a WORKING one: a comparison
+                 that refuses EVERY tip is not a guard, it is an
+                 outage -- and the rule that checked that it REFUSES
+                 could not tell the two apart.
+
+               and the "if:" KEY may be QUOTED too -- the same class
+                 R13-05 closed for the job key.
+
+    Fix:     all five, in commits 4edb7eb and c7b1833.
+    Proof:   the controls are 34 of 34 RED, with and without pyyaml.
+
+    NOTE:   the reviewer also verified that the WORKFLOW itself is
+             sound -- "I did not find an authorization hole in
+             release.yml" -- and that the reusable workflow's
+             publisher closures, the trigger family, the concurrency
+             family and the harness-blindness family all behave.
+
 ### H-33 — the thirteenth review's unclosed class: the readers must AGREE
 
     Status:  PROVEN DEFECT — FIXED
