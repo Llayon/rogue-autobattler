@@ -72,6 +72,45 @@
              manual staging/phase3/feature/tag/pull_request/schedule
              DENY, a failed required job DENY.
 
+### H-24 — the eighth review: the class is still live
+
+    Status:  PROVEN DEFECT — FIXED
+    Found:   the eighth reviewer pinned the tree and hunted for the
+             CLASS rather than the instance. The class is still live
+             in three of the places that matter most:
+
+               R8-01  the harness's own blindness: a further way to
+                      switch the controls off, which the rule about
+                      the disabled step did not reach
+               R8-02  the swallow was a spelling list. The next
+                      spellings were missed -- a path to the true
+                      command, an explicit success after the gate, and
+                      a swallow on a CONTINUATION line of a
+                      multi-line run block, because the rule read one
+                      line at a time
+               R8-03/04  the authorization set is still a list, not a
+                      rule: the corpus replaced a hand-written list
+                      with a generated one, and it is still a list
+               R8-07  the publication count was the count of one
+                      action name: a third-party Pages action before
+                      the tip checks was a second publication path,
+                      invisible to the count
+
+    Fix:     the swallow is SEMANTIC -- the whole run block is read
+             and any construct that discards the gate's status is a
+             swallow. The publication count is a RULE -- a step that
+             publishes is counted by its action's CAPABILITY, so the
+             official action, a third-party one and a plain push are
+             all seen, and the ordinary actions are not.
+    Proof:   the controls are 33 of 33 RED, with and without pyyaml.
+
+    NOTE:   seven rounds, one class. The pattern is stable: a
+             textual rule is defeated by the next spelling, and a
+             spelling is always one more. The controls are now
+             structural -- they read the mechanism, its subject, its
+             order and its scope -- and that is the only shape that
+             survives the next round.
+
 ### H-23 — the seventh review: three HIGH and four more
 
     Status:  PROVEN DEFECT — FIXED
