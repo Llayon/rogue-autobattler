@@ -970,6 +970,17 @@ def prop_12_permissions_are_minimal(release, test):
         out.append("the deploy job has no pages: write: it could not "
                    "publish")
 
+    # The environment is part of the policy. The deploy job publishes
+    # into the github-pages environment, whose branch restrictions are
+    # a repository setting the owner has NOT verified. A different
+    # environment would be one whose restrictions may not be set at
+    # all.
+    if "github-pages" not in deploy:
+        out.append("the deploy job does not publish into the "
+                   "github-pages environment: the environment's branch "
+                   "restriction is the owner's action and must not be "
+                   "swapped for another one")
+
     # There must be exactly ONE publication step. A second one would
     # publish without the checks that guard the first: the checks look
     # at the job's body, and one guarded path plus one unguarded path
@@ -1069,6 +1080,26 @@ def _step_conditions(job_body):
             value = " ".join(parts).strip()
         conditions.append(value)
     return conditions
+
+
+def _uses_yaml_anchors(release):
+    """Does the workflow use YAML anchors or aliases?
+
+    An anchor defines a mapping that another place can MERGE in with
+    "<<: *name". The controls read each job's body, so a condition
+    that comes from an anchor would be invisible: the deploy job would
+    look unguarded while its real policy lives elsewhere in the file.
+
+    So the controls do not try to resolve the anchors -- they REFUSE
+    a workflow that uses them. A workflow the controls cannot read is
+    a workflow the controls cannot certify.
+    """
+    for name, body in release["jobs"].items():
+        if re.search(r"<<\s*:\s*\*", body):
+            return True
+    if re.search(r"^\s*&\w+", release["text"], re.MULTILINE):
+        return True
+    return False
 
 
 def _job_permissions(job_body):
@@ -1203,6 +1234,25 @@ def _step_block(body, needle):
             block.append(follow)
         return "\n".join(block)
     return None
+
+
+def prop_13_no_yaml_anchors(release, test):
+    """The workflow must be readable by the controls.
+
+    A YAML anchor can carry the deploy job's condition out of the job
+    itself. The controls read the job's body, so such a condition
+    would be invisible -- the job would look unguarded while its real
+    policy lived somewhere else in the file.
+
+    The controls do not resolve anchors: they refuse them. A workflow
+    they cannot read is a workflow they cannot certify.
+    """
+    out = []
+    if _uses_yaml_anchors(release):
+        out.append("the workflow uses YAML anchors: the controls "
+                   "cannot read a policy that is merged in from "
+                   "elsewhere")
+    return out
 
 
 def prop_08_required_jobs_stay_mandatory(release, test):
@@ -1346,6 +1396,7 @@ PROPERTIES = {
     "NC-RB-09": prop_11_sha_checks_stay_real,
     "NC-RB-10": prop_11_sha_checks_stay_real,
     "NC-RB-11": prop_12_permissions_are_minimal,
+    "NC-RB-12": prop_13_no_yaml_anchors,
 }
 
 
@@ -1473,6 +1524,12 @@ MUTATIONS = [
      "release.yml",
      [("        success() &&\n",
        "        (success() || always()) &&\n")]),
+
+    ("NC-RB-12",
+     "merge the deploy job's policy in from a yaml anchor",
+     "release.yml",
+     [("  deploy:\n    name: Deploy to Pages",
+       "  deploy:\n    <<: *base\n    name: Deploy to Pages")]),
 
     ("NC-RB-11",
      "give the build job the pages write permission",
