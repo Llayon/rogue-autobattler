@@ -1219,11 +1219,25 @@ def _uses_yaml_anchors(release):
     a workflow that uses them. A workflow the controls cannot read is
     a workflow the controls cannot certify.
     """
+    # An anchor can be defined MID-LINE ("x-policy: &cond ...") and
+    # an alias can be used WITHOUT the merge key ("policy: *base").
+    # The rule is not a list of shapes: an '&' or a '*' anywhere
+    # outside a comment makes the workflow unreadable to the controls.
     for name, body in release["jobs"].items():
         if re.search(r"<<\s*:\s*\*", body):
             return True
-    if re.search(r"^\s*&\w+", release["text"], re.MULTILINE):
-        return True
+    for line in release["text"].split("\n"):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        # A '*' inside a shell glob is not an alias, and the workflow's
+        # own shell steps use them; but an '&' or an '*' next to a
+        # value is. The check is deliberately strict: the controls
+        # refuse what they cannot read.
+        if re.search(r"[&*]\s*[\w-]+\s*$", stripped):
+            return True
+        if re.search(r":\s*&\w", stripped):
+            return True
     return False
 
 
@@ -1445,6 +1459,73 @@ def _step_block(body, needle):
     return None
 
 
+def prop_15_the_triggers_are_certified(release, test):
+    """The trigger block is the FIRST gate, so it is certified too.
+
+    The job-level condition and the master-tip check would still deny
+    a bad ref, so this is defence in depth -- but the branch filter
+    is the first thing that runs, and nothing certified it: adding a
+    "pull_request:" or a "schedule:" trigger, or removing the branch
+    filter, passed every control.
+    """
+    out = []
+    text = release["text"]
+
+    # The trigger block is at the top level, before "jobs:".
+    match = re.search(r"^on\s*:\s*$", text, re.MULTILINE)
+    if not match:
+        out.append("the workflow has no trigger block")
+        return out
+    body = text[match.end():]
+    # The block ends at the next top-level key.
+    lines = []
+    for line in body.split("\n")[1:]:
+        if line.strip() and not line.startswith(" "):
+            break
+        lines.append(line)
+    trigger = "\n".join(lines)
+
+    # The push trigger must be filtered to master.
+    if "branches:" not in trigger:
+        out.append("the push trigger has no branch filter")
+    elif "master" not in trigger:
+        out.append("the push trigger is not filtered to master")
+
+    # The other triggers must not exist: they are the door through
+    # which a ref other than master could arrive.
+    for forbidden in ("pull_request:", "schedule:", "workflow_run:",
+                      "pull_request_target:", "issue_comment:"):
+        if forbidden in trigger:
+            out.append("the workflow has a %s trigger" % forbidden[:-1])
+    return out
+
+
+def prop_16_the_concurrency_group_is_real(release, test):
+    """The concurrency group must be per ref, not a constant.
+
+    The group was checked with two substring greps over the whole
+    file, comments included, so a constant group -- which would make
+    the deployments of DIFFERENT refs queue behind each other -- was
+    accepted.
+    """
+    out = []
+    code = _code_lines(release["text"])
+    group = None
+    for line in code.split("\n"):
+        stripped = line.strip()
+        if stripped.startswith("group:"):
+            group = stripped[len("group:"):].strip()
+            break
+    if group is None:
+        out.append("the workflow has no concurrency group")
+        return out
+    if "github.ref" not in group:
+        out.append("the concurrency group %s is constant: the "
+                   "deployments of different refs would queue behind "
+                   "each other" % group)
+    return out
+
+
 def prop_14_the_ref_set_is_a_rule(release, test):
     """The authorization set is a RULE, not a sample.
 
@@ -1660,6 +1741,8 @@ PROPERTIES = {
     "NC-RB-11": prop_12_permissions_are_minimal,
     "NC-RB-12": prop_13_no_yaml_anchors,
     "NC-RB-13": prop_14_the_ref_set_is_a_rule,
+    "NC-RB-14": prop_15_the_triggers_are_certified,
+    "NC-RB-15": prop_16_the_concurrency_group_is_real,
 }
 
 
@@ -1787,6 +1870,17 @@ MUTATIONS = [
      "release.yml",
      [("        success() &&\n",
        "        (success() || always()) &&\n")]),
+
+    ("NC-RB-14",
+     "add a pull_request trigger",
+     "release.yml",
+     [("on:\n  push:\n    branches: [master]",
+       "on:\n  push:\n    branches: [master]\n  pull_request:")]),
+
+    ("NC-RB-15",
+     "make the concurrency group constant",
+     "release.yml",
+     [("group: pages-${{ github.ref }}", "group: pages-release")]),
 
     ("NC-RB-13",
      "authorize one more ref beside master",
