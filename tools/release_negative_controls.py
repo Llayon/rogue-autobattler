@@ -770,7 +770,7 @@ def _code_lines(job_body):
     """
     code = []
     for line in job_body.split("\n"):
-        stripped = line.strip()
+        stripped = line.strip().lstrip("\ufeff")
         if not stripped or stripped.startswith("#"):
             continue
         # A TRAILING comment carries the tokens too: "ls-remote origin
@@ -1031,10 +1031,21 @@ def prop_12_permissions_are_minimal(release, test):
     # pull-requests: write. An elevated scope on the publish job is a
     # STANDING capability, not a one-off need.
     allowed = {"pages": "write", "id-token": "write", "contents": "read"}
-    for scope, value in _job_permissions(release["jobs"].get("deploy", "")):
+    deploy_permissions = _job_permissions(release["jobs"].get("deploy", ""))
+    for scope, value in deploy_permissions:
         if allowed.get(scope) != value:
             out.append("the deploy job carries %s: %s: it may hold only %s"
                        % (scope, value,
+                          ", ".join("%s: %s" % (k, v)
+                                    for k, v in sorted(allowed.items()))))
+    # And it must hold ALL of them: a MISSING scope was never
+    # checked, so the deploy could lose its OIDC minting right or its
+    # checkout right -- and the tip-checks could not read the remote.
+    held = {scope for scope, _ in deploy_permissions}
+    for scope in sorted(allowed):
+        if scope not in held:
+            out.append("the deploy job has no %s: it may hold only %s"
+                       % (scope,
                           ", ".join("%s: %s" % (k, v)
                                     for k, v in sorted(allowed.items()))))
     # The WORKFLOW-LEVEL permissions block lives outside every job
@@ -1708,11 +1719,26 @@ def prop_15_the_triggers_are_certified(release, test):
         lines.append(line)
     trigger = "\n".join(lines)
 
-    # The push trigger must be filtered to master.
+    # The push trigger must be filtered to master -- and to master
+    # ALONE. A widened filter ("[master, staging]") admits another
+    # branch, and the check that only asked whether "master" was
+    # present passed it.
     if "branches:" not in trigger:
         out.append("the push trigger has no branch filter")
-    elif "master" not in trigger:
-        out.append("the push trigger is not filtered to master")
+    else:
+        branches = re.findall(r"branches:\s*\[([^\]]*)\]", trigger)
+        listed = []
+        for group in branches:
+            for item in group.split(","):
+                item = _unquote(item.strip())
+                if item:
+                    listed.append(item)
+        if not listed:
+            out.append("the push trigger has an empty branch filter")
+        for item in listed:
+            if item != "master":
+                out.append("the push trigger admits %r: only master may "
+                           "be published from" % item)
 
     # The other triggers must not exist: they are the door through
     # which a ref other than master could arrive.
@@ -1988,10 +2014,27 @@ MANDATORY_TEST_STEPS = (
     "Lint core and scenes",
     "Parse project in editor mode",
     "Run legacy regression suite",
-    "Run legacy characterization suite",
+    "Run legacy characterization suite (3 runs, all produce result, identical)",
     "Run legacy save fixture loader",
     "Run save schema v4 suite",
     "Run save schema v4 byte-for-byte determinism",
+    "Run production save repository suite",
+    "Run RunSaveFileOps suite",
+    "Run RunUnit is_alive suite",
+    "Install Godot",
+    "Import project cache",
+    "Run every standalone suite",
+    "Run the A-H semantic differential",
+    "Validate the Run Integrity ledger",
+    "Check the Run Integrity ledger validator",
+    "Check the standalone runner contract",
+    "Check the A-H differential contract",
+    "Check the standalone runner negative controls",
+    "Check the A-H differential negative controls",
+    "Check the battle entry negative controls",
+    "Run the release negative controls",
+    "Audit the standalone harness exit contract",
+    "Audit the legacy test reachability",
 )
 
 
@@ -2052,6 +2095,18 @@ def prop_23_the_mandatory_steps_are_present(release, test):
         if not any(step in line for line in code.split("\n")):
             out.append("the reusable workflow has no %r step: a deleted "
                        "gate is a removed gate" % step)
+    # And the steps that are PRESENT must be the ones that were
+    # expected: the named list covers only part of the workflow, and a
+    # step that is not on it can be deleted without the list noticing.
+    present = set()
+    for line in code.split("\n"):
+        if line.startswith("- name:"):
+            present.add(line[len("- name:"):].strip())
+    for step in present:
+        if step not in MANDATORY_TEST_STEPS:
+            out.append("the reusable workflow has an unexpected step %r: "
+                       "a step that is not on the list can be deleted "
+                       "without the list noticing" % step)
     # The gate commands themselves must run somewhere in the
     # reusable workflow. The artifact validator is NOT among them: it
     # runs in the RELEASE workflow's build job.
@@ -2089,7 +2144,7 @@ def prop_18_no_other_publisher(release, test):
             continue
         path = os.path.join(directory, name)
         try:
-            text = io.open(path, encoding="utf-8", errors="replace").read()
+            text = io.open(path, encoding="utf-8-sig", errors="replace").read()
         except OSError:
             continue
         code = "\n".join(l for l in text.replace("\r\n", "\n").split("\n")
@@ -2615,7 +2670,7 @@ def load_jobs(path):
 
     Returns {job_name: body_text}.
     """
-    with io.open(path, encoding="utf-8") as f:
+    with io.open(path, encoding="utf-8-sig") as f:
         text = f.read()
 
     jobs = {}
@@ -2649,8 +2704,19 @@ def load_jobs(path):
 
 
 def load_text(path):
-    with io.open(path, encoding="utf-8") as f:
-        return f.read()
+    """The text of a file.
+
+    The encoding is "utf-8-sig": a BOM is valid YAML and GitHub
+    accepts it, but with the plain "utf-8" the BOM became part of
+    the first line -- so "name: Release" no longer matched and the
+    controls reported a FALSE RED on a legitimate commit.
+    """
+    with io.open(path, encoding="utf-8-sig") as f:
+        text = f.read()
+    # The BOM is stripped from the text itself: a reader that checks
+    # the first line must see "name: Release", not the BOM in front
+    # of it.
+    return text.lstrip("\ufeff")
 
 
 def load_validator_from(path):
@@ -2733,7 +2799,7 @@ def run_control(name, description, target, edits):
         else:
             path = copy_validator
 
-        with io.open(path, encoding="utf-8") as f:
+        with io.open(path, encoding="utf-8-sig") as f:
             text = f.read()
 
         for old, new in edits:
