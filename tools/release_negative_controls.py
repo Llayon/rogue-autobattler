@@ -1757,8 +1757,15 @@ def _condition_refuses(block, condition):
     for line in lines:
         stripped = line.strip()
         if not inside:
-            if stripped == condition:
+            # The line must BE the condition: it may carry the
+            # refusal on the same line, which is a legal and normal
+            # way to write it.
+            if stripped == condition or stripped.startswith(condition + " "):
                 inside = True
+                # The refusal may already be on this line.
+                tail = stripped[len(condition):]
+                if "exit " in tail:
+                    return True
             continue
         if "exit " in stripped:
             return True
