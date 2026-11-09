@@ -579,6 +579,23 @@ def prop_04_sha_identity(release, test):
                 if not _condition_refuses(tip_block, stripped):
                     out.append("the SHA comparison does not refuse: it "
                                "notices the mismatch and continues")
+                # The condition must not be neutralised.
+                neutral = _neutralised(stripped)
+                if neutral:
+                    out.append("the SHA comparison is neutralised by "
+                               "%s: it can never hold" % neutral)
+                # The SHAs must DIFFER for a stale publication: the
+                # comparison is "!=", never "==".
+                if "!=" not in stripped and "==" not in stripped:
+                    out.append("the SHA comparison does not compare the "
+                               "two SHAs")
+                elif "==" in stripped and "!=" not in stripped:
+                    out.append("the SHA comparison is INVERTED: it refuses "
+                               "when the SHAs match")
+                # The refusal must exit NON-ZERO.
+                if not _exit_is_a_refusal(tip_block, stripped):
+                    out.append("the SHA comparison does not exit non-zero: "
+                               "exit 0 reports success and continues")
                 break
     if not compares and not out:
         out.append("the deploy job never compares the published SHA "
@@ -846,6 +863,7 @@ def prop_07_branch_authorization(release, test):
     master_read = re.search(r"ls-remote[^\n]*refs/heads/master", code)
     if master_read:
         compares = False
+        master_block = _step_block(_body_without_comments(deploy), "master")
         for line in code.split("\n"):
             stripped = line.strip()
             if not stripped.startswith("if"):
@@ -853,6 +871,20 @@ def prop_07_branch_authorization(release, test):
             if ("MASTER_SHA" in stripped and "github.sha" in stripped
                     and ("!=" in stripped or "==" in stripped)):
                 compares = True
+                # The same shape as the tip comparison: not
+                # neutralised, not inverted, and a non-zero exit.
+                neutral = _neutralised(stripped)
+                if neutral:
+                    out.append("the master comparison is neutralised by "
+                               "%s: it can never hold" % neutral)
+                if "==" in stripped and "!=" not in stripped:
+                    out.append("the master comparison is INVERTED: it "
+                               "refuses when the SHAs match")
+                if master_block is not None and not _exit_is_a_refusal(
+                        master_block, stripped):
+                    out.append("the master comparison does not exit "
+                               "non-zero: exit 0 reports success and "
+                               "continues")
                 break
         if not compares:
             out.append("the master check reads the tip of master but "
@@ -1137,6 +1169,43 @@ def _job_permissions(job_body):
                 if match:
                     permissions.append((match.group(1), match.group(2)))
     return permissions
+
+
+def _neutralised(condition):
+    """Is the condition neutralised by a shell operator?
+
+    "&& false" makes the condition NEVER hold, and "|| true" makes it
+    ALWAYS hold. Either way the comparison is not a comparison: it is
+    a decoration.
+    """
+    stripped = condition.strip()
+    if re.search(r"&&\s*false\b", stripped):
+        return "&& false"
+    if re.search(r"\|\|\s*true\b", stripped):
+        return "|| true"
+    return None
+
+
+def _exit_is_a_refusal(block, condition):
+    """Does the condition exit NON-ZERO?
+
+    "exit 0" is not a refusal: it reports success and the script
+    continues. Only a non-zero exit stops the step.
+    """
+    lines = block.split("\n")
+    inside = False
+    for line in lines:
+        stripped = line.strip()
+        if not inside:
+            if stripped == condition:
+                inside = True
+            continue
+        match = re.match(r"^exit\s+(\d+)", stripped)
+        if match:
+            return int(match.group(1)) != 0
+        if stripped == "fi" or stripped.startswith("fi "):
+            return False
+    return False
 
 
 def _condition_refuses(block, condition):
