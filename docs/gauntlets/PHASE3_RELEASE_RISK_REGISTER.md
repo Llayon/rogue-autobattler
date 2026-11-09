@@ -72,6 +72,47 @@
              manual staging/phase3/feature/tag/pull_request/schedule
              DENY, a failed required job DENY.
 
+### H-28 — the tenth review: the pipeline and the platform's shell
+
+    Status:  PROVEN DEFECT — FIXED
+    Found:   the tenth reviewer ran against a FROZEN HEAD on a
+             separate clone, and it proved the one case the ninth
+             review's battery had left uncaught. It had been
+             dismissed as "not an opening", and that dismissal was
+             WRONG:
+
+               the SWALLOW rule exempted a pipeline that ends in a
+                 LOGGER -- "tee" and "cat" -- on the belief that a
+                 logger keeps the status of its input. That is true
+                 only with pipefail. The platform runs a "run:" step
+                 with "bash -e {0}", and that default has NO
+                 pipefail: the status of a pipeline is the status of
+                 its LAST stage. The reviewer measured it:
+                 "false | tee /tmp/x.log" exits 0.
+
+                 So the gate could be piped into a logger and its
+                 RED result discarded, and the required job stayed
+                 GREEN.
+
+    Fix:     the rule reads the BLOCK now. Without pipefail a
+             pipeline discards the gate's status; with "set -euo
+             pipefail" -- which the repository's own suite block
+             has -- the status is the first failing stage's, which
+             is the gate's, so that pipe is legitimate. The stale
+             branch that exempted a logger is gone, so the rule is
+             one place and not two.
+    Proof:   the controls are 33 of 33 RED, with and without pyyaml,
+             and the ninth reviewer's battery now reports 19 of its
+             31 cases DETECTED -- the two that remain are not
+             openings: one is not valid YAML, and the third is a
+             condition that really does admit another branch, so the
+             controls catching it is the correct verdict.
+
+    NOTE:   this class was dismissed twice before it was proven.
+             The lesson is the one the tenth reviewer's own words
+             carry: a dismissal needs a MEASUREMENT, not a
+             reasoning about what the shell "should" do.
+
 ### H-27 — the ninth review: nine more classes
 
     Status:  PROVEN DEFECT — FIXED
