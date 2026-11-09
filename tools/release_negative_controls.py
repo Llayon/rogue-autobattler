@@ -1207,7 +1207,7 @@ def _condition_runs_after_a_failure(condition):
     return bool(verdict)
 
 
-def _step_conditions(job_body):
+def _step_conditions(job_body, job_level=True):
     """The conditions of the STEPS of a job, with the folded and
     literal block scalars expanded.
 
@@ -1225,6 +1225,11 @@ def _step_conditions(job_body):
 
     The third one is the same condition, and reading only the ">-"
     would miss it -- which is exactly how a bypass hides.
+
+    With job_level=False the JOB-LEVEL condition is left out: it is
+    the guard for the deploy job, read by the condition model, and it
+    is the thing the branch authorization is about. The step-level
+    conditions are the "this step does something else" class.
     """
     conditions = []
     lines = job_body.split("\n")
@@ -1232,6 +1237,13 @@ def _step_conditions(job_body):
         match = re.match(r"^\s*(?:-\s*)?if\s*:\s*(.*)$", line)
         if not match:
             continue
+        if not job_level:
+            # The job-level key sits at four spaces; a step key sits
+            # deeper, and the list form carries the "- ".
+            stripped = line.strip()
+            if stripped == "if" or stripped.startswith("if "):
+                if not stripped.startswith("- "):
+                    continue
         value = match.group(1).strip()
         if value in (">-", ">", "|-", "|"):
             # The block that follows, joined.
@@ -1658,6 +1670,58 @@ def prop_17_the_test_jobs_are_not_disabled(release, test):
         condition = _job_condition(body)
         if condition and _condition_disables_the_step(condition):
             out.append("the %s job is disabled: %s" % (name, condition))
+        # The STEP-level conditions of the reusable workflow matter
+        # just as much: a mandatory step disabled with "if: false" is
+        # a removed gate -- and the step that runs THE CONTROLS is
+        # itself such a step. A harness that cannot detect its own
+        # disablement certifies nothing.
+        for value in _step_conditions(body, job_level=False):
+            if _condition_disables_the_step(value):
+                out.append("the %s job carries a step that is disabled: "
+                           "%s" % (name, value))
+                break
+            if _condition_runs_after_a_failure(value):
+                out.append("the %s job carries a step that runs "
+                           "regardless: %s" % (name, value))
+                break
+    return out
+
+
+def prop_18_no_other_publisher(release, test):
+    """There must be no OTHER workflow that could publish the Pages.
+
+    The harness resolves its inputs by filename, so a workflow file it
+    does not know about cannot be checked -- and one that publishes on
+    every branch with pages: write would pass every control.
+
+    The premise "the old ungated publish path cannot survive the
+    merge" is true for the DELETED web-build.yml and false for any
+    NEW file: the deletion is recorded in the diff, but a file that
+    appears out of nowhere is not.
+    """
+    out = []
+    known = {"release.yml", "test.yml"}
+    # The directory of the RELEASE FILE THAT WAS GIVEN: a mutation
+    # that adds a workflow next to it must be seen. A module-level
+    # constant would point at the real repository and miss it.
+    directory = release.get("directory")
+    if not directory:
+        directory = os.path.dirname(os.path.abspath(RELEASE))
+    for name in sorted(os.listdir(directory)):
+        if not name.endswith(".yml") and not name.endswith(".yaml"):
+            continue
+        if name in known:
+            continue
+        path = os.path.join(directory, name)
+        try:
+            text = io.open(path, encoding="utf-8", errors="replace").read()
+        except OSError:
+            continue
+        code = "\n".join(l for l in text.replace("\r\n", "\n").split("\n")
+                          if l.strip() and not l.strip().startswith("#"))
+        if "actions/deploy-pages" in code or "pages: write" in code:
+            out.append("the workflow %s could publish the Pages: the "
+                       "release gate is the only publisher" % name)
     return out
 
 
@@ -1842,6 +1906,7 @@ PROPERTIES = {
     "NC-RB-14": prop_15_the_triggers_are_certified,
     "NC-RB-15": prop_16_the_concurrency_group_is_real,
     "NC-RB-16": prop_17_the_test_jobs_are_not_disabled,
+    "NC-RB-17": prop_18_no_other_publisher,
 }
 
 
@@ -1969,6 +2034,16 @@ MUTATIONS = [
      "release.yml",
      [("        success() &&\n",
        "        (success() || always()) &&\n")]),
+
+    ("NC-RB-17",
+     "add a second workflow that publishes the pages",
+     "publish.yml",
+     [("", "name: Publish\non:\n  push:\n    branches: ['*']\n"
+       "permissions:\n  pages: write\n  id-token: write\n"
+       "jobs:\n  deploy:\n    runs-on: ubuntu-latest\n"
+       "    steps:\n      - uses: actions/checkout@v4\n"
+       "      - uses: actions/deploy-pages@v4\n")]),
+
 
     ("NC-RB-16",
      "disable the battle-ecs job in the reusable workflow",
@@ -2196,6 +2271,18 @@ def run_control(name, description, target, edits):
             path = os.path.join(copy_wf, "release.yml")
         elif target == "test.yml":
             path = os.path.join(copy_wf, "test.yml")
+        elif target.endswith(".yml") or target.endswith(".yaml"):
+            # A NEW workflow file. The harness resolves its inputs by
+            # filename, so a file it does not know about cannot be
+            # checked -- and one that publishes on every branch with
+            # pages: write would pass every control. The new file is
+            # written whole, and the edits are applied to it.
+            path = os.path.join(copy_wf, target)
+            # The file is created with the PLAIN mode: on this host
+            # io.open(path, "w", newline="") refuses a path that does
+            # not exist yet.
+            with open(path, "w", encoding="utf-8"):
+                pass
         else:
             path = copy_validator
 
@@ -2203,6 +2290,11 @@ def run_control(name, description, target, edits):
             text = f.read()
 
         for old, new in edits:
+            if old == "" and text == "":
+                # A NEW file: the content IS the mutation, so there is
+                # no anchor to replace.
+                text = new
+                continue
             mutated = _mutate(text, old, new)
             if mutated is None:
                 # The anchor is gone: the control cannot prove anything.
@@ -2254,8 +2346,10 @@ def run_control(name, description, target, edits):
             property_fn = PROPERTIES[name]
             # The CLEAN gate must satisfy the property.
             clean_violations = property_fn(
-                {"text": load_text(RELEASE), "jobs": load_jobs(RELEASE)},
-                {"text": load_text(TEST), "jobs": load_jobs(TEST)})
+                {"text": load_text(RELEASE), "jobs": load_jobs(RELEASE),
+                 "directory": os.path.dirname(os.path.abspath(RELEASE))},
+                {"text": load_text(TEST), "jobs": load_jobs(TEST),
+                 "directory": os.path.dirname(os.path.abspath(TEST))})
             if clean_violations:
                 failures.append("the clean gate already violates the "
                                 "property: %s" % "; ".join(clean_violations))
@@ -2265,9 +2359,11 @@ def run_control(name, description, target, edits):
             mutated_test = os.path.join(copy_wf, "test.yml")
             mutated_violations = property_fn(
                 {"text": load_text(mutated_release),
-                 "jobs": load_jobs(mutated_release)},
+                 "jobs": load_jobs(mutated_release),
+                 "directory": os.path.dirname(mutated_release)},
                 {"text": load_text(mutated_test),
-                 "jobs": load_jobs(mutated_test)})
+                 "jobs": load_jobs(mutated_test),
+                 "directory": os.path.dirname(mutated_test)})
             if not mutated_violations:
                 failures.append("the mutation did not break the property")
 
