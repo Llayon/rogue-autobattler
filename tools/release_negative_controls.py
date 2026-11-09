@@ -1251,15 +1251,17 @@ def _step_conditions(job_body, job_level=True):
         if not match:
             continue
         if not job_level:
-            # The job-level key is "if:" -- at four spaces in the
-            # deploy job. The old guard matched "if" and "if ", so the
-            # job-level condition was NOT excluded and came back as a
-            # step condition: the documented contract was not what the
-            # code did. The list form ("- if:") is a STEP condition
-            # and stays.
+            # The distinction is INDENTATION, not text: the job keys
+            # sit at four spaces and a step's keys sit deeper. The
+            # text of the key is the same, so a textual test dropped
+            # a step's mapping form "if: false" as the job-level
+            # guard -- and the reusable workflow's steps are read ONLY
+            # through this filter.
             stripped = line.strip()
-            if stripped.startswith("if:") and not stripped.startswith("- "):
-                continue
+            if stripped.startswith("if:"):
+                indent = len(line) - len(line.lstrip())
+                if indent <= 4:
+                    continue
         value = match.group(1).strip()
         if value in (">-", ">", "|-", "|"):
             # The block that follows, joined.
@@ -1320,6 +1322,126 @@ GATE_COMMANDS = (
     "ledger_validator",
     "negative_controls.py",
 )
+
+
+def _run_block(raw_body, command):
+    """The RUN block of the step that runs the given command.
+
+    A "set +e" disables the errexit for the whole run block, and it
+    comes BEFORE the gate command inside that block. So the block is
+    read from the "run:" key: the lines that follow it, until the
+    indentation returns.
+
+    The command is matched by its TEXT, not by its line: the code
+    lines have the indentation stripped, so the two never compare
+    equal.
+    """
+    lines = raw_body.split("\n")
+    for index, line in enumerate(lines):
+        if command.strip() not in line:
+            continue
+        # The "run:" key is the nearest key above the command.
+        run_index = index - 1
+        while run_index >= 0:
+            stripped = lines[run_index].strip()
+            if stripped.startswith("run:"):
+                break
+            if stripped.startswith("- "):
+                break
+            run_index -= 1
+        if run_index < 0 or not lines[run_index].strip().startswith("run:"):
+            return []
+        run_base = len(lines[run_index]) - len(lines[run_index].lstrip())
+        run_block = []
+        for follow in lines[run_index + 1:]:
+            if not follow.strip():
+                run_block.append(follow)
+                continue
+            if len(follow) - len(follow.lstrip()) <= run_base:
+                break
+            run_block.append(follow)
+        return run_block
+    return []
+
+
+def _step_lines(code, target):
+    """The lines of the STEP a line belongs to.
+
+    The step is the run body: the lines that follow the "run:" and
+    are deeper than it. A "set +e" on its own line disables the
+    errexit for the whole step, so the rule must read the step and
+    not the single line.
+    """
+    lines = code.split("\n")
+    for index, line in enumerate(lines):
+        if line.strip() != target.strip():
+            continue
+        base = len(line) - len(line.lstrip())
+        block = []
+        for follow in lines[index + 1:]:
+            if not follow.strip():
+                block.append(follow)
+                continue
+            if len(follow) - len(follow.lstrip()) <= base:
+                break
+            block.append(follow)
+        return block
+    return []
+
+
+def _declares_an_elevated_scope(line):
+    """Does this line declare an ELEVATED permission?
+
+    Every spelling of a scope is read, because a rule that recognises
+    only the spellings it was written for is defeated by the next
+    one:
+
+        contents: write
+        "contents": "write"
+        'contents': 'write'
+        Contents: Write
+        permissions: {contents: write}
+        permissions: {contents: write, id-token: write}
+        permissions: write-all
+        permissions: "write-all"
+
+    So the scopes are extracted and then judged, rather than matched
+    as text.
+    """
+    quote = "\"\'"
+    optional_quote = "[" + quote + "]?"
+    scope_pattern = optional_quote + r"([\w-]+)" + optional_quote \
+        + r"\s*:\s*(.+)$"
+
+    stripped = line.strip()
+    if stripped.startswith("permissions:"):
+        value = _unquote(stripped[len("permissions:"):].strip())
+        if value.lower() in ("write", "write-all"):
+            return True
+        if value.startswith("{") and value.endswith("}"):
+            for part in value[1:-1].split(","):
+                inner = re.match(scope_pattern, part.strip())
+                if inner:
+                    if _unquote(inner.group(2).strip()).lower() in (
+                            "write", "write-all"):
+                        return True
+        return False
+
+    match = re.match(scope_pattern, stripped)
+    if not match:
+        return False
+    scope_value = _unquote(match.group(2).strip()).lower()
+    if scope_value in ("write", "write-all"):
+        return True
+    # A flow mapping in the value: "{contents: write}".
+    if scope_value.startswith("{") and scope_value.endswith("}"):
+        for part in scope_value[1:-1].split(","):
+            inner = re.match(scope_pattern, part.strip())
+            if inner:
+                if _unquote(inner.group(2).strip()).lower() in (
+                        "write", "write-all"):
+                    return True
+    return False
 
 
 def _workflow_permissions(release):
@@ -1748,11 +1870,35 @@ def prop_19_the_gate_is_not_swallowed(release, test):
     for label, text in (("the release workflow", release["text"]),
                         ("the reusable workflow", test["text"])):
         code = _code_lines(text)
+        # The RAW body, with the indentation: the run block is
+        # delimited by it, and the code lines have it stripped.
+        raw_body = _body_without_comments(text)
         for line in code.split("\n"):
             # Only the GATE's own result matters. "godot --editor --quit
             # || true" is a legitimate way to close an editor that
             # exits with a warning, and it is not a gate.
-            if "|| true" not in line and "||  true" not in line:
+            # The swallow has more than one spelling: "|| true",
+            # "||true" (the same operator without the space) and
+            # "| true" (a pipeline whose exit status is true's). And
+            # "set +e" disables errexit, so the step exits 0 even
+            # when the gate fails.
+            swallowed = ("|| true" in line or "||true" in line
+                         or "| true" in line or "|true" in line)
+            # "set +e" disables errexit, so the STEP exits 0 even when
+            # the gate fails. In the workflow it is a line of its own
+            # and the gate command is on the next one -- so the rule
+            # must look at the STEP, not at the single line.
+            if not swallowed:
+                # "set +e" disables the errexit for the whole RUN
+                # BLOCK, and it comes BEFORE the gate command inside
+                # that block. So the block is read from the "run:"
+                # key -- the lines that follow it.
+                if "set +e" in line:
+                    swallowed = True
+                elif any("set +e" in other
+                         for other in _run_block(raw_body, line)):
+                    swallowed = True
+            if not swallowed:
                 continue
             # Every gate command, not a list of them: a step that
             # RUNS a python script from the tools directory and
@@ -1957,12 +2103,12 @@ def prop_18_no_other_publisher(release, test):
         reason = None
         for line in code.split("\n"):
             stripped = line.strip()
-            # Any write scope at all.
-            if re.search(r"^[\w-]+\s*:\s*write\b", stripped):
+            # Any write scope at all. The scopes are READ as a
+            # block: the flow mapping "permissions: {contents: write}",
+            # the quoted keys, the different case -- a textual regex
+            # over the line misses every one of them.
+            if _declares_an_elevated_scope(stripped):
                 reason = "it carries the elevated permission %r" % stripped
-                break
-            if re.search(r"write-all", stripped):
-                reason = "it carries %r" % stripped
                 break
             # The Pages branch, however it is reached.
             if "gh-pages" in stripped:
