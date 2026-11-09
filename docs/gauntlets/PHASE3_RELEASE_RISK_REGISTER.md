@@ -21,7 +21,7 @@
     Proof:   tools/release_negative_controls.py — NC-REL-01..10 and NC-RB-01..07, all
              semantic RED; the clean gate ALLOWs the good scenario
              only.
-             EIGHT of the TWENTY are GATE controls: they mutate the
+             EIGHT of the TWENTY ONE are GATE controls: they mutate the
              workflows and assert a property of the parsed result.
              NC-REL-06 and NC-REL-08 are VALIDATOR controls: they
              mutate the validator itself and compare two validator
@@ -67,10 +67,39 @@
              Seven new controls, NC-RB-01..07, and the property
              asserts BOTH sides: the forbidden refs and events are
              refused AND the legitimate master push is still allowed.
-             20 of 20 controls are RED.
+             21 of 21 controls are RED.
              The matrix: push master ALLOW, manual master ALLOW,
              manual staging/phase3/feature/tag/pull_request/schedule
              DENY, a failed required job DENY.
+
+### H-12 — the controls asserted a FRAGMENT of a mechanism
+
+    Status:  PROVEN DEFECT — FIXED
+    Found:   the independent critic found four more ways to break the
+             release gate that every control missed. Each time the
+             cause was the same: a control asserted ONE FRAGMENT of a
+             mechanism, and the fragment it asserted was satisfied by
+             something else.
+
+               F-01  the master check could be reduced to READING the
+                     tip of master and doing nothing with it
+               F-04  the fail-closed refusal for an UNREADABLE tip
+                     could be deleted: a global search for "exit 1"
+                     was satisfied by the OTHER refusal in the same
+                     step -- the comparison
+               F-05  prop_04 scanned every line, COMMENTS included,
+                     so a commented out comparison satisfied it
+               F-06  the permissions scope was asserted NOWHERE:
+                     pages: write could be added to the build job
+
+    Fix:     the properties now assert the WHOLE mechanism -- the
+             read, the comparison and the refusal -- and the step's
+             own block is parsed with its INDENTATION kept, because
+             the indentation is what delimits a step from the next
+             one. A mechanism's refusal must be inside its own step.
+    Proof:   NC-RB-11 is the new control for the permissions. All of
+             the critic's scenarios are detected, and the controls are
+             21 of 21 RED.
 
 ### H-11 — four bypasses were invisible to the controls
 
@@ -108,7 +137,7 @@
              and that the checks fail closed.
     Proof:   NC-RB-09 and NC-RB-10 are the new controls. All eight of
              the critic's adversarial mutations are now detected, and
-             the controls are 20 of 20 RED.
+             the controls are 21 of 21 RED.
 
 ### H-10 — the string comparison of the ref is case insensitive
 
@@ -208,7 +237,7 @@
              audit, the reachability audit and the three other
              negative-control harnesses all avoid yaml).
     Proof:   the controls were run under a python where importing yaml
-             raises ImportError, exactly as on a bare runner: 20 of 20
+             raises ImportError, exactly as on a bare runner: 21 of 21
              RED, exit 0. There is no "import yaml" anywhere in the
              repository now.
 
