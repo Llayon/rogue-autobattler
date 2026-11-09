@@ -363,7 +363,7 @@ the CI gates            10 / 10 clean
 the A-H differential    PASS (8 + 8 fixtures, both rc=0)
 the CI-01 self-tests    13 / 0 failed
 the CI-02 self-tests    20 / 0 failed
-the release NC          22 / 22 RED, the clean gate ALLOWs
+the release NC          25 / 25 RED, the clean gate ALLOWs
 the hardening NC        14 / 14 RED
 the ledger controls     7 / 7 RED, the ledger VALID
 the historical NC       44 RED, 0 SKIP, 0 INVALID
@@ -396,7 +396,7 @@ the browser smoke       17 of 18 PASS (the settings are NOT VERIFIED:
     turned the REQUIRED battle-ecs job RED. Every other CI tool of the
     repository deliberately avoids yaml, and now the release controls
     do too. They were re-run under a python where importing yaml
-    raises: 22 of 22 RED, exit 0.
+    raises: 25 of 25 RED, exit 0.
 
     It also found TWO HIGH findings in the HARNESS itself, which are
     the most important findings of the whole closure:
@@ -643,6 +643,9 @@ DENIED
     NC-RB-10  accept the sha whatever master's tip is      RED
     NC-RB-11  give the build job the pages write permission  RED
     NC-RB-12  merge the policy in from a yaml anchor          RED
+    NC-RB-13  authorize one more ref beside master           RED
+    NC-RB-14  add a pull_request trigger                     RED
+    NC-RB-15  make the concurrency group constant             RED
 
     ENVIRONMENT BRANCH RESTRICTION:
     NOT VERIFIED / OWNER ACTION REQUIRED
@@ -803,7 +806,7 @@ PHASE 3 -> MASTER INTEGRATION & RELEASE SAFETY
 ```
 
     Every gate was executed and none of them was taken on trust. The
-    BLOCKER of the release path is closed and proved by TWENTY TWO
+    BLOCKER of the release path is closed and proved by TWENTY FIVE
     structural negative controls; the HIGH of the A-H baseline is
     closed and proved by the pinned baseline that HOLDs when it is
     unavailable; the MEDIUM of the export path is closed and proved by
@@ -824,7 +827,7 @@ PHASE 3 -> MASTER INTEGRATION & RELEASE SAFETY
         the runner and turned the REQUIRED battle-ecs job RED. The
         controls now read the workflows as text, like every other CI
         tool of the repository, and they were run under a python where
-        importing yaml raises: 22 of 22 RED, exit 0.
+        importing yaml raises: 25 of 25 RED, exit 0.
 
     The SETTINGS scenario remains NOT VERIFIED: the Settings button is
     declared and never created, so the panel cannot be opened. It is
@@ -868,7 +871,7 @@ PHASE 3 -> MASTER INTEGRATION & RELEASE SAFETY
     unregistered property a hard failure, and the condition check
     distinguishes the job level from the step level by INDENTATION.
 
-    The controls are 22 of 22 RED, with and without pyyaml, and the
+    The controls are 25 of 25 RED, with and without pyyaml, and the
     CLEAN gate ALLOWs every scenario.
 
     The three residual risks that are accepted, with their reasons:

@@ -21,7 +21,7 @@
     Proof:   tools/release_negative_controls.py — NC-REL-01..10 and NC-RB-01..07, all
              semantic RED; the clean gate ALLOWs the good scenario
              only.
-             EIGHT of the TWENTY TWO are GATE controls: they mutate the
+             EIGHT of the TWENTY FIVE are GATE controls: they mutate the
              workflows and assert a property of the parsed result.
              NC-REL-06 and NC-REL-08 are VALIDATOR controls: they
              mutate the validator itself and compare two validator
@@ -67,10 +67,58 @@
              Seven new controls, NC-RB-01..07, and the property
              asserts BOTH sides: the forbidden refs and events are
              refused AND the legitimate master push is still allowed.
-             22 of 22 controls are RED.
+             25 of 25 controls are RED.
              The matrix: push master ALLOW, manual master ALLOW,
              manual staging/phase3/feature/tag/pull_request/schedule
              DENY, a failed required job DENY.
+
+### H-18 — the fourth review: eleven classes of mutation, and two false REDs
+
+    Status:  PROVEN DEFECT — FIXED
+    Found:   the fourth independent reviewer built an INDEPENDENT
+             68-case adversarial battery and an INDEPENDENT GitHub
+             Actions expression evaluator -- not the repo's -- and
+             found eleven classes of mutation the harness reported
+             GREEN while the gate was open or broken, plus TWO FALSE
+             REDS that would have broken the CI on a legitimate edit.
+             The workflow itself was never found broken, across four
+             passes: the gate is sound, the proof was not.
+
+               F1  the step conditions were matched against a LIST OF
+                   SPELLINGS, so any composition evaded it. In GitHub
+                   Actions ANY status function drops the implicit
+                   success(), so "success() || failure()" is true
+                   after the previous step failed -- a
+                   publish-after-HOLD
+               F2  prop_11 stripped whole-line comments only, so the
+                   tip check's remote read could be replaced by a
+                   TRAILING comment
+               F3  the permissions spellings: the flow mapping
+                   "{pages: write}" and the quoted scalars
+               F4  the WORKFLOW-LEVEL permissions block was never
+                   read, so a top-level elevation plus a deleted job
+                   block would elevate that job
+               F5  the forbidden-ref list was a SAMPLE, not a rule: a
+                   mutation that opened ONE other ref passed every
+                   control
+               F6  FALSE RED: the needs block form lost the second
+                   item, so the deploy job rewritten in the standard
+                   block form would report "the deploy does not need
+                   the web build" and BLOCK the publication
+               F7  FALSE RED: a quoted job condition is valid YAML
+                   and valid GHA, and the harness raised a TypeError
+                   that run_control swallowed as INVALID -- a red CI
+
+    Fix:     the step conditions are EVALUATED with the harness's own
+             evaluator against a failed previous step; the code
+             reader is used everywhere; the permissions are read as a
+             block, at the workflow level and per job; the
+             authorization set is asserted over a generated corpus;
+             the needs and the condition are read in every valid
+             spelling.
+    Proof:   the controls are 25 of 25 RED, with and without pyyaml,
+             and the legitimate edits -- the needs in the block form,
+             the condition in quotes -- still pass.
 
 ### H-15 — the third review: seven HIGH, all in the harness
 
@@ -112,7 +160,7 @@
              code reader cuts the trailing comments off, with the
              quotes tracked; the model reproduces the platform
              exactly.
-    Proof:   the controls are 22 of 22 RED, with and without pyyaml,
+    Proof:   the controls are 25 of 25 RED, with and without pyyaml,
              and every scenario of the reviewer is detected.
 
 ### H-16 — the publication could come before the checks
@@ -203,7 +251,7 @@
              one. A mechanism's refusal must be inside its own step.
     Proof:   NC-RB-11 is the new control for the permissions. All of
              the critic's scenarios are detected, and the controls are
-             22 of 22 RED.
+             25 of 25 RED.
 
 ### H-11 — four bypasses were invisible to the controls
 
@@ -241,7 +289,7 @@
              and that the checks fail closed.
     Proof:   NC-RB-09 and NC-RB-10 are the new controls. All eight of
              the critic's adversarial mutations are now detected, and
-             the controls are 22 of 22 RED.
+             the controls are 25 of 25 RED.
 
 ### H-10 — the string comparison of the ref is case insensitive
 
@@ -341,7 +389,7 @@
              audit, the reachability audit and the three other
              negative-control harnesses all avoid yaml).
     Proof:   the controls were run under a python where importing yaml
-             raises ImportError, exactly as on a bare runner: 22 of 22
+             raises ImportError, exactly as on a bare runner: 25 of 25
              RED, exit 0. There is no "import yaml" anywhere in the
              repository now.
 
