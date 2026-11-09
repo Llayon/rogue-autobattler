@@ -1781,22 +1781,59 @@ def _reads_the_gate_result(line):
             or "pass" in stripped.lower() or "fail" in stripped.lower())
 
 
-def _discards_the_status(tail):
+def _block_sets_pipefail(block):
+    """Does this run block set pipefail?
+
+    The platform runs a "run:" step with "bash -e {0}", and that
+    default has NO pipefail: the status of a pipeline is the status
+    of its LAST stage, so "false | tee log" exits 0 and the gate's
+    status is discarded.
+
+    A block that says "set -euo pipefail" changes that: the status of
+    a pipeline is then the FIRST failing stage's -- the gate's -- so
+    the pipe is legitimate there. The repository's own suite block
+    does exactly that.
+    """
+    lines = block.split("\n") if isinstance(block, str) else block
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("set "):
+            flags = stripped[4:]
+            for part in flags.split(";"):
+                part = part.strip()
+                if part in ("-o", "-o pipefail") or part == "-o pipefail":
+                    return True
+                if re.search(r"(?:^|\s)-o\s+pipefail(?:\s|$)", part):
+                    return True
+                if "pipefail" in part:
+                    return True
+    return False
+
+
+def _discards_the_status(tail, block=""):
     """Does this tail discard the gate's status?
 
-    A pipeline into a LOGGER keeps the status: "tee" returns the
-    status of its input, and the repository's own suites use it to
-    keep the output. Any other pipeline, a separator, a conditional
-    or an explicit exit discards it.
+    A pipeline discards the gate's status UNLESS the block sets
+    pipefail. Any other pipeline, a separator, a conditional or an
+    explicit exit discards it.
     """
     if not tail:
         return False
-    # A pipeline: the last stage decides. A logger keeps the status.
+    # A pipeline: the status of the pipeline is the status of its
+    # LAST stage. The platform runs a "run:" step with "bash -e {0}"
+    # -- and that default has NO pipefail, so "false | tee log" exits
+    # 0 and the gate's status is discarded. A logger is NOT the
+    # exception the rule used to make it: without pipefail, tee
+    # discards the gate's status exactly as any other stage does.
+    #
+    # The pipeline matters only when the GATE is inside it: the tail
+    # passed here is what follows the gate command, so a pipe in it
+    # means the gate's own status is discarded.
     if "|" in tail:
         stages = [stage.strip() for stage in tail.split("|")]
         if len(stages) > 1:
-            last = stages[-1].split()[0] if stages[-1].split() else ""
-            if last in ("tee", "cat", "tee;", "cat;"):
+            # With pipefail the pipeline keeps the gate's status.
+            if block and _block_sets_pipefail(block):
                 return False
             return True
     # A tail that is only an ARGUMENT runs the gate and nothing else.
@@ -2580,7 +2617,7 @@ def prop_19_the_gate_is_not_swallowed(release, test):
                 tail = re.sub(r"^run:\s*", "", tail)
                 tail = tail.split(None, 2)[2] if len(
                     tail.split(None, 2)) > 2 else ""
-                if _discards_the_status(tail.strip()):
+                if _discards_the_status(tail.strip(), block_lines):
                     swallowed = True
             else:
                 # The gate's OWN line may carry the swallow:
@@ -2590,14 +2627,8 @@ def prop_19_the_gate_is_not_swallowed(release, test):
                                       _without_trailing_comment(own.strip()))
                 parts = own_stripped.split(None, 2)
                 own_tail = parts[2].strip() if len(parts) > 2 else ""
-                if own_tail and _discards_the_status(own_tail):
+                if own_tail and _discards_the_status(own_tail, block_lines):
                     swallowed = True
-                # A pipeline that ends in a LOGGER keeps the status.
-                elif own_tail and "|" in own_tail:
-                    stages = [s.strip() for s in own_tail.split("|")]
-                    last = stages[-1].split()[0] if stages[-1].split() else ""
-                    if last not in ("tee", "cat", "tee;", "cat;"):
-                        swallowed = True
                 # "set +e" may come BEFORE the gate command: it
                 # disables the errexit for the whole block, so the
                 # gate's failure does not stop the step.
