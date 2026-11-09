@@ -2329,6 +2329,26 @@ def _step_block(body, needle):
     return None
 
 
+# The events that may NEVER trigger a release workflow. The rule is
+# a PROPERTY: each workflow may carry the events it needs, and every
+# OTHER event is forbidden. A deny-list of names is the class of rule
+# this series has closed nine times over -- the next event name
+# passes it.
+#
+# The reusable workflow may ALSO run on a pull_request: that is what it
+# is for -- and it must be callable as a reusable workflow. The
+# release workflow may not: a pull request must never publish.
+FORBIDDEN_TRIGGERS = ("pull_request_target", "schedule", "workflow_run",
+                      "issue_comment", "repository_dispatch", "release",
+                      "fork", "deployment", "page_build", "check_run",
+                      "check_suite", "status", "create", "delete", "watch")
+
+# What the release workflow may carry, beyond the shared rules.
+RELEASE_TRIGGERS_ALLOWED = ("push", "workflow_dispatch")
+
+# What the reusable workflow may carry, beyond the shared rules.
+REUSABLE_TRIGGERS_ALLOWED = ("push", "pull_request", "workflow_call")
+
 def prop_15_the_triggers_are_certified(release, test):
     """The trigger block is the FIRST gate, so it is certified too.
 
@@ -2393,10 +2413,7 @@ def prop_15_the_triggers_are_certified(release, test):
             # The dangerous triggers are the ones that carry a PR's
             # code with the workflow's own privileges, and the ones
             # that can be fired from outside.
-            if name in ("pull_request_target", "schedule", "workflow_run",
-                        "issue_comment", "repository_dispatch", "release",
-                        "fork", "deployment", "page_build", "check_run",
-                        "check_suite", "status", "create", "delete", "watch"):
+            if name in FORBIDDEN_TRIGGERS:
                 out.append("the reusable workflow has a %s trigger" % name)
 
     # The push trigger must be filtered to master -- and to master
