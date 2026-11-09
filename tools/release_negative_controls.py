@@ -2457,7 +2457,7 @@ def prop_15_the_triggers_are_certified(release, test):
     text = release["text"]
 
     # The trigger block is at the top level, before "jobs:".
-    match = re.search(r"^\s*['\"]?on['\"]?\s*:\s*$", text, re.MULTILINE)
+    match = re.search(r"^\s*['\"]?on['\"]?\s*:(?:\s*#.*)?$", text, re.MULTILINE)
     if not match:
         out.append("the workflow has no trigger block")
         return out
@@ -2486,7 +2486,7 @@ def prop_15_the_triggers_are_certified(release, test):
     # the workflow's own privileges, and the gate would be reachable
     # from a pull request.
     reusable = test["text"]
-    reusable_match = re.search(r"^\s*['\"]?on['\"]?\s*:\s*$", reusable,
+    reusable_match = re.search(r"^\s*['\"]?on['\"]?\s*:(?:\s*#.*)?$", reusable,
                                re.MULTILINE)
     if reusable_match is None:
         out.append("the reusable workflow has no trigger block")
