@@ -233,6 +233,43 @@ jobs:
             exit 1
           fi
 
+      # RB5: the string comparison of the job-level condition is NOT
+      # case sensitive -- GitHub Actions compares strings with ==
+      # ignoring the case, so `github.ref == 'refs/heads/master'` is
+      # also true for a branch named "Master". A branch that differs
+      # from master only by case is a DISTINCT branch, and it can
+      # exist on a case-sensitive repository.
+      #
+      # This step asks a question that the case cannot change: is the
+      # SHA being published the SAME COMMIT as the tip of master? The
+      # remote's ref path is case sensitive, so
+      # `git ls-remote origin refs/heads/master` names exactly one
+      # branch.
+      #
+      # It is fail-closed: an unreadable master tip is a HOLD, never
+      # a GREEN, because a check that compared nothing would approve
+      # everything.
+      #
+      # This protects against the WRONG BRANCH. The tip-check above
+      # protects against STALENESS. They are different questions and
+      # both are needed.
+      - name: Verify the SHA is the tip of master itself
+        run: |
+          set -euo pipefail
+          MASTER_SHA="$(git ls-remote origin refs/heads/master | cut -f1)"
+          echo "the tip of master: $MASTER_SHA"
+          echo "the SHA being published: ${{ github.sha }}"
+          if [ -z "$MASTER_SHA" ]; then
+            echo "HOLD: the tip of master could not be read."
+            echo "An unreadable tip is a HOLD, never a GREEN."
+            exit 1
+          fi
+          if [ "$MASTER_SHA" != "${{ github.sha }}" ]; then
+            echo "HOLD: ${{ github.sha }} is not the tip of master ($MASTER_SHA is)."
+            echo "Only the tip of master may be published."
+            exit 1
+          fi
+
       - uses: actions/configure-pages@v5
       # The artifact comes from the build job, which uploaded the
       # bytes it validated. The deploy job must NOT upload a local

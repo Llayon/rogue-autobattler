@@ -375,11 +375,34 @@ def _evaluate(tree, context):
         if left_value is None or right_value is None:
             return None
         if operator == "==":
-            return left_value == right_value
-        return left_value != right_value
+            # GitHub Actions compares strings with == IGNORING THE
+            # CASE. The model must reproduce the PLATFORM, not an
+            # idealized comparison: a model that were stricter than
+            # the platform would report a policy the platform does
+            # not enforce.
+            return _loose_equal(left_value, right_value)
+        return not _loose_equal(left_value, right_value)
     if kind == "name":
         return _value(tree[3], context)
     return None
+
+
+def _loose_equal(left, right):
+    """The GitHub Actions string equality: the case is IGNORED.
+
+    The documentation states that the comparison is not case
+    sensitive. So `github.ref == 'refs/heads/master'` is also true
+    for a branch named "Master".
+
+    That is why the workflow does not rely on the string alone: the
+    deploy job also compares the SHA being published with the tip of
+    master, which the case cannot change.
+    """
+    if isinstance(left, bool) or isinstance(right, bool):
+        return left == right
+    if isinstance(left, str) and isinstance(right, str):
+        return left.lower() == right.lower()
+    return left == right
 
 
 def _value(token, context):
@@ -652,6 +675,34 @@ def prop_06b_validation_is_a_gate(release, test):
     return out
 
 
+def _has_master_sha_check(deploy_body):
+    """Is there a REAL step that compares the published SHA with the
+    tip of master?
+
+    The check reads CODE, never comments: the workflow's own comment
+    block literally contains the text "git ls-remote origin
+    refs/heads/master", so a textual search matched the COMMENT and
+    the control reported GREEN while the STEP it protects was gone.
+
+    So the requirement has two parts:
+      - a step named for the master check must exist, and
+      - a CODE line -- not a comment -- must read the tip of
+        refs/heads/master from the remote.
+    """
+    # The step must exist.
+    if not re.search(r"^\s*- name: .*master", deploy_body, re.MULTILINE):
+        return False
+
+    # The remote read must be in CODE.
+    for line in deploy_body.split("\n"):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if "ls-remote" in stripped and "refs/heads/master" in stripped:
+            return True
+    return False
+
+
 def prop_07_branch_authorization(release, test):
     """The deployment is authorized ONLY from refs/heads/master.
 
@@ -701,6 +752,30 @@ def prop_07_branch_authorization(release, test):
     if not allowed:
         out.append("the deploy refuses a legitimate dispatch on master: %s"
                    % reason)
+
+    # The string comparison is NOT enough on its own: GitHub Actions
+    # compares strings with == IGNORING THE CASE, so a branch named
+    # "Master" passes `github.ref == 'refs/heads/master'`. The deploy
+    # job must therefore ALSO compare the SHA being published with
+    # the tip of master, which the case cannot change.
+    deploy = release["jobs"].get("deploy", "")
+    # The check must be SPECIFIC and UNCONDITIONAL. The deploy job has
+    # two remote reads: the tip-check, which compares against the tip
+    # of the DISPATCHED branch, and the master-check, which compares
+    # against the tip of refs/heads/master. Only the second one
+    # protects against the wrong branch, because the string comparison
+    # of the job-level condition is case insensitive: a branch named
+    # "Master" would pass it.
+    #
+    # The requirement does NOT depend on the job mentioning
+    # "refs/heads/master" elsewhere: removing the master-check also
+    # removes that mention, and a conditional requirement would then
+    # be satisfied by its own absence.
+    if not _has_master_sha_check(deploy):
+        out.append("the deploy does not compare the published SHA with "
+                   "the tip of master: the ref string comparison is "
+                   "case insensitive, so a branch named Master would "
+                   "pass it")
     return out
 
 
@@ -792,6 +867,7 @@ PROPERTIES = {
     "NC-RB-05": prop_08_required_jobs_stay_mandatory,
     "NC-RB-06": prop_07_branch_authorization,
     "NC-RB-07": prop_09_no_failure_tolerance,
+    "NC-RB-08": prop_07_branch_authorization,
 }
 
 
@@ -919,6 +995,28 @@ MUTATIONS = [
      "release.yml",
      [("        success() &&\n",
        "        (success() || always()) &&\n")]),
+
+    ("NC-RB-08",
+     "remove the case-independent check against the tip of master",
+     "release.yml",
+     [("      - name: Verify the SHA is the tip of master itself\n"
+       "        run: |\n"
+       "          set -euo pipefail\n"
+       "          MASTER_SHA=\"$(git ls-remote origin refs/heads/master | cut -f1)\"\n"
+       "          echo \"the tip of master: $MASTER_SHA\"\n"
+       "          echo \"the SHA being published: ${{ github.sha }}\"\n"
+       "          if [ -z \"$MASTER_SHA\" ]; then\n"
+       "            echo \"HOLD: the tip of master could not be read.\"\n"
+       "            echo \"An unreadable tip is a HOLD, never a GREEN.\"\n"
+       "            exit 1\n"
+       "          fi\n"
+       "          if [ \"$MASTER_SHA\" != \"${{ github.sha }}\" ]; then\n"
+       "            echo \"HOLD: ${{ github.sha }} is not the tip of master "
+       "($MASTER_SHA is).\"\n"
+       "            echo \"Only the tip of master may be published.\"\n"
+       "            exit 1\n"
+       "          fi\n\n",
+       "")]),
 
     ("NC-RB-07",
      "let the build job continue on error",
