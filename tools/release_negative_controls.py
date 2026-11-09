@@ -1082,6 +1082,57 @@ def prop_07_branch_authorization(release, test):
     return out
 
 
+def _cuts_the_tip(line):
+    """Does this line cut a value down to a SHA?
+
+    The cut may be "cut -f1", "awk '{print $1}'", or a parameter
+    expansion that strips the tab and everything after it.
+    """
+    if re.search(r"\bcut\b", line):
+        return True
+    if re.search(r"\bawk\b", line):
+        return True
+    return bool(re.search(r"\$\{[^}]*%%[^}]*\}", line))
+
+
+def _the_tip_is_read_as_a_sha(block, variable):
+    """Is the tip read as a SHA and nothing else?
+
+    "git ls-remote" prints "<sha>\t<ref>", so the value has to be cut
+    down to the SHA. Without it the comparison never matches and the
+    guard always HOLDs.
+    """
+    lines = [line.strip() for line in block.split("\n")]
+    for index, stripped in enumerate(lines):
+        if "ls-remote" not in stripped or variable not in stripped:
+            continue
+        # The cut may be ON THE READ LINE -- which is how the
+        # workflow writes it -- or on the next one.
+        if _cuts_the_tip(stripped):
+            return True
+        for follow in lines[index + 1:]:
+            if not follow:
+                continue
+            if _cuts_the_tip(follow):
+                return True
+            break
+        return False
+    return False
+
+
+def _the_comparison_is_well_formed(comparison):
+    """Is this a two-argument comparison the shell can read?
+
+    "[ "$A" != "$B" ]" compares two values. "[ "$A"!="$B" ]" is
+    bash's ONE-ARGUMENT form: the whole thing is a non-empty string,
+    so the test is true iff it is non-empty -- and the guard always
+    HOLDs.
+    """
+    if not comparison:
+        return False
+    return bool(re.search(r"\s(!=|==)\s", comparison))
+
+
 def prop_11_sha_checks_stay_real(release, test):
     """The SHA checks must READ THE REMOTE.
 
@@ -1156,6 +1207,28 @@ def prop_11_sha_checks_stay_real(release, test):
         if _guards_on_the_emptiness(comparison, variable):
             out.append("%s guards its comparison on the tip's own "
                        "emptiness: an unreadable tip would sail on"
+                       % label)
+            continue
+        # The comparison must be a WORKING one: a comparison that
+        # refuses EVERY tip is not a guard, it is an outage -- and the
+        # rule that checks that it REFUSES cannot tell the two apart.
+        # "[ "$VAR"!="$SHA" ]" is bash's ONE-ARGUMENT form: the whole
+        # thing is a non-empty string, so the test is true iff it is
+        # non-empty, and the guard always HOLDs.
+        if not _the_comparison_is_well_formed(comparison):
+            out.append("%s does not compare two values: its operator is "
+                       "not separated from its operands, so the shell "
+                       "reads it as a one-argument test that is always "
+                       "true" % label)
+            continue
+        # And the tip must be read as a SHA. "git ls-remote" prints
+        # "<sha>\t<ref>", so the value has to be cut down to the SHA.
+        # Without it the comparison never matches and the guard always
+        # HOLDs.
+        if not _the_tip_is_read_as_a_sha(block, variable):
+            out.append("%s does not read the tip as a SHA: the value "
+                       "carries the ref name too, so the comparison "
+                       "never matches and the guard always holds"
                        % label)
     return out
 
