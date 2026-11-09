@@ -1152,7 +1152,10 @@ def _every_workflow(release, test):
             continue
         path = os.path.join(directory, name)
         try:
-            workflows.append((name, {"jobs": load_jobs(path)}))
+            with io.open(path, encoding="utf-8-sig", errors="replace") as f:
+                text = f.read()
+            workflows.append((name, {"jobs": load_jobs(path),
+                                     "text": text}))
         except OSError:
             continue
     return workflows
@@ -1223,11 +1226,15 @@ def prop_12_permissions_are_minimal(release, test):
     # together with a job whose block was DELETED: that job would
     # inherit the elevation. So the workflow default must be
     # read-only, and every job must carry its own explicit block.
-    workflow_permissions = _workflow_permissions(release)
-    for scope, value in workflow_permissions:
-        if value in ("write", "write-all"):
-            out.append("the workflow-level permissions carry %s: %s"
-                       % (scope, value))
+    # The WORKFLOW-LEVEL scopes of every workflow, not only of the
+    # release one: the reusable workflow is a top-level workflow, so
+    # its default is inherited by every one of its jobs.
+    for workflow_name, workflow in _every_workflow(release, test):
+        text = workflow.get("text") or ""
+        for scope, value in _workflow_permissions(text):
+            if value in ("write", "write-all"):
+                out.append("the workflow-level permissions of %s carry "
+                           "%s: %s" % (workflow_name, scope, value))
     for name, body in release["jobs"].items():
         if name in ("push", "workflow_dispatch"):
             continue
@@ -2088,8 +2095,11 @@ def _workflow_permissions(release):
     default is only dangerous when a job has no block of its own --
     but that combination is exactly what would elevate a job
     silently.
+
+    The reader takes the TEXT of a workflow, so it works for every
+    workflow in the directory and not only for the release one.
     """
-    text = release["text"]
+    text = release["text"] if isinstance(release, dict) else str(release)
     lines = text.split("\n")
     value = None
     permissions = None
@@ -3166,7 +3176,11 @@ def prop_18_no_other_publisher(release, test):
     appears out of nowhere is not.
     """
     out = []
-    known = {"release.yml", "test.yml"}
+    # Only the release workflow may publish. The reusable workflow is
+    # a TOP-LEVEL workflow -- it runs on every push to every branch --
+    # so a publisher inside it is a second publisher on every branch.
+    # Exempting it BY NAME is what made that invisible.
+    known = {"release.yml"}
     # The directory of the RELEASE FILE THAT WAS GIVEN: a mutation
     # that adds a workflow next to it must be seen. A module-level
     # constant would point at the real repository and miss it.
@@ -3215,6 +3229,12 @@ def prop_18_no_other_publisher(release, test):
                 break
             if "deploy-pages" in stripped:
                 reason = "it deploys the Pages: %r" % stripped
+                break
+            # An UPLOAD of the Pages artifact is a publisher too: it
+            # stages what the deployment publishes, and a workflow
+            # that carries the Pages rights can publish through it.
+            if "upload-pages-artifact" in stripped:
+                reason = "it uploads the Pages artifact: %r" % stripped
                 break
             # A workflow that CALLS the release workflow is a second
             # path to the same publication: it would run the release
