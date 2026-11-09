@@ -113,9 +113,13 @@ def _needs_of(jobs, job_name):
             items.append(line.strip().lstrip("-").strip())
         if items:
             return " ".join(items)
-    plain = re.search(r"needs:\s*(\S+)", body)
+    plain = re.search(r"needs\s*:\s*(.+)$", body, re.MULTILINE)
     if plain:
-        return plain.group(1)
+        # The QUOTED scalar form -- 'needs: "a, b"' -- is valid YAML,
+        # and the quotes must not become part of the job names. The
+        # value is the REST of the line: a quoted value may contain
+        # a space.
+        return _unquote(plain.group(1).strip())
     return ""
 
 
@@ -173,7 +177,10 @@ def _job_condition(block):
         match = re.match(r"^    if\s*:\s*(.*)$", line)
         if not match:
             continue
-        value = match.group(1).strip()
+        # The trailing comment is cut off FIRST: "if: >-  # only
+        # master may publish" is valid YAML, and the block scalar
+        # must still be recognised as one.
+        value = _without_trailing_comment(match.group(1).strip())
         if value in (">-", ">", "|-", "|"):
             # The condition is the block that follows, joined.
             parts = []
@@ -1454,7 +1461,10 @@ def _tests_variable(condition, variable):
     that tests another variable holds for the wrong tip and sails on
     for the right one.
     """
-    if ("$" + variable) not in condition:
+    # The variable may be written "$VAR" or "${VAR}" -- the second
+    # is the standard robust form.
+    if ("$" + variable) not in condition \
+            and ("${" + variable + "}") not in condition:
         return False
     # And it must test it for EMPTINESS -- "-z" is the empty test and
     # "-n" is the non-empty one, which tolerates the unreadable tip.
@@ -1524,6 +1534,46 @@ def _the_gate_command_is_not_last(line):
     if re.match(r"^(?:if\b|!\b|\()", tail):
         return True
     return False
+
+
+def _the_deploy_condition(release):
+    """The JOB-LEVEL condition of the deploy job."""
+    deploy = release["jobs"].get("deploy")
+    if deploy is None:
+        return None
+    return _job_condition(deploy)
+
+
+def _compared_refs(condition):
+    """The refs the condition compares against.
+
+    The authorization set is DERIVED from the expression: every ref
+    literal the condition mentions is returned. A corpus is a sample
+    of the names, and a name the sample omits is invisible -- so the
+    rule is over the comparisons themselves, and no ref name can
+    escape it.
+    """
+    refs = []
+    for pattern in (r"github\.ref\s*(?:==|!=)\s*'([^']*)'",
+                    r'github\.ref\s*(?:==|!=)\s*"([^"]*)"',
+                    r"(?:startsWith|contains)\s*\(\s*github\.ref\s*,\s*'([^']*)'",
+                    r'(?:startsWith|contains)\s*\(\s*github\.ref\s*,\s*"([^"]*)"'):
+        for match in re.finditer(pattern, condition):
+            refs.append(match.group(1))
+    return refs
+
+
+def _compared_events(condition):
+    """The events the condition compares against.
+
+    Derived from the expression, for the same reason as the refs.
+    """
+    events = []
+    for pattern in (r"github\.event_name\s*(?:==|!=)\s*'([^']*)'",
+                    r'github\.event_name\s*(?:==|!=)\s*"([^"]*)"'):
+        for match in re.finditer(pattern, condition):
+            events.append(match.group(1))
+    return events
 
 
 def _is_yaml_true(line, key):
@@ -1609,12 +1659,19 @@ def _workflow_permissions(release):
     text = release["text"]
     lines = text.split("\n")
     value = None
+    permissions = None
+    # The TOP-LEVEL blocks only: an indented one belongs to a job.
+    # And the LAST of them: a duplicate key is last-wins in YAML, and
+    # the platform takes the last one.
     for index, line in enumerate(lines):
         stripped = line.strip()
         if not stripped.startswith("permissions:"):
             continue
+        if line[:1].isspace():
+            continue
         value = _unquote(stripped[len("permissions:"):].strip())
         if value:
+            permissions = None
             break
         # The BLOCK form: the scopes are deeper than the key, exactly
         # as in the per-job reader.
@@ -1626,10 +1683,11 @@ def _workflow_permissions(release):
             if len(follow) - len(follow.lstrip()) <= base:
                 break
             scope_line = follow.strip()
-            match = re.match(r"^([\w-]+)\s*:\s*(\S+)$", scope_line)
+            match = re.match(SCOPE_PATTERN, scope_line)
             if match:
                 permissions.append((match.group(1),
                                    _unquote(match.group(2))))
+    if permissions is not None:
         return permissions
     if value is None:
         return []
@@ -1899,6 +1957,26 @@ def prop_15_the_triggers_are_certified(release, test):
                 if item:
                     listed.append(item)
         if not listed:
+            # The BLOCK form: "branches:" and then the list, one per
+            # line. It is the canonical style and valid YAML.
+            trigger_lines = trigger.split("\n")
+            for index, line in enumerate(trigger_lines):
+                if not re.match(r"^\s*branches\s*:\s*$", line):
+                    continue
+                base = len(line) - len(line.lstrip())
+                for follow in trigger_lines[index + 1:]:
+                    if not follow.strip():
+                        continue
+                    if len(follow) - len(follow.lstrip()) <= base:
+                        break
+                    item = follow.strip()
+                    if item.startswith("- "):
+                        item = item[2:].strip()
+                    item = _unquote(item)
+                    if item:
+                        listed.append(item)
+                break
+        if not listed:
             out.append("the push trigger has an empty branch filter")
         for item in listed:
             if item != "master":
@@ -2034,10 +2112,34 @@ def prop_14_the_ref_set_is_a_rule(release, test):
     publication for those.
     """
     out = []
-    # The corpus is GENERATED, not written down: the shapes of a ref
-    # and the names of an event are combined with the branch names
-    # that are plausible in this repository. A hand-written list is a
-    # list -- and a list is defeated by the one entry it omits.
+    # The corpus is a GENERATION over the shapes, but the NAMES in it
+    # are still a list -- and a list of names is defeated by the one
+    # name it omits. So the property does not depend on the names at
+    # all.
+    #
+    # It is a PROPERTY of the condition: every ref the condition
+    # compares against must be the master ref, and every event it
+    # compares against must be push or workflow_dispatch. That is a
+    # rule over the condition's own text, and no ref name and no
+    # event name can escape it.
+    condition = _the_deploy_condition(release)
+    if condition is None:
+        out.append("the deploy job has no condition: every ref is "
+                   "authorized")
+        return out
+
+    for ref in _compared_refs(condition):
+        if ref.strip().lower() != "refs/heads/master":
+            out.append("the deploy condition compares against %s: it "
+                       "may compare only against refs/heads/master" % ref)
+    for event in _compared_events(condition):
+        if event not in ("push", "workflow_dispatch"):
+            out.append("the deploy condition compares against the %s "
+                       "event: it may compare only against push and "
+                       "workflow_dispatch" % event)
+
+    # And the model is asked over the generated corpus as well, so a
+    # form the text rule does not see is still caught.
     corpus = _generate_ref_corpus()
     events = _generate_event_corpus()
     allowed = set()
