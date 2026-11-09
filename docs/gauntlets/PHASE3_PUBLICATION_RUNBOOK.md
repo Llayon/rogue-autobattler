@@ -15,7 +15,9 @@
     branch            integration/phase3-master-release-rehearsal
     the merge-base    02fe83ef (== master: a strict fast-forward)
     ahead / behind    0 / 311
-    the commits       38 over the published Phase 3, 311 over master
+    the commits       read them from the repository:
+                      git rev-list --count 4316a32..HEAD
+                      git rev-list --count master..HEAD
 
     The candidate SHA moves with every commit of the series. Read it
     from the repository at the moment of the publication; do NOT copy

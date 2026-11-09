@@ -70,7 +70,12 @@ the merge-base            02fe83ef == master  -> a strict fast-forward
     said 274 commits and 294 files. Those were the values of the
     FIRST commit of the series (b00cb8b), written when the series
     consisted of one commit and never updated. The final numbers are
-    311 commits and 298 files. The 38 commits of the series are all
+    the counts are NOT hard-coded -- they are invalidated by the
+    next documentation commit. Read them from the repository:
+        git rev-list --count 4316a32..HEAD      the series
+        git rev-list --count master..HEAD       over master
+        git diff --name-only master..HEAD | wc -l   the files
+    The commits of the series are all
     listed in section O; none of them is a filler, and the history
     was NOT touched to make a number look right.
 
@@ -336,7 +341,7 @@ the candidate SHA     (the tip of this branch: read it with
 the merge-base        02fe83ef == master -> the fast-forward is eligible
 ahead / behind        0 / 311
 the merge commits     1 (the historical one, inside Phase 3)
-the new work          38 commits on top of the published Phase 3
+the new work          the commits on top of the published Phase 3
 the changed files     11 over the published Phase 3
 ```
 
@@ -744,14 +749,14 @@ DENIED
       +-- a38848a docs(repo): separate the remote run from the local branch work
 ```
 
-    38 commits on top of the published Phase 3: the release
+    the commits on top of the published Phase 3: the release
     gate, the documents, and the fixes that the checks and the
     independent critic forced. Every one of them is a single parent,
     so the chain is linear and the candidate remains a strict
     fast-forward of master.
 
     The arithmetic: 273 (the published Phase 3) + 38 (this series) =
-    311 commits over master.
+    commits over master.
 
     The 11 files the series changed over the published Phase 3:
 
