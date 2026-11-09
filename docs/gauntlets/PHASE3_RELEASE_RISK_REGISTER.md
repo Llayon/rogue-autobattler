@@ -72,6 +72,70 @@
              manual staging/phase3/feature/tag/pull_request/schedule
              DENY, a failed required job DENY.
 
+### H-15 — the third review: seven HIGH, all in the harness
+
+    Status:  PROVEN DEFECT — FIXED
+    Found:   the third independent reviewer built its own mutation
+             battery and found seven HIGH findings. Every one was in
+             the EVIDENCE HARNESS, not in the workflow: the gate was
+             never found broken, but the controls could not see a
+             mutation that genuinely opens it. The distinction
+             matters -- "the workflow is sound; the proof is not".
+
+               H-1  the model mapped cancelled() to "the needs did not
+                    succeed", which made !cancelled() equivalent to
+                    success(). The platform says otherwise, and the
+                    difference is the dangerous one: a deploy job
+                    guarded by !cancelled() runs on a RED CI and
+                    publishes the artifact of a SHA whose tests
+                    failed
+               H-2  the fail-closed refusals could be neutered: the
+                    master refusal lost its OWN exit 1 and a global
+                    search matched the COMPARISON's exit; the
+                    tip-check's unreadable refusal was not covered at
+                    all; the comparison's refusal could be deleted
+                    while its "if" stayed
+               H-3  a folded or literal block scalar hid a step-level
+                    bypass, and the guard was narrower than the risk
+                    class: in GitHub Actions a step with an "if"
+                    OVERRIDES the implicit success(), so
+                    "if: failure()" and "if: !cancelled()" on the
+                    publish step are publish-after-HOLD
+               H-4  a TRAILING comment carried the tokens:
+                    'MASTER_SHA="" # git ls-remote origin
+                    refs/heads/master' mentions the whole policy and
+                    reads nothing
+
+    Fix:     the refusals must belong to THEIR OWN condition; the
+             step conditions are expanded before they are judged and
+             the class is widened to every overriding condition; the
+             code reader cuts the trailing comments off, with the
+             quotes tracked; the model reproduces the platform
+             exactly.
+    Proof:   the controls are 21 of 21 RED, with and without pyyaml,
+             and every scenario of the reviewer is detected.
+
+### H-16 — the publication could come before the checks
+
+    Status:  PROVEN DEFECT — FIXED
+    Found:   the third reviewer found a REAL bypass: a deploy-pages
+             step placed BEFORE the two fail-closed checks. The checks
+             would then HOLD the job -- but the pages had ALREADY
+             been published. The refusal was theatre.
+    Fix:     the property requires the ORDER: exactly ONE
+             publication, it is the LAST step, and both fail-closed
+             checks come BEFORE it.
+
+### H-17 — the permissions sweep was a list of spellings
+
+    Status:  PROVEN DEFECT — FIXED
+    Found:   the property refused "pages: write" and "id-token:
+             write" on the other jobs, so every OTHER elevated scope
+             passed: write-all, contents: write, actions: write.
+    Fix:     the permissions are read as the BLOCK they are. The
+             scalar form "permissions: write-all" is elevated by
+             itself, and the block form lists one scope per line.
+
 ### H-13 — the model was stricter than the platform it models
 
     Status:  PROVEN DEFECT — FIXED
