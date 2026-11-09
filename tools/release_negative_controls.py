@@ -1114,6 +1114,14 @@ def prop_12_permissions_are_minimal(release, test):
     # counted -- by its action's capability, not by its name. A
     # third-party Pages action is a second publication path, and the
     # count of "actions/deploy-pages" would not see it.
+    # The deploy job's steps must be EXACTLY the ones the mechanism
+    # needs: a duplicated step is a step the controls did not
+    # certify, and the count of the publications must stay exact.
+    configure_count = deploy.count("actions/configure-pages")
+    if configure_count != 1:
+        out.append("the deploy job configures the pages %d times: there "
+                   "must be exactly one configuration" % configure_count)
+
     publishing = 0
     for line in deploy.split("\n"):
         stripped = line.strip()
@@ -2604,9 +2612,16 @@ def prop_24_the_published_bytes_are_the_validated_bytes(release, test):
     # EVERY upload is read: a second upload of another directory
     # overwrites the artifact, so the rule that read only the FIRST
     # one missed it.
+    # The validated bytes must be the PUBLISHED bytes: nothing may
+    # write into the validated directory between the validation and
+    # the upload.
+    validation_index = None
+    upload_index = None
     uploaded = []
     lines = code.split("\n")
     for index, line in enumerate(lines):
+        if "validate_web_artifact.py" in line and validation_index is None:
+            validation_index = index
         if "upload-pages-artifact" in line:
             # The path is the key below it.
             for follow in lines[index + 1:index + 4]:
@@ -2614,8 +2629,21 @@ def prop_24_the_published_bytes_are_the_validated_bytes(release, test):
                     uploaded.append(follow.split("path:", 1)[1].strip()
                                     .strip("'\""))
                     break
+            if upload_index is None:
+                upload_index = index
     if not uploaded:
         out.append("the build job does not upload the artifact")
+    if validation_index is not None and upload_index is not None:
+        between = lines[validation_index:upload_index]
+        for line in between:
+            stripped = line.strip()
+            # A step that WRITES into the validated directory
+            # publishes bytes that were never validated.
+            if (">>" in stripped or ">" in stripped) and "build/" in stripped:
+                out.append("the build job modifies the artifact between "
+                           "the validation and the upload: the published "
+                           "bytes are not the validated bytes")
+                break
     for path in uploaded:
         if path.rstrip("/") != validated.rstrip("/"):
             out.append("the build job validates %s but uploads %s: the "
