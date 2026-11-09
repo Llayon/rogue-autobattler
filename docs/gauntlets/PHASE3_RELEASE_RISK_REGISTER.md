@@ -79,6 +79,45 @@
              manual staging/phase3/feature/tag/pull_request/schedule
              DENY, a failed required job DENY.
 
+### H-33 — the thirteenth review's unclosed class: the readers must AGREE
+
+    Status:  PROVEN DEFECT — FIXED
+    Found:   the thirteenth reviewer left the deepest finding of the
+             series, and it is the ROOT of the series rather than one
+             more instance of it:
+
+               there are TWO readers of the deploy's "if:" value --
+                 the job-level one and the step-level one -- and they
+                 had learned to disagree about the same line THREE
+                 times: the trailing comment, the YAML escape of a
+                 single-quoted scalar, and the outer quotes of a
+                 quoted scalar.
+
+             A disagreement is not a bug in one of them -- it is the
+             AGREEMENT that failed. So the disagreement was never
+             hunted one spelling at a time; the agreement was the
+             thing that had to hold.
+
+             So there is ONE reader now, and both call it. And the
+             agreement is a CONTROL: NC-RB-24 checks that the two
+                 readers read the same value on every legal spelling
+                 of the condition -- the folded block, the literal
+                 block, the single-quoted scalar, the double-quoted
+                 scalar, each with the trailing comment and the
+                 trailing space the formatter may leave on the key.
+
+             And the thirteenth reviewer proved, with PyYAML, that a
+             "#" inside a folded block is LITERAL TEXT and not a
+             comment -- the platform keeps it. So a rule that
+             stripped it was reading a DIFFERENT condition than the
+             one the platform sees. The body of a folded block is
+             verbatim now; the comment is stripped only from the
+             key's own line, where YAML really does treat it as a
+             comment.
+
+    Fix:     commit 740deee.
+    Proof:   the controls are 34 of 34 RED, with and without pyyaml.
+
 ### H-32 — the thirteenth review: the reusable workflow may not publish
 
     Status:  PROVEN DEFECT — FIXED
