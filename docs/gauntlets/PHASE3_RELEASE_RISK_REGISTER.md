@@ -79,6 +79,61 @@
              manual staging/phase3/feature/tag/pull_request/schedule
              DENY, a failed required job DENY.
 
+### H-35 — the fifteenth review: the operator, the command and the self-certification
+
+    Status:  PROVEN DEFECT — FIXED
+    Found:   the fifteenth reviewer read the whole harness and found
+             four defects and one principle:
+
+               the "if:" KEY may be QUOTED -- the same class R13-05
+                 closed for the job key and R14-01 closed for the
+                 permissions key. Both condition readers matched the
+                 literal text "if", so a quoted key was INVISIBLE:
+                 the guard read as absent, EVERY ref became
+                 authorized, and a LEGAL edit was certified as an
+                 authorization hole.
+
+               and "!=" was DEAD CODE: the tokenizer's
+                 single-character branch ran before the two-character
+                 one, so "!" was emitted alone and the following "="
+                 failed the word scanner. Fail closed -- but a legal
+                 "!=" was a false red, and the detection of an
+                 INVERTED comparison was ACCIDENTAL: the model
+                 refused to parse it, not because it saw the widened
+                 authorization. With the operator read first, the
+                 model now SEES that "github.ref != 'staging'"
+                 authorizes every other ref -- a real opening it can
+                 finally name.
+
+               and the workflow-level permissions block must EXIST:
+                 without it a workflow inherits the repository
+                 default, whose value the harness cannot know -- and
+                 the reusable workflow is a top-level workflow on
+                 every push to every branch.
+
+               and the workflow-level reader must take the LAST
+                 permissions key, as its own docstring always
+                 claimed; it used to BREAK at the first scalar, so
+                 the elevation in the block after it was certified.
+
+               and the mandatory steps were certified by NAME only: a
+                 step can keep its name and lose its work. "Run
+                 legacy regression suite" rewritten to "run: echo ok"
+                 satisfies the list, and every property stays
+                 silent. The gate step can be DELETED (caught) but
+                 NEUTERED (not caught) -- the same class as "a
+                 deleted gate is a removed gate", one level down.
+                 So a mandatory step must also carry a COMMAND.
+
+    Fix:     all five, in commits f846658 and eda4f21.
+    Proof:   the controls are 34 of 34 RED, with and without pyyaml.
+
+    NOTE:   the reviewer named one PRINCIPLE that cannot be closed:
+             the harness cannot certify ITSELF. An edit that makes a
+             property return [] or calls sys.exit(0) is invisible
+             from inside. That is inherent to a self-certifying
+             harness, and it is stated here rather than hidden.
+
 ### H-34 — the fourteenth review: the quoted key and the implicit success
 
     Status:  PROVEN DEFECT — FIXED
