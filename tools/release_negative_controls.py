@@ -560,17 +560,26 @@ def prop_04_sha_identity(release, test):
     # comparison leaves the other two intact.
     compares = False
     code = _code_lines(deploy)
-    # The comparison must be a CONDITION that refuses. An echo that
+    # The comparison must be a CONDITION that REFUSES. An echo that
     # merely MENTIONS the comparison is not a check: it prints a
-    # message and continues.
-    for index, line in enumerate(code.split("\n")):
-        if "if" not in line:
-            continue
-        if "TIP" not in line or "github.sha" not in line:
-            continue
-        if line.strip().startswith("if"):
-            compares = True
-            break
+    # message and continues. And a comparison whose `exit 1` was
+    # deleted does not refuse either -- so the refusal must be inside
+    # the comparison's own condition.
+    tip_block = _step_block(_body_without_comments(deploy), "tip of the branch")
+    if tip_block is not None:
+        for line in tip_block.split("\n"):
+            stripped = line.strip()
+            if not stripped.startswith("if "):
+                continue
+            if "TIP" in stripped and "github.sha" in stripped:
+                compares = True
+                # The refusal must belong to THE COMPARISON's own
+                # condition: another condition in the same step
+                # refusing is a different mechanism.
+                if not _condition_refuses(tip_block, stripped):
+                    out.append("the SHA comparison does not refuse: it "
+                               "notices the mismatch and continues")
+                break
     if not compares and not out:
         out.append("the deploy job never compares the published SHA "
                    "with the branch tip in a condition that refuses")
@@ -715,8 +724,13 @@ def _code_lines(job_body):
     code = []
     for line in job_body.split("\n"):
         stripped = line.strip()
-        if stripped and not stripped.startswith("#"):
-            code.append(stripped)
+        if not stripped or stripped.startswith("#"):
+            continue
+        # A TRAILING comment carries the tokens too: "ls-remote origin
+        # refs/heads/master # the tip of master" is a code line whose
+        # text contains the whole policy. The comment is cut off, but
+        # only when the '#' is not inside a quoted string.
+        code.append(_without_trailing_comment(stripped))
     return "\n".join(code)
 
 
@@ -738,11 +752,12 @@ def _has_master_sha_check(deploy_body):
     if not re.search(r"^\s*- name: .*master", deploy_body, re.MULTILINE):
         return False
 
-    # The remote read must be in CODE.
-    for line in deploy_body.split("\n"):
+    # The remote read must be in CODE, and a TRAILING comment must
+    # not count: 'MASTER_SHA="" # git ls-remote origin refs/heads/master'
+    # mentions the whole policy and reads nothing.
+    code = _code_lines(deploy_body)
+    for line in code.split("\n"):
         stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
-            continue
         if "ls-remote" in stripped and "refs/heads/master" in stripped:
             return True
     return False
@@ -854,10 +869,17 @@ def prop_07_branch_authorization(release, test):
             # "exit 1" was satisfied by the OTHER refusal in the same
             # step -- the comparison -- so deleting the unreadable
             # case left the check green.
-            unreadable = re.search(
-                r"-z[^\n]*\n(?:[^\n]*\n){0,6}?[^\n]*exit\s+1",
-                master_block)
-            if not unreadable:
+            # The refusal for an UNREADABLE tip must be a CONDITION
+            # that refuses: a check that the tip is empty, followed by
+            # a HOLD INSIDE that condition. The exit of a DIFFERENT
+            # condition a few lines below is a different mechanism.
+            holds = False
+            for line in master_block.split("\n"):
+                stripped = line.strip()
+                if stripped.startswith("if ") and "-z" in stripped:
+                    holds = _condition_refuses(master_block, stripped)
+                    break
+            if not holds:
                 out.append("the master check does not fail closed: an "
                            "unreadable tip must be a HOLD, never a GREEN")
     return out
@@ -897,10 +919,21 @@ def prop_11_sha_checks_stay_real(release, test):
     # The tip of master.
     if not re.search(r"ls-remote[^\n]*refs/heads/master", code_text):
         out.append("the deploy does not read the tip of master")
-    # The fail-closed refusal.
-    if not re.search(r"exit\s+1", code_text):
-        out.append("the SHA checks do not fail closed: an unreadable "
-                   "tip must be a HOLD, never a GREEN")
+    # The fail-closed refusals: each must be inside its own condition.
+    for needle, label in (("tip of the branch", "the tip check"),
+                          ("master", "the master check")):
+        block = _step_block(_body_without_comments(deploy), needle)
+        if block is None:
+            continue
+        holds = False
+        for line in block.split("\n"):
+            stripped = line.strip()
+            if stripped.startswith("if ") and "-z" in stripped:
+                holds = _condition_refuses(block, stripped)
+                break
+        if not holds:
+            out.append("%s does not fail closed: an unreadable tip must "
+                       "be a HOLD, never a GREEN" % label)
     return out
 
 
@@ -916,10 +949,19 @@ def prop_12_permissions_are_minimal(release, test):
         if name in ("push", "workflow_dispatch"):
             continue
         code = _code_lines(body)
-        for elevated in ("pages: write", "id-token: write"):
-            if elevated in code:
+        # The rule is not a list of spellings: EVERY permission of every
+        # job other than the deploy job must be read-only. A sweep of
+        # named scopes would miss "write-all" and "contents: write".
+        #
+        # The permissions are read as the BLOCK they are: the scalar
+        # form "permissions: write-all" is elevated by itself, and the
+        # block form lists one scope per line.
+        permissions = _job_permissions(body)
+        for scope, value in permissions:
+            if value in ("write", "write-all"):
                 if name != "deploy":
-                    out.append("the %s job carries %s" % (name, elevated))
+                    out.append("the %s job carries %s: %s"
+                               % (name, scope, value))
                 break
     # The deploy job must still carry them: without them it could
     # not publish at all.
@@ -966,6 +1008,168 @@ def prop_12_permissions_are_minimal(release, test):
                               else "refusal"))
                 break
     return out
+
+
+def _without_trailing_comment(line):
+    """The line without its trailing comment.
+
+    A '#' inside a quoted string is not a comment: the shell step
+    "echo '# not a comment'" must survive. So the quotes are tracked.
+    """
+    quote = None
+    for index, char in enumerate(line):
+        if quote:
+            if char == quote:
+                quote = None
+            continue
+        if char in ("'", '"'):
+            quote = char
+            continue
+        if char == "#":
+            return line[:index].rstrip()
+    return line
+
+
+def _step_conditions(job_body):
+    """The conditions of the STEPS of a job, with the folded and
+    literal block scalars expanded.
+
+    A step condition can be written three ways:
+
+        - name: x
+          if: always()
+
+        - if: always()
+          name: x
+
+        - name: x
+          if: >-
+            always()
+
+    The third one is the same condition, and reading only the ">-"
+    would miss it -- which is exactly how a bypass hides.
+    """
+    conditions = []
+    lines = job_body.split("\n")
+    for index, line in enumerate(lines):
+        match = re.match(r"^\s*(?:-\s*)?if\s*:\s*(.*)$", line)
+        if not match:
+            continue
+        value = match.group(1).strip()
+        if value in (">-", ">", "|-", "|"):
+            # The block that follows, joined.
+            base = len(line) - len(line.lstrip())
+            parts = []
+            for follow in lines[index + 1:]:
+                if not follow.strip():
+                    continue
+                if len(follow) - len(follow.lstrip()) <= base:
+                    break
+                parts.append(follow.strip())
+            value = " ".join(parts).strip()
+        conditions.append(value)
+    return conditions
+
+
+def _job_permissions(job_body):
+    """The permissions of a job, as (scope, value) pairs.
+
+    Both spellings are read:
+
+        permissions: write-all          -> (write-all, write-all)
+        permissions:                    -> the scopes listed below
+          contents: read
+          pages: write
+
+    The scalar form is elevated by itself, and the block form lists
+    one scope per line. A sweep that skipped the key "permissions"
+    would miss the scalar form entirely.
+    """
+    permissions = []
+    lines = job_body.split("\n")
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("permissions:"):
+            value = stripped[len("permissions:"):].strip()
+            if value:
+                permissions.append((value, value))
+                continue
+            # The block form: the scopes are deeper than the key.
+            base = len(line) - len(line.lstrip())
+            for follow in lines[index + 1:]:
+                if not follow.strip():
+                    continue
+                if len(follow) - len(follow.lstrip()) <= base:
+                    break
+                scope_line = follow.strip()
+                match = re.match(r"^([\w-]+)\s*:\s*(\S+)$", scope_line)
+                if match:
+                    permissions.append((match.group(1), match.group(2)))
+    return permissions
+
+
+def _condition_refuses(block, condition):
+    """Does the GIVEN condition refuse?
+
+    The refusal must belong to that condition: the `exit` must be
+    between the condition's `then` and its `fi`. An `exit` that belongs
+    to a LATER condition is a different mechanism -- and a comparison
+    eight lines below is exactly that.
+    """
+    lines = block.split("\n")
+    inside = False
+    for line in lines:
+        stripped = line.strip()
+        if not inside:
+            if stripped == condition:
+                inside = True
+            continue
+        if "exit " in stripped:
+            return True
+        if stripped == "fi" or stripped.startswith("fi "):
+            return False
+    return False
+
+
+def _refuses(block):
+    """Does this block REFUSE, or only notice?
+
+    A condition that prints a message and continues is not a refusal.
+    The refusal must be INSIDE the condition: an `exit 1` a few lines
+    below, in a DIFFERENT condition, is a different mechanism.
+
+    So the check is: the `if` line, and the `exit` that follows it,
+    must be in the SAME condition -- that is, before the matching
+    `fi`.
+    """
+    if block is None:
+        return False
+    lines = block.split("\n")
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if not stripped.startswith("if "):
+            continue
+        if "exit " in stripped:
+            # A single-line condition: `if [ ... ]; then exit 1; fi`.
+            return True
+        # A block condition: the exit must come before the `fi`, and
+        # it must belong to THIS condition.
+        depth = 0
+        for follow in lines[index + 1:]:
+            follow_stripped = follow.strip()
+            if follow_stripped.endswith("then"):
+                depth += 1
+                continue
+            if follow_stripped == "fi" or follow_stripped.startswith("fi "):
+                if depth == 0:
+                    break
+                depth -= 1
+                continue
+            if depth == 0 and follow_stripped.startswith("if "):
+                break
+            if "exit " in follow_stripped:
+                return True
+    return False
 
 
 def _step_block(body, needle):
@@ -1067,19 +1271,29 @@ def prop_09_no_failure_tolerance(release, test):
         # A STEP that runs REGARDLESS is the shape of a bypass: the
         # deploy job would be skipped when a need failed, but the
         # workflow still contains a step that runs no matter what.
+        #
         # The condition is read at the STEP level here -- unlike the
         # job level, where a condition is the guard.
         #
         # Both spellings of a step condition are read: the mapping
         # form ("if: always()" under a step) and the list form
         # ("- if: always()" inside the step itself).
-        for line in body.split("\n"):
-            match = re.match(r"^\s*(?:-\s*)?if\s*:\s*(.*)$", line)
-            if not match:
-                continue
-            value = match.group(1).strip()
+        #
+        # A FOLDED or LITERAL block scalar is expanded before it is
+        # judged: "if: >-" with "always()" on the next line is the
+        # same condition, and reading only the ">-" would miss it.
+        #
+        # And the class is wider than always(): in GitHub Actions a
+        # step with an `if` OVERRIDES the implicit success(), so
+        # `if: failure()` and `if: !cancelled()` make the step RUN
+        # after a failure. Every one of those is a publish-after-HOLD.
+        # So the deploy job's steps may carry NO condition at all.
+        for value in _step_conditions(body):
             if value.strip("'\"") in ("always()", "${{ always() }}",
-                                       "${{always()}}"):
+                                       "${{always()}}", "failure()",
+                                       "${{ failure() }}", "${{failure()}}",
+                                       "!cancelled()", "${{ !cancelled() }}",
+                                       "${{!cancelled()}}"):
                 out.append("the %s job carries a step that runs "
                            "regardless: %s" % (name, value))
                 break
