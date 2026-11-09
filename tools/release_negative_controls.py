@@ -2135,7 +2135,10 @@ def _the_comparison_of(block, variable):
         stripped = line.strip()
         if not stripped.startswith("if "):
             continue
-        if variable not in stripped:
+        # The variable may be written "$VAR" or "${VAR}" -- the
+        # second is the standard robust form, and a rule that
+        # matched the bare name alone could not see it.
+        if not _tests_variable(stripped, variable):
             continue
         core = _condition_core(stripped)
         if "!=" in core or "==" in core:
@@ -2215,6 +2218,31 @@ def _condition_refuses(block, condition):
             return True
         if stripped == "fi" or stripped.startswith("fi "):
             return False
+        # The one-line form: "if <test>; then exit 1; fi". The
+        # refusal is on the SAME line as the condition, after the
+        # "then".
+        if _one_line_refusal(stripped):
+            return True
+    return False
+
+
+def _one_line_refusal(line):
+    """Does this line carry its refusal on ONE line?
+
+    "if <test>; then exit 1; fi" is a legal and normal way to write
+    the refusal. The rule looked for a line of its own after the
+    condition, so it could not see this form.
+    """
+    core = _condition_core(line)
+    if not core:
+        return False
+    # The part after the "then".
+    match = re.search(r"\bthen\b(.*)$", line.strip())
+    if not match:
+        return False
+    after = match.group(1)
+    if "exit " in after:
+        return True
     return False
 
 
