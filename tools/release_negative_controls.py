@@ -207,7 +207,13 @@ def _job_condition(block):
         # The job-level keys are indented by exactly four spaces.
         if not line.startswith("    ") or line.startswith("     "):
             continue
-        match = re.match(r"^    if\s*:\s*(.*)$", line)
+        # The key may be QUOTED: "'if':" is legal YAML and resolves
+        # to the same key -- the same class R13-05 closed for the job
+        # key and R14-01 closed for the permissions key. A reader that
+        # matched the literal text made a quoted key INVISIBLE: the
+        # guard read as absent, every ref became authorized, and a
+        # LEGAL edit was certified as an authorization hole.
+        match = re.match(r"^    ['\"]?if['\"]?\s*:\s*(.*)$", line)
         if not match:
             continue
         # The trailing comment is cut off FIRST: "if: >-  # only
@@ -286,15 +292,27 @@ def _tokenize(expression):
         if char.isspace():
             index += 1
             continue
+        # The TWO-character operators are read FIRST: "!=" used to
+        # be dead code, because the single-character branch ran first
+        # and emitted "!" alone -- so the following "=" failed the
+        # word scanner and the WHOLE expression failed to parse. That
+        # is fail closed, but it made every legal "!=" condition a
+        # false red, and it made the detection of an INVERTED
+        # comparison accidental: the model refused to parse it, not
+        # because it saw the widened authorization.
+        if expression.startswith("&&", index):
+            tokens.append("&&")
+            index += 2
+            continue
+        if expression.startswith("||", index):
+            tokens.append("||")
+            index += 2
+            continue
+        if expression.startswith("!=", index):
+            tokens.append("!=")
+            index += 2
+            continue
         if char in "()!&|":
-            if expression.startswith("&&", index):
-                tokens.append("&&")
-                index += 2
-                continue
-            if expression.startswith("||", index):
-                tokens.append("||")
-                index += 2
-                continue
             tokens.append(char)
             index += 1
             continue
@@ -1434,7 +1452,19 @@ def prop_12_permissions_are_minimal(release, test):
     # its default is inherited by every one of its jobs.
     for workflow_name, workflow in _every_workflow(release, test):
         text = workflow.get("text") or ""
-        for scope, value in _workflow_permissions(text):
+        scopes = _workflow_permissions(text)
+        if not scopes:
+            # The block must EXIST. A workflow with no workflow-level
+            # block inherits the REPOSITORY default, whose value the
+            # harness cannot know -- and the reusable workflow's jobs
+            # carry no blocks of their own, so they would inherit it
+            # too. The reusable workflow is a TOP-LEVEL workflow: it
+            # runs on every push to every branch.
+            out.append("the workflow %s has no workflow-level "
+                       "permissions block: it would inherit the "
+                       "repository default" % workflow_name)
+            continue
+        for scope, value in scopes:
             if value in ("write", "write-all"):
                 out.append("the workflow-level permissions of %s carry "
                            "%s: %s" % (workflow_name, scope, value))
@@ -1701,7 +1731,8 @@ def _step_conditions(job_body, job_level=True):
     conditions = []
     lines = job_body.split("\n")
     for index, line in enumerate(lines):
-        match = re.match(r"^\s*(?:-\s*)?if\s*:\s*(.*)$", line)
+        # The key may be QUOTED -- see _job_condition.
+        match = re.match(r"^\s*(?:-\s*)?['\"]?if['\"]?\s*:\s*(.*)$", line)
         if not match:
             continue
         if not job_level:
@@ -2397,8 +2428,13 @@ def _workflow_permissions(release):
             continue
         value = _unquote(_the_value_of_the_key(stripped))
         if value:
-            permissions = None
-            break
+            # The LAST one wins: a duplicate key is last-wins in YAML,
+            # and the platform takes the last one. The reader BROKE
+            # here, so a file whose FIRST permissions: was a scalar
+            # never reached the block that followed it -- and the
+            # elevation in that block was CERTIFIED.
+            permissions = [(value, value)]
+            continue
         # The BLOCK form: the scopes are deeper than the key, exactly
         # as in the per-job reader.
         base = len(line) - len(line.lstrip())
@@ -2415,22 +2451,7 @@ def _workflow_permissions(release):
                                    _unquote(match.group(2)).lower()))
     if permissions is not None:
         return permissions
-    if value is None:
-        return []
-    if value.startswith("{") and value.endswith("}"):
-        permissions = []
-        for part in value[1:-1].split(","):
-            part = _unquote(part.strip())
-            if not part:
-                continue
-            inner = re.match(r"^([\w-]+)\s*:\s*(\S+)$", part)
-            if inner:
-                permissions.append((inner.group(1),
-                                   _unquote(inner.group(2))))
-            else:
-                permissions.append((part, part))
-        return permissions
-    return [(value, value)]
+    return []
 
 
 # The pattern of a scope and its value, with the optional quotes and
