@@ -1798,7 +1798,7 @@ def _workflow_permissions(release):
             match = re.match(SCOPE_PATTERN, scope_line)
             if match:
                 permissions.append((match.group(1),
-                                   _unquote(match.group(2))))
+                                   _unquote(match.group(2)).lower()))
     if permissions is not None:
         return permissions
     if value is None:
@@ -1821,7 +1821,8 @@ def _workflow_permissions(release):
 
 # The pattern of a scope and its value, with the optional quotes and
 # any case: "contents: write", "'contents': 'write'", "Contents: Write".
-SCOPE_PATTERN = r'^[\"\']?([\w-]+)[\"\']?\s*:\s*(\S+)$'
+SCOPE_PATTERN = (r'^[\"\']?([\w-]+)[\"\']?\s*:\s*'
+                 r'[\"\']?(\S+?)[\"\']?$')
 
 
 def _job_permissions(job_body):
@@ -1851,13 +1852,13 @@ def _job_permissions(job_body):
                 if value.startswith("{") and value.endswith("}"):
                     inner = value[1:-1]
                     for part in inner.split(","):
-                        part = _unquote(part.strip())
+                        part = part.strip()
                         if not part:
                             continue
                         match = re.match(SCOPE_PATTERN, part)
                         if match:
                             permissions.append((match.group(1),
-                                               _unquote(match.group(2))))
+                                               match.group(2).lower()))
                         else:
                             permissions.append((part, part))
                     continue
@@ -1873,7 +1874,8 @@ def _job_permissions(job_body):
                 scope_line = follow.strip()
                 match = re.match(SCOPE_PATTERN, scope_line)
                 if match:
-                    permissions.append((match.group(1), match.group(2)))
+                    permissions.append((match.group(1),
+                                       match.group(2).lower()))
     return permissions
 
 
@@ -3274,7 +3276,7 @@ def load_jobs(path):
     while i < len(lines):
         line = lines[i]
         # A job header is "  name:" at the two-space indentation.
-        match = re.match(r"^  ([A-Za-z0-9_-]+):\s*$", line)
+        match = re.match(r"^  ([A-Za-z0-9_-]+):\s*(?:#.*)?$", line)
         if match:
             name = match.group(1)
             body = []
@@ -3288,7 +3290,7 @@ def load_jobs(path):
                 # A line that is less indented ends the job.
                 if not nxt.startswith("    ") and not nxt.startswith("  "):
                     break
-                if re.match(r"^  [A-Za-z0-9_-]+:\s*$", nxt):
+                if re.match(r"^  [A-Za-z0-9_-]+:\s*(?:#.*)?$", nxt):
                     break
                 body.append(nxt)
                 i += 1
