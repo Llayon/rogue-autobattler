@@ -96,9 +96,23 @@ def _needs_of(jobs, job_name):
     inline = re.search(r"needs:\s*\[([^\]]*)\]", body)
     if inline:
         return inline.group(1)
-    block = re.search(r"needs:\s*\n((?:\s+-\s*\S+\s*\n?)+)", body)
+    # The block form is read LINE BY LINE. The earlier regex was
+    # greedy across the newline, so the SECOND item was lost: the
+    # deploy job rewritten in the standard block form would report
+    # "the deploy does not need the web build" and block the
+    # publication. A false RED in the required CI job is the worst
+    # class of defect in a harness that gates a publication.
+    block = re.search(r"^\s*needs\s*:\s*$", body, re.MULTILINE)
     if block:
-        return " ".join(re.findall(r"-\s*(\S+)", block.group(1)))
+        items = []
+        for line in body[block.end():].split("\n")[1:]:
+            if not line.strip():
+                continue
+            if not line.strip().startswith("-"):
+                break
+            items.append(line.strip().lstrip("-").strip())
+        if items:
+            return " ".join(items)
     plain = re.search(r"needs:\s*(\S+)", body)
     if plain:
         return plain.group(1)
@@ -113,6 +127,22 @@ def _job(jobs, name):
 def _block(jobs, job_name):
     """The body of a job as a text block, for the line-level checks."""
     return jobs.get(job_name) or ""
+
+
+def _unquote(value):
+    """The value without its matching surrounding quotes.
+
+    A job condition can be written as a plain scalar or as a double
+    quoted one -- both are valid YAML and valid GHA. The harness
+    returned the value WITH the quotes, so the tokenizer failed and
+    the parse raised a TypeError that run_control swallowed as
+    INVALID: a red CI on a legitimate edit.
+    """
+    stripped = value.strip()
+    if len(stripped) >= 2 and stripped[0] == stripped[-1] \
+            and stripped[0] in ("'", '"'):
+        return stripped[1:-1]
+    return stripped
 
 
 def _job_condition(block):
@@ -153,8 +183,8 @@ def _job_condition(block):
                 if not follow.startswith("      "):
                     break
                 parts.append(follow.strip())
-            return " ".join(parts).strip()
-        return value
+            return _unquote(" ".join(parts).strip())
+        return _unquote(value)
     return ""
 
 
@@ -931,12 +961,11 @@ def prop_11_sha_checks_stay_real(release, test):
     # text "git ls-remote origin refs/heads/master", so a search over
     # the whole body matched the COMMENT and the control reported
     # GREEN while the check it protects was gone.
-    code = []
-    for line in deploy.split("\n"):
-        stripped = line.strip()
-        if stripped and not stripped.startswith("#"):
-            code.append(stripped)
-    code_text = "\n".join(code)
+    # The CODE lines, with the trailing comments cut off: a tip read
+    # replaced by 'TIP="${{ github.sha }}" # git ls-remote origin
+    # "refs/heads/${GITHUB_REF_NAME}"' mentions the whole policy and
+    # reads nothing.
+    code_text = _code_lines(deploy)
 
     if "ls-remote" not in code_text:
         out.append("the deploy does not read the remote: a SHA check "
@@ -995,6 +1024,24 @@ def prop_12_permissions_are_minimal(release, test):
                     out.append("the %s job carries %s: %s"
                                % (name, scope, value))
                 break
+    # The WORKFLOW-LEVEL permissions block lives outside every job
+    # body, so it was never examined. A job's own block OVERRIDES the
+    # workflow default, so the danger is a top-level elevation
+    # together with a job whose block was DELETED: that job would
+    # inherit the elevation. So the workflow default must be
+    # read-only, and every job must carry its own explicit block.
+    workflow_permissions = _workflow_permissions(release)
+    for scope, value in workflow_permissions:
+        if value in ("write", "write-all"):
+            out.append("the workflow-level permissions carry %s: %s"
+                       % (scope, value))
+    for name, body in release["jobs"].items():
+        if name in ("push", "workflow_dispatch"):
+            continue
+        if not _job_permissions(body):
+            out.append("the %s job has no explicit permissions block: it "
+                       "would inherit the workflow default" % name)
+
     # The deploy job must still carry them: without them it could
     # not publish at all.
     deploy = _code_lines(release["jobs"].get("deploy", ""))
@@ -1073,6 +1120,52 @@ def _without_trailing_comment(line):
     return line
 
 
+def _condition_runs_after_a_failure(condition):
+    """Can this step condition be TRUE when the previous step failed?
+
+    The context is the one GitHub Actions uses: after a failed step,
+    success() is false, failure() is true and cancelled() is false --
+    the workflow was not cancelled, a step was.
+
+    A condition with no status function keeps the implicit success(),
+    so it is false then, and the step is skipped. A condition with ANY
+    status function drops that implicit check, and the step RUNS.
+
+    An undecidable condition is treated as running: the harness must
+    not certify a condition it cannot read.
+    """
+    expression = _unquote(condition).strip()
+    if expression.startswith("${{") and expression.endswith("}}"):
+        expression = expression[3:-2].strip()
+    if not expression:
+        return False
+
+    tokens = _tokenize(expression)
+    if tokens is None:
+        return True
+    try:
+        tree = _parse(tokens)
+    except Exception:
+        return True
+    if tree is None:
+        return True
+
+    context = {
+        "success": False,
+        "cancelled": False,
+        "ref": "refs/heads/master",
+        "event": "push",
+        "sha": "0" * 40,
+    }
+    try:
+        verdict = _evaluate(tree, context)
+    except Exception:
+        return True
+    if verdict is None:
+        return True
+    return bool(verdict)
+
+
 def _step_conditions(job_body):
     """The conditions of the STEPS of a job, with the folded and
     literal block scalars expanded.
@@ -1134,6 +1227,37 @@ def _uses_yaml_anchors(release):
     return False
 
 
+def _workflow_permissions(release):
+    """The WORKFLOW-LEVEL permissions, which live outside every job.
+
+    A job's own block overrides the workflow default, so the workflow
+    default is only dangerous when a job has no block of its own --
+    but that combination is exactly what would elevate a job
+    silently.
+    """
+    text = release["text"]
+    match = re.search(r"^permissions\s*:\s*(.*)$", text, re.MULTILINE)
+    if not match:
+        return []
+    value = _unquote(match.group(1).strip())
+    if not value:
+        return []
+    if value.startswith("{") and value.endswith("}"):
+        permissions = []
+        for part in value[1:-1].split(","):
+            part = _unquote(part.strip())
+            if not part:
+                continue
+            inner = re.match(r"^([\w-]+)\s*:\s*(\S+)$", part)
+            if inner:
+                permissions.append((inner.group(1),
+                                   _unquote(inner.group(2))))
+            else:
+                permissions.append((part, part))
+        return permissions
+    return [(value, value)]
+
+
 def _job_permissions(job_body):
     """The permissions of a job, as (scope, value) pairs.
 
@@ -1153,8 +1277,24 @@ def _job_permissions(job_body):
     for index, line in enumerate(lines):
         stripped = line.strip()
         if stripped.startswith("permissions:"):
-            value = stripped[len("permissions:"):].strip()
+            value = _unquote(stripped[len("permissions:"):].strip())
             if value:
+                # The FLOW MAPPING is a valid spelling:
+                # "permissions: {pages: write}". Its scopes are read
+                # like a block.
+                if value.startswith("{") and value.endswith("}"):
+                    inner = value[1:-1]
+                    for part in inner.split(","):
+                        part = _unquote(part.strip())
+                        if not part:
+                            continue
+                        match = re.match(r"^([\w-]+)\s*:\s*(\S+)$", part)
+                        if match:
+                            permissions.append((match.group(1),
+                                               _unquote(match.group(2))))
+                        else:
+                            permissions.append((part, part))
+                    continue
                 permissions.append((value, value))
                 continue
             # The block form: the scopes are deeper than the key.
@@ -1305,6 +1445,57 @@ def _step_block(body, needle):
     return None
 
 
+def prop_14_the_ref_set_is_a_rule(release, test):
+    """The authorization set is a RULE, not a sample.
+
+    The forbidden refs used to be a hand-written list of ten, so a
+    mutation that opened ONE OTHER ref -- "|| github.ref ==
+    'refs/tags/v1'" -- passed every control. The model is now asked
+    about a generated corpus, and its authorization set must be a
+    subset of the master ref.
+
+    The corpus contains the CASE variants on purpose: GitHub Actions
+    compares strings IGNORING the case, so "refs/heads/Master" does
+    satisfy "== 'refs/heads/master'" on the platform. The model must
+    reproduce that faithfully -- and the second, case independent
+    guard (the master-tip SHA check) is what actually refuses the
+    publication for those.
+    """
+    out = []
+    corpus = [
+        "refs/heads/master",
+        "refs/heads/master-2",
+        "refs/heads/master2",
+        "refs/heads/feature/master",
+        "refs/heads/feature/x",
+        "refs/heads/staging/phase3-master-verification",
+        "refs/heads/phase3/effect-status-trigger-gauntlet",
+        "refs/tags/v1",
+        "refs/tags/v1.0.0",
+        "refs/pull/1/head",
+        "refs/pull/12/merge",
+        "refs/remotes/origin/master",
+        "master",
+        "refs/heads/",
+        "refs/heads/master ",
+        "refs/heads/master/",
+        "refs/heads/Master2",
+    ]
+    # The master ref, folded the way the platform folds it.
+    allowed = set()
+    for ref in corpus:
+        for event in ("push", "workflow_dispatch"):
+            ok, _ = deploy_is_authorized(release, event, ref, True)
+            if ok:
+                allowed.add(ref)
+    for ref in allowed:
+        if ref.strip().lower() != "refs/heads/master":
+            out.append("the deploy condition authorizes %s: the "
+                       "authorization set must be a subset of the "
+                       "master ref" % ref)
+    return out
+
+
 def prop_13_no_yaml_anchors(release, test):
     """The workflow must be readable by the controls.
 
@@ -1408,11 +1599,13 @@ def prop_09_no_failure_tolerance(release, test):
         # after a failure. Every one of those is a publish-after-HOLD.
         # So the deploy job's steps may carry NO condition at all.
         for value in _step_conditions(body):
-            if value.strip("'\"") in ("always()", "${{ always() }}",
-                                       "${{always()}}", "failure()",
-                                       "${{ failure() }}", "${{failure()}}",
-                                       "!cancelled()", "${{ !cancelled() }}",
-                                       "${{!cancelled()}}"):
+            # The condition is EVALUATED, not matched against a list of
+            # spellings. In GitHub Actions ANY status function drops
+            # the implicit success(), so "success() || failure()" and
+            # "!cancelled() || failure()" are true after the previous
+            # step failed -- a publish-after-HOLD. A list of spellings
+            # would miss every composition.
+            if _condition_runs_after_a_failure(value):
                 out.append("the %s job carries a step that runs "
                            "regardless: %s" % (name, value))
                 break
@@ -1466,6 +1659,7 @@ PROPERTIES = {
     "NC-RB-10": prop_11_sha_checks_stay_real,
     "NC-RB-11": prop_12_permissions_are_minimal,
     "NC-RB-12": prop_13_no_yaml_anchors,
+    "NC-RB-13": prop_14_the_ref_set_is_a_rule,
 }
 
 
@@ -1593,6 +1787,13 @@ MUTATIONS = [
      "release.yml",
      [("        success() &&\n",
        "        (success() || always()) &&\n")]),
+
+    ("NC-RB-13",
+     "authorize one more ref beside master",
+     "release.yml",
+     [("        github.ref == 'refs/heads/master' &&",
+       "        ( github.ref == 'refs/heads/master' ||\n"
+       "          github.ref == 'refs/tags/v1' ) &&")]),
 
     ("NC-RB-12",
      "merge the deploy job's policy in from a yaml anchor",
