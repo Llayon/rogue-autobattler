@@ -3420,6 +3420,73 @@ def prop_24_the_published_bytes_are_the_validated_bytes(release, test):
     return out
 
 
+def _the_steps_of(text):
+    """The steps of a workflow, as {name: body}.
+
+    The BODY is the block of the step -- the lines that follow its
+    name, until the indentation returns.
+    """
+    steps = {}
+    lines = text.replace("\r\n", "\n").split("\n")
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        match = re.match(r"^\s*-?\s*name:\s*(.+)$", line)
+        if not match:
+            index += 1
+            continue
+        name = _unquote(match.group(1).strip())
+        base = len(line) - len(line.lstrip())
+        # A step lives INSIDE a job. The workflow's own "name:" is at
+        # the top level, and the job headers are at two spaces -- so
+        # a step's name is DEEPER than the job's. A name at the
+        # workflow's own level is not a step.
+        if base <= 2:
+            index += 1
+            continue
+        body = []
+        index += 1
+        while index < len(lines):
+            follow = lines[index]
+            if not follow.strip():
+                body.append(follow)
+                index += 1
+                continue
+            if len(follow) - len(follow.lstrip()) <= base:
+                break
+            body.append(follow)
+            index += 1
+        steps[name] = "\n".join(body)
+    return steps
+
+
+def _the_step_carries_a_command(body):
+    """Does this step's body RUN anything?
+
+    A step that only echoes is a step that does no work -- so a
+    mandatory step whose body lost its command is a gate that was
+    neutered, not a gate that was renamed.
+    """
+    for line in body.split("\n"):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        # The body of a step: a "run:" key with a command, or a
+        # "uses:" key with an action.
+        if stripped.startswith("run:"):
+            value = stripped[len("run:"):].strip()
+            if not value:
+                # A block scalar: the command is on the next lines.
+                return True
+            # An "echo" is not work: it prints and exits.
+            if re.match(r"^echo\b", value):
+                return False
+            return True
+        if stripped.startswith("uses:"):
+            return True
+    return False
+
+
 def prop_23_the_mandatory_steps_are_present(release, test):
     """Every mandatory step of the reusable workflow must EXIST.
 
@@ -3447,6 +3514,18 @@ def prop_23_the_mandatory_steps_are_present(release, test):
         if step not in present:
             out.append("the reusable workflow has no %r step: a deleted "
                        "gate is a removed gate" % step)
+    # And a mandatory step must CARRY A COMMAND, not only its NAME.
+    # A step can keep its name and lose its work: "Run legacy
+    # regression suite" rewritten to "run: echo ok" satisfies the
+    # list, and every property stays silent. The gate step can be
+    # DELETED (caught) but NEUTERED (not caught) -- the same class as
+    # "a deleted gate is a removed gate", one level down.
+    for step, body in _the_steps_of(test["text"]).items():
+        if step not in MANDATORY_TEST_STEPS:
+            continue
+        if not _the_step_carries_a_command(body):
+            out.append("the %r step carries no command: a step that runs "
+                       "nothing is not a step that runs the suite" % step)
     # And the steps that are PRESENT must be the ones that were
     # expected: the named list covers only part of the workflow, and a
     # step that is not on it can be deleted without the list noticing.
