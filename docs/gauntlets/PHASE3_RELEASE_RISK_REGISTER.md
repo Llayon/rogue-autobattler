@@ -72,6 +72,46 @@
              manual staging/phase3/feature/tag/pull_request/schedule
              DENY, a failed required job DENY.
 
+### H-13 — the model was stricter than the platform it models
+
+    Status:  PROVEN DEFECT — FIXED
+    Found:   the model mapped cancelled() to "the needs did not
+             succeed", which made !cancelled() equivalent to
+             success(). The platform says otherwise: !cancelled() is
+             TRUE even when a needed job FAILED -- it is the
+             documented way to run a job "regardless of its success
+             or failure". So the model was STRICTER than the platform
+             and reported a policy the platform does not enforce: a
+             deploy job guarded by !cancelled() was reported as safe
+             while the platform would run it on a red CI and publish
+             the artifact of a SHA whose tests failed.
+             Found by the independent critic.
+    Fix:     the model now reproduces the platform exactly:
+             success() with a RED need is False, !cancelled() with a
+             RED need is True, cancelled() with a RED need is False.
+    Proof:   the same rule is applied everywhere the model touches
+             the platform: it must be neither stricter nor looser.
+             The case folding was already made LOOSER on purpose,
+             for exactly the same reason.
+
+### H-14 — a second publication step and a comparison in an echo
+
+    Status:  PROVEN DEFECT — FIXED
+    Found:   two more ways to break the release gate that every
+             control missed, found by building adversarial mutations
+             directly:
+               a SECOND deploy-pages step was invisible -- the checks
+               look at the deploy job's body, so one guarded
+               publication plus one unguarded publication is an
+               unguarded publication
+               the comparison could be moved into an echo: a check
+               that merely MENTIONS a comparison is not a check, it
+               prints a message and continues
+    Fix:     the property requires EXACTLY ONE publication step and
+             nothing after it, and the comparisons must be
+             CONDITIONS -- in the tip-check and in the master check
+             alike.
+
 ### H-12 — the controls asserted a FRAGMENT of a mechanism
 
     Status:  PROVEN DEFECT — FIXED
