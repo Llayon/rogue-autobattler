@@ -1250,11 +1250,31 @@ def _workflow_permissions(release):
     silently.
     """
     text = release["text"]
-    match = re.search(r"^permissions\s*:\s*(.*)$", text, re.MULTILINE)
-    if not match:
-        return []
-    value = _unquote(match.group(1).strip())
-    if not value:
+    lines = text.split("\n")
+    value = None
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if not stripped.startswith("permissions:"):
+            continue
+        value = _unquote(stripped[len("permissions:"):].strip())
+        if value:
+            break
+        # The BLOCK form: the scopes are deeper than the key, exactly
+        # as in the per-job reader.
+        base = len(line) - len(line.lstrip())
+        permissions = []
+        for follow in lines[index + 1:]:
+            if not follow.strip():
+                continue
+            if len(follow) - len(follow.lstrip()) <= base:
+                break
+            scope_line = follow.strip()
+            match = re.match(r"^([\w-]+)\s*:\s*(\S+)$", scope_line)
+            if match:
+                permissions.append((match.group(1),
+                                   _unquote(match.group(2))))
+        return permissions
+    if value is None:
         return []
     if value.startswith("{") and value.endswith("}"):
         permissions = []
