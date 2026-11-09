@@ -164,14 +164,6 @@ def _needs_of(jobs, job_name):
     return ""
 
 
-def _job(jobs, name):
-    """The body of a job, as text."""
-    return jobs.get(name) or ""
-
-
-def _block(jobs, job_name):
-    """The body of a job as a text block, for the line-level checks."""
-    return jobs.get(job_name) or ""
 
 
 def _unquote(value):
@@ -1101,7 +1093,7 @@ def prop_11_sha_checks_stay_real(release, test):
         holds = False
         for line in block.split("\n"):
             stripped = line.strip()
-            if stripped.startswith("if ") and "-z" in stripped:
+            if _is_an_emptiness_test(stripped):
                 # The variable belongs to the block: the tip check
                 # tests TIP and the master check tests MASTER_SHA.
                 if not _tests_variable(stripped, variable):
@@ -1113,6 +1105,26 @@ def prop_11_sha_checks_stay_real(release, test):
         if not holds:
             out.append("%s does not fail closed: an unreadable tip must "
                        "be a HOLD, never a GREEN" % label)
+            continue
+        # The COMPARISON that follows must refuse when the tip
+        # differs, and it must NOT be guarded by the tip's own
+        # emptiness. A guard of "[ -n \"$VAR\" ] && [ ... ]" makes
+        # the comparison skip an unreadable tip -- so the tip is
+        # never compared with the published SHA, and the deployment
+        # proceeds on a tip nobody read.
+        comparison = _the_comparison_of(block, variable)
+        if comparison is None:
+            out.append("%s does not compare the tip with the published "
+                       "SHA" % label)
+            continue
+        if not _condition_refuses(block, comparison):
+            out.append("%s does not refuse a tip that differs from the "
+                       "published SHA" % label)
+            continue
+        if _guards_on_the_emptiness(comparison, variable):
+            out.append("%s guards its comparison on the tip's own "
+                       "emptiness: an unreadable tip would sail on"
+                       % label)
     return out
 
 
@@ -1540,30 +1552,6 @@ def _run_block(raw_body, command):
     return []
 
 
-def _step_lines(code, target):
-    """The lines of the STEP a line belongs to.
-
-    The step is the run body: the lines that follow the "run:" and
-    are deeper than it. A "set +e" on its own line disables the
-    errexit for the whole step, so the rule must read the step and
-    not the single line.
-    """
-    lines = code.split("\n")
-    for index, line in enumerate(lines):
-        if line.strip() != target.strip():
-            continue
-        base = len(line) - len(line.lstrip())
-        block = []
-        for follow in lines[index + 1:]:
-            if not follow.strip():
-                block.append(follow)
-                continue
-            if len(follow) - len(follow.lstrip()) <= base:
-                break
-            block.append(follow)
-        return block
-    return []
-
 
 def _is_a_publishing_step(line):
     """Does this step publish?
@@ -1592,9 +1580,13 @@ def _body_publishes(body):
     CONTINUATION line, and a line-by-line scan would miss it.
     """
     text = body.replace("\\\n", " ")
-    # A push to the Pages branch.
-    if re.search(r"git\s+push[^\n]*\b(?:gh-pages|refs/heads/site)\b",
-                 text):
+    # A push to a BRANCH publishes to the Pages branch of a
+    # repository deployed from a branch -- and that branch is
+    # whatever the Pages setting names: "gh-pages", "site", "docs",
+    # "main". A rule that named two of them would miss the rest, so
+    # the rule is a property: ANY push in the deploy job publishes,
+    # because the deploy job has nothing to push.
+    if re.search(r"git\s+push\b", text):
         return True
     # A call to the Pages API.
     if re.search(r"(?:curl|wget|gh\s+api|http\b)[^\n]*"
@@ -1690,40 +1682,6 @@ def _runs_a_command(line, script):
     return script in first
 
 
-def _the_gate_command_is_not_last(line):
-    """Does something follow the gate command in its run block?
-
-    The gate command must be the LAST command of the block: anything
-    after it can discard its status, and the list of the constructs
-    that do so is never complete -- a pipeline, a conditional, an
-    explicit exit, a do-nothing command.
-    """
-    stripped = _without_trailing_comment(line.strip())
-    stripped = re.sub(r"^run:\s*", "", stripped)
-    if not re.match(r"^(?:python3?|py)\s+", stripped):
-        return False
-    # The gate command is on this line. What follows it, on this line
-    # or on the next lines of the block, decides the step's status.
-    # The gate commands are "python <script>": the tail after the
-    # script is what decides the status. An ARGUMENT is not a
-    # swallow -- "python tools/x.py --verbose" runs the gate -- but an
-    # OPERATOR is.
-    after = stripped.split(None, 2)
-    tail = after[2] if len(after) > 2 else ""
-    tail = tail.strip()
-    if not tail:
-        return False
-    # The operators that discard the status.
-    if re.match(r"^(?:\|\||\||&&|;|\||&|if\b|then\b|else\b|fi\b|\{)",
-                tail):
-        return True
-    # Anything else after the script on the same line is a wrapper --
-    # "if ! python ..." starts with "if", and a redirection is not a
-    # swallow.
-    if re.match(r"^(?:if\b|!\b|\()", tail):
-        return True
-    return False
-
 
 def _the_deploy_condition(release):
     """The JOB-LEVEL condition of the deploy job."""
@@ -1810,6 +1768,54 @@ def _block_sets_pipefail(block):
     return False
 
 
+def _is_an_emptiness_test(line):
+    """Is this line a test of a variable's EMPTINESS?
+
+    The spellings are: "-z", "-n" (negated), "! -s", "= \"\"", and
+    the long "test -z" / "test -n". A rule that recognised one of
+    them would miss the others, and the readability HOLD is the
+    property that keeps an unreadable tip from being a GREEN.
+    """
+    stripped = _without_trailing_comment(line.strip())
+    if not stripped:
+        return False
+    if not (stripped.startswith("if ")
+            or stripped.startswith("elif ")
+            or stripped.startswith("while ")
+            or stripped.startswith("[ ")
+            or stripped.startswith("test ")):
+        return False
+    if re.search(r"(?:^|[\s\[!])-z\b", stripped):
+        return True
+    if re.search(r"=\s*[\"']{2}", stripped):
+        return True
+    return False
+
+
+def _disables_the_errexit(line):
+    """Does this line disable the errexit?
+
+    "set +e" and "set +o errexit" are the same construct -- the short
+    and the POSIX long spelling -- and either one disables the
+    errexit for the whole block, so the gate's failure does not stop
+    the step. The rule knows only the spelling it was written for.
+    """
+    stripped = _without_trailing_comment(line.strip())
+    if not re.match(r"^set\s", stripped):
+        return False
+    flags = stripped[3:].strip()
+    # "set +e", "set +eu", "set +o errexit", "set +o pipefail"
+    for part in flags.split(";"):
+        part = part.strip()
+        if re.match(r"^\+[A-Za-z]*e[A-Za-z]*$", part):
+            return True
+        if re.match(r"^\+o\s+errexit$", part):
+            return True
+        if part.startswith("+o") and "errexit" in part:
+            return True
+    return False
+
+
 def _discards_the_status(tail, block=""):
     """Does this tail discard the gate's status?
 
@@ -1836,6 +1842,10 @@ def _discards_the_status(tail, block=""):
             if block and _block_sets_pipefail(block):
                 return False
             return True
+    # A BACKGROUNDED command's status is discarded: the step exits 0
+    # whatever the command reports.
+    if tail.rstrip().endswith("&"):
+        return True
     # A tail that is only an ARGUMENT runs the gate and nothing else.
     if re.match(r"^(?:--\S+|-\S+)(?:\s+--?\S+)*$", tail):
         return False
@@ -2115,6 +2125,67 @@ def _exit_is_a_refusal(block, condition):
     return False
 
 
+def _the_comparison_of(block, variable):
+    """The condition in this block that COMPARES the tip.
+
+    It is the condition that names the variable AND compares it with
+    something else -- "if [ \"$VAR\" != \"$SHA\" ]".
+    """
+    for line in block.split("\n"):
+        stripped = line.strip()
+        if not stripped.startswith("if "):
+            continue
+        if variable not in stripped:
+            continue
+        core = _condition_core(stripped)
+        if "!=" in core or "==" in core:
+            return stripped
+    return None
+
+
+def _guards_on_the_emptiness(condition, variable):
+    """Does this condition guard on the variable's own EMPTINESS?
+
+    "[ -n \"$VAR\" ] && [ \"$VAR\" != \"$SHA\" ]" skips the
+    comparison when the variable is empty -- so an unreadable tip is
+    never compared with the published SHA, and the deployment goes
+    on. The rule that recognised only "-z" missed it.
+    """
+    core = _condition_core(condition)
+    if re.search(r"-n\s", core):
+        # The guard is a problem only when it guards the COMPARISON:
+        # "[ -n \"$VAR\" ] && [ ... ]".
+        if "&&" in core:
+            return True
+        # "[ -n \"$VAR\" ]" alone is a non-empty test -- it is the
+        # readability check in the wrong direction, and it was caught
+        # by the emptiness rule above.
+        return True
+    return False
+
+
+def _condition_core(condition):
+    """The CORE of a shell condition.
+
+    "if [ -z \"$VAR\" ]; then", "[ -z \"$VAR\" ]" and
+    "test -z \"$VAR\"" are the same test in three spellings. The
+    core is the test itself, so the rules can compare the condition
+    they are about with the line in the workflow.
+    """
+    stripped = _without_trailing_comment(condition.strip())
+    stripped = re.sub(r"^if\s+", "", stripped)
+    stripped = re.sub(r"^elif\s+", "", stripped)
+    stripped = re.sub(r"^while\s+", "", stripped)
+    stripped = re.sub(r"^;\s*then\s*$", "", stripped)
+    stripped = re.sub(r";\s*then\s*$", "", stripped)
+    stripped = re.sub(r"^test\s+", "", stripped)
+    stripped = stripped.strip()
+    # The bracket form: "[ -z \"$VAR\" ]".
+    if stripped.startswith("[") and stripped.endswith("]"):
+        stripped = stripped[1:-1].strip()
+    return " ".join(stripped.split())
+
+
 def _condition_refuses(block, condition):
     """Does the GIVEN condition refuse?
 
@@ -2125,17 +2196,19 @@ def _condition_refuses(block, condition):
     """
     lines = block.split("\n")
     inside = False
+    # The condition may be written "if <test>; then", "[ <test> ]", or
+    # "test <test>". So the line is matched by its CONTENT: the "if "
+    # prefix and the "; then" suffix are stripped, and the test that
+    # remains must be the one the caller passed in.
+    wanted = _condition_core(condition)
     for line in lines:
         stripped = line.strip()
         if not inside:
-            # The line must BE the condition: it may carry the
-            # refusal on the same line, which is a legal and normal
-            # way to write it.
-            if stripped == condition or stripped.startswith(condition + " "):
+            if _condition_core(stripped) == wanted:
                 inside = True
                 # The refusal may already be on this line.
-                tail = stripped[len(condition):]
-                if "exit " in tail:
+                tail = stripped[len(stripped):]
+                if "exit " in stripped:
                     return True
             continue
         if "exit " in stripped:
@@ -2144,46 +2217,6 @@ def _condition_refuses(block, condition):
             return False
     return False
 
-
-def _refuses(block):
-    """Does this block REFUSE, or only notice?
-
-    A condition that prints a message and continues is not a refusal.
-    The refusal must be INSIDE the condition: an `exit 1` a few lines
-    below, in a DIFFERENT condition, is a different mechanism.
-
-    So the check is: the `if` line, and the `exit` that follows it,
-    must be in the SAME condition -- that is, before the matching
-    `fi`.
-    """
-    if block is None:
-        return False
-    lines = block.split("\n")
-    for index, line in enumerate(lines):
-        stripped = line.strip()
-        if not stripped.startswith("if "):
-            continue
-        if "exit " in stripped:
-            # A single-line condition: `if [ ... ]; then exit 1; fi`.
-            return True
-        # A block condition: the exit must come before the `fi`, and
-        # it must belong to THIS condition.
-        depth = 0
-        for follow in lines[index + 1:]:
-            follow_stripped = follow.strip()
-            if follow_stripped.endswith("then"):
-                depth += 1
-                continue
-            if follow_stripped == "fi" or follow_stripped.startswith("fi "):
-                if depth == 0:
-                    break
-                depth -= 1
-                continue
-            if depth == 0 and follow_stripped.startswith("if "):
-                break
-            if "exit " in follow_stripped:
-                return True
-    return False
 
 
 def _step_block(body, needle):
@@ -2385,12 +2418,17 @@ def prop_16_the_concurrency_group_is_real(release, test):
     # carries the SHA lets two runs of the SAME ref run at the same
     # time -- the second is not queued behind the first, and the
     # freshness guarantee is gone.
-    for other in ("github.sha", "github.head_ref", "github.run_id",
-                  "github.run_number", "github.actor"):
-        if other in group:
-            out.append("the concurrency group %s carries %s: two runs "
-                       "of the same ref would not queue behind each "
-                       "other" % (group, other))
+    # The group must carry the ref and NOTHING ELSE. A deny-list of
+    # the fields that were thought of is the class of rule that this
+    # series has closed nine times over: the next field -- ref_type,
+    # run_attempt, event.number -- passes it. So the rule is a
+    # property: the group's context fields must be the ref and only
+    # the ref.
+    for field in re.findall(r"github\.([A-Za-z_][A-Za-z0-9_]*)", group):
+        if field != "ref":
+            out.append("the concurrency group %s carries github.%s: "
+                       "two runs of the same ref would not queue "
+                       "behind each other" % (group, field))
 
     # The flag the workflow's own comment depends on. With
     # cancel-in-progress: true the in-flight older run is CANCELLED,
@@ -2633,7 +2671,7 @@ def prop_19_the_gate_is_not_swallowed(release, test):
                 # disables the errexit for the whole block, so the
                 # gate's failure does not stop the step.
                 for before in block_lines[:index]:
-                    if "set +e" in before:
+                    if _disables_the_errexit(before):
                         swallowed = True
                         break
                 continued = False
@@ -3701,6 +3739,10 @@ def check_registry():
     """
     violations = []
 
+    # This file's own source, for the call count below.
+    with io.open(os.path.abspath(__file__), encoding="utf-8") as f:
+        src = f.read()
+
     # The controls that measure the VALIDATOR rather than the gate.
     validator_controls = {"NC-REL-06", "NC-REL-08"}
 
@@ -3720,6 +3762,21 @@ def check_registry():
     registered = set(v.__name__ for v in PROPERTIES.values())
     for name in sorted(defined - registered):
         violations.append("the property %s is defined but not registered" % name)
+
+    # Every HELPER that is defined must be called: a helper nobody
+    # calls is a rule that does not run. The tenth reviewer found
+    # five of them -- and one of them was the implementation of the
+    # positional rule, superseded by a rule that misses the class.
+    # Dead code of this kind is where the next hole hides.
+    for key, value in sorted(globals().items()):
+        if not key.startswith("_") or not callable(value):
+            continue
+        if key.startswith("__"):
+            continue
+        calls = len(re.findall(r"(?<!def )\b%s\(" % re.escape(key), src))
+        if calls == 0:
+            violations.append("the helper %s is defined and never called: "
+                              "it is a rule that does not run" % key)
 
     # Every registered property must be used by at least one control:
     # a property nothing calls is a property nothing checks.
