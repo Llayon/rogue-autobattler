@@ -1120,6 +1120,47 @@ def _without_trailing_comment(line):
     return line
 
 
+def _condition_disables_the_step(condition):
+    """Is this step condition NEVER true?
+
+    "if: false" -- and its spellings -- DISABLES the step. A disabled
+    tip check or a disabled artifact validation is a REMOVED check,
+    and the harness has to see it: the other evaluation asks whether
+    a condition can be true after a failure, and "false" is not, so
+    that question alone would pass it.
+    """
+    expression = _unquote(condition).strip()
+    if expression.startswith("${{") and expression.endswith("}}"):
+        expression = expression[3:-2].strip()
+    if not expression:
+        return False
+
+    tokens = _tokenize(expression)
+    if tokens is None:
+        return False
+    try:
+        tree = _parse(tokens)
+    except Exception:
+        return False
+    if tree is None:
+        return False
+
+    # The condition is evaluated in a context where everything is
+    # true, so a condition that is still false there can never hold.
+    context = {
+        "success": True,
+        "cancelled": False,
+        "ref": "refs/heads/master",
+        "event": "push",
+        "sha": "0" * 40,
+    }
+    try:
+        verdict = _evaluate(tree, context)
+    except Exception:
+        return False
+    return verdict is False
+
+
 def _condition_runs_after_a_failure(condition):
     """Can this step condition be TRUE when the previous step failed?
 
@@ -1700,15 +1741,29 @@ def prop_09_no_failure_tolerance(release, test):
         # after a failure. Every one of those is a publish-after-HOLD.
         # So the deploy job's steps may carry NO condition at all.
         for value in _step_conditions(body):
-            # The condition is EVALUATED, not matched against a list of
-            # spellings. In GitHub Actions ANY status function drops
-            # the implicit success(), so "success() || failure()" and
-            # "!cancelled() || failure()" are true after the previous
-            # step failed -- a publish-after-HOLD. A list of spellings
-            # would miss every composition.
+            # EVERY condition on a deploy-job step is refused, and
+            # the condition is EVALUATED rather than matched against a
+            # list of spellings.
+            #
+            # A step without a condition is the safe form. A
+            # condition changes what the step does, and there are
+            # three ways that matters, all of them openings:
+            #   "if: false"         DISABLES the step -- and a
+            #                        disabled tip check or artifact
+            #                        validation is a removed check
+            #   "if: always()"      runs it REGARDLESS
+            #   "if: failure()"     runs it AFTER A FAILURE
+            #
+            # The last two are caught by evaluating the condition
+            # against a failed previous step; the first is not, so
+            # the whole class is refused.
             if _condition_runs_after_a_failure(value):
                 out.append("the %s job carries a step that runs "
                            "regardless: %s" % (name, value))
+                break
+            if _condition_disables_the_step(value):
+                out.append("the %s job carries a step that is disabled: "
+                           "%s" % (name, value))
                 break
     return out
 
