@@ -2655,12 +2655,19 @@ REF_SHAPES = (
     "refs/heads/{name}/",
 )
 
-# The events GitHub can deliver.
+# The events GitHub can deliver. The list covers every event the
+# platform documents -- a rule that keys on a spelling cannot rely on
+# the list, because the authorization set is DERIVED from the
+# expression -- but the corpus must still be complete, or a name
+# nobody thought of would be invisible.
 EVENT_NAMES = (
     "push", "workflow_dispatch", "pull_request", "pull_request_target",
     "schedule", "workflow_run", "issue_comment", "release",
     "repository_dispatch", "create", "delete", "fork", "watch",
-    "deployment", "status", "page_build", "check_run", "check_suite",
+    "deployment", "deployment_status", "status", "page_build",
+    "check_run", "check_suite", "merge_group", "branch_protection_rule",
+    "repository_rule", "milestone", "public", "project",
+    "discussion", "discussion_comment", "label", "gollum",
 )
 
 
@@ -2676,8 +2683,19 @@ def _generate_ref_corpus():
 
 
 def _generate_event_corpus():
-    """Every event the corpus covers."""
-    return sorted(EVENT_NAMES)
+    """Every event the corpus covers, with its case variants.
+
+    The platform folds the case of a string comparison, so "Push" and
+    "PUSH" are the same event to it. A rule that keyed on one
+    spelling must not be able to hide behind another, so the corpus
+    carries the variants too.
+    """
+    events = set()
+    for name in EVENT_NAMES:
+        events.add(name)
+        events.add(name.upper())
+        events.add(name.capitalize())
+    return sorted(events)
 
 
 def prop_14_the_ref_set_is_a_rule(release, test):
@@ -2741,7 +2759,7 @@ def prop_14_the_ref_set_is_a_rule(release, test):
         # The master's spellings: the full ref and the branch name,
         # folded the way the platform folds the case.
         if ref.strip().lower() in ("refs/heads/master", "master"):
-            if event not in ("push", "workflow_dispatch"):
+            if event.strip().lower() not in ("push", "workflow_dispatch"):
                 out.append("the deploy condition authorizes %s on %s: the "
                            "authorization set must be a subset of the "
                            "push and dispatch events" % (ref, event))
