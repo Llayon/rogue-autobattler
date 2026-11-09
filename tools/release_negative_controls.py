@@ -2191,6 +2191,16 @@ def prop_16_the_concurrency_group_is_real(release, test):
         out.append("the concurrency group %s is constant: the "
                    "deployments of different refs would queue behind "
                    "each other" % group)
+    # The group must be per REF and NOTHING ELSE. A group that also
+    # carries the SHA lets two runs of the SAME ref run at the same
+    # time -- the second is not queued behind the first, and the
+    # freshness guarantee is gone.
+    for other in ("github.sha", "github.head_ref", "github.run_id",
+                  "github.run_number", "github.actor"):
+        if other in group:
+            out.append("the concurrency group %s carries %s: two runs "
+                       "of the same ref would not queue behind each "
+                       "other" % (group, other))
 
     # The flag the workflow's own comment depends on. With
     # cancel-in-progress: true the in-flight older run is CANCELLED,
