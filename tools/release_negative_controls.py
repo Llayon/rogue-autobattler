@@ -939,6 +939,14 @@ def prop_07_branch_authorization(release, test):
             for line in master_block.split("\n"):
                 stripped = line.strip()
                 if stripped.startswith("if ") and "-z" in stripped:
+                    # The condition must test the MASTER's own
+                    # variable: a condition that tests another one
+                    # holds for the wrong tip and sails on for the
+                    # right one.
+                    if not _tests_variable(stripped, "MASTER_SHA"):
+                        out.append("the master check tests another "
+                                   "variable for readability: %s" % stripped)
+                        break
                     holds = _condition_refuses(master_block, stripped)
                     break
             if not holds:
@@ -981,8 +989,9 @@ def prop_11_sha_checks_stay_real(release, test):
     if not re.search(r"ls-remote[^\n]*refs/heads/master", code_text):
         out.append("the deploy does not read the tip of master")
     # The fail-closed refusals: each must be inside its own condition.
-    for needle, label in (("tip of the branch", "the tip check"),
-                          ("master", "the master check")):
+    for needle, label, variable in (
+            ("tip of the branch", "the tip check", "TIP"),
+            ("master", "the master check", "MASTER_SHA")):
         block = _step_block(_body_without_comments(deploy), needle)
         if block is None:
             continue
@@ -990,6 +999,12 @@ def prop_11_sha_checks_stay_real(release, test):
         for line in block.split("\n"):
             stripped = line.strip()
             if stripped.startswith("if ") and "-z" in stripped:
+                # The variable belongs to the block: the tip check
+                # tests TIP and the master check tests MASTER_SHA.
+                if not _tests_variable(stripped, variable):
+                    out.append("%s tests another variable for "
+                               "readability: %s" % (label, stripped))
+                    break
                 holds = _condition_refuses(block, stripped)
                 break
         if not holds:
@@ -1398,6 +1413,22 @@ def _step_lines(code, target):
             block.append(follow)
         return block
     return []
+
+
+def _tests_variable(condition, variable):
+    """Does this condition test the given shell variable?
+
+    The readability check must be about the RIGHT tip: a condition
+    that tests another variable holds for the wrong tip and sails on
+    for the right one.
+    """
+    if ("$" + variable) not in condition:
+        return False
+    # And it must test it for EMPTINESS -- "-z" is the empty test and
+    # "-n" is the non-empty one, which tolerates the unreadable tip.
+    if re.search(r"-n\s+", condition):
+        return False
+    return True
 
 
 def _is_yaml_true(line, key):
