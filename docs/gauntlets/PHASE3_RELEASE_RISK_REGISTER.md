@@ -67,7 +67,7 @@
              Seven new controls, NC-RB-01..07, and the property
              asserts BOTH sides: the forbidden refs and events are
              refused AND the legitimate master push is still allowed.
-             25 of 25 controls are RED.
+             27 of 27 controls are RED.
              The matrix: push master ALLOW, manual master ALLOW,
              manual staging/phase3/feature/tag/pull_request/schedule
              DENY, a failed required job DENY.
@@ -428,7 +428,7 @@
              audit, the reachability audit and the three other
              negative-control harnesses all avoid yaml).
     Proof:   the controls were run under a python where importing yaml
-             raises ImportError, exactly as on a bare runner: 25 of 25
+             raises ImportError, exactly as on a bare runner: 27 of 27
              RED, exit 0. There is no "import yaml" anywhere in the
              repository now.
 
