@@ -21,7 +21,7 @@
     Proof:   tools/release_negative_controls.py — NC-REL-01..10 and NC-RB-01..07, all
              semantic RED; the clean gate ALLOWs the good scenario
              only.
-             EIGHT of the THIRTY ONE are GATE controls: they mutate the
+             EIGHT of the THIRTY THREE are GATE controls: they mutate the
              workflows and assert a property of the parsed result.
              NC-REL-06 and NC-REL-08 are VALIDATOR controls: they
              mutate the validator itself and compare two validator
@@ -67,10 +67,58 @@
              Seven new controls, NC-RB-01..07, and the property
              asserts BOTH sides: the forbidden refs and events are
              refused AND the legitimate master push is still allowed.
-             31 of 31 controls are RED.
+             33 of 33 controls are RED.
              The matrix: push master ALLOW, manual master ALLOW,
              manual staging/phase3/feature/tag/pull_request/schedule
              DENY, a failed required job DENY.
+
+### H-21 — the sixth review: nine gaps, the same class again
+
+    Status:  PROVEN DEFECT — FIXED
+    Found:   the sixth independent reviewer found the SAME CLASS of
+             hole the fifth review called HIGH, re-opened through a
+             different spelling, plus five more:
+
+               R6-01  the second-publisher detector was a TWO-TOKEN
+                      STRING SEARCH. A publisher that writes to the
+                      Pages branch directly carries neither
+                      "deploy-pages" nor "pages: write": it pushes to
+                      gh-pages with contents: write. So the premise
+                      was only certified for the two spellings the
+                      rule was written for.
+               R6-02  the swallowed-gate check was a list of command
+                      NAMES, and six gate commands were outside it.
+               R6-03  a mandatory step could be DELETED outright. The
+                      harness proved a step cannot be disabled, but
+                      not that it cannot be absent -- and deleting the
+                      step that runs the controls leaves the deploy
+                      publishing with nothing running them.
+               R6-04  the deploy job was exempt from the permissions
+                      check, so it could hold any elevated scope.
+               R6-05  only the release workflow's triggers were
+                      certified; a pull_request_target: trigger on
+                      the REUSABLE workflow is the classic privilege
+                      escalation shape.
+               R6-06  the documents carried hard-coded commit counts
+                      in the very block that claimed they were not
+                      hard-coded.
+               R6-07  the job-level condition filter matched "if"
+                      and "if " -- but the key is "if:", so the
+                      job-level guard came back as a step condition.
+               R6-08  cancel-in-progress: true would silently cancel
+                      the in-flight older run, contradicting the
+                      workflow's own comment.
+               R6-09  the upload path was not checked against the
+                      validated path.
+
+    Fix:     every rule is now a RULE and not a token list: a
+             publisher is any elevated permission, a Pages branch or
+             a Pages action; a swallowed gate is any python script
+             from the tools directory; a deleted gate is a named list
+             of steps that must be present; the deploy job holds
+             exactly three scopes; both workflows' triggers are
+             certified.
+    Proof:   the controls are 33 of 33 RED, with and without pyyaml.
 
 ### H-20 — the sixth review: the gate's result could be swallowed
 
@@ -96,7 +144,7 @@
              that exist. The timeout is required, except for a job
              that CALLS the reusable workflow: the called workflow
              carries it. The workflow's name is certified.
-    Proof:   the controls are 31 of 31 RED, with and without pyyaml.
+    Proof:   the controls are 33 of 33 RED, with and without pyyaml.
 
 ### H-19 — the fifth review: the harness could not see its own disablement
 
@@ -130,7 +178,7 @@
              its step conditions are read, so a disabled job or step
              is seen. The workflow directory is scanned for any other
              publisher.
-    Proof:   the controls are 31 of 31 RED, with and without pyyaml.
+    Proof:   the controls are 33 of 33 RED, with and without pyyaml.
 
     NOTE:   across five passes the WORKFLOW was never found broken.
              Every finding was in the proof. The distinction matters:
@@ -181,7 +229,7 @@
              authorization set is asserted over a generated corpus;
              the needs and the condition are read in every valid
              spelling.
-    Proof:   the controls are 31 of 31 RED, with and without pyyaml,
+    Proof:   the controls are 33 of 33 RED, with and without pyyaml,
              and the legitimate edits -- the needs in the block form,
              the condition in quotes -- still pass.
 
@@ -225,7 +273,7 @@
              code reader cuts the trailing comments off, with the
              quotes tracked; the model reproduces the platform
              exactly.
-    Proof:   the controls are 31 of 31 RED, with and without pyyaml,
+    Proof:   the controls are 33 of 33 RED, with and without pyyaml,
              and every scenario of the reviewer is detected.
 
 ### H-16 — the publication could come before the checks
@@ -316,7 +364,7 @@
              one. A mechanism's refusal must be inside its own step.
     Proof:   NC-RB-11 is the new control for the permissions. All of
              the critic's scenarios are detected, and the controls are
-             31 of 31 RED.
+             33 of 33 RED.
 
 ### H-11 — four bypasses were invisible to the controls
 
@@ -354,7 +402,7 @@
              and that the checks fail closed.
     Proof:   NC-RB-09 and NC-RB-10 are the new controls. All eight of
              the critic's adversarial mutations are now detected, and
-             the controls are 31 of 31 RED.
+             the controls are 33 of 33 RED.
 
 ### H-10 — the string comparison of the ref is case insensitive
 
