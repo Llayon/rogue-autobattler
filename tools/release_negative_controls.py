@@ -1187,7 +1187,12 @@ def prop_12_permissions_are_minimal(release, test):
     # The deploy job must still carry them: without them it could
     # not publish at all.
     deploy = _code_lines(release["jobs"].get("deploy", ""))
-    if "pages: write" not in deploy:
+    # The scope is read as a SCOPE: a text search for "pages: write"
+    # missed the quoted form -- "'pages': 'write'" -- and reported a
+    # deploy that could not publish.
+    deploy_scopes = {scope: value for scope, value
+                     in _job_permissions(release["jobs"].get("deploy", ""))}
+    if deploy_scopes.get("pages") != "write":
         out.append("the deploy job has no pages: write: it could not "
                    "publish")
 
