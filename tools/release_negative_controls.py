@@ -2707,10 +2707,10 @@ def _condition_refuses(block, condition):
                 inside = True
                 # The refusal may already be on this line.
                 tail = stripped[len(stripped):]
-                if "exit " in stripped:
+                if _the_exit_is_non_zero(stripped):
                     return True
             continue
-        if "exit " in stripped:
+        if _the_exit_is_non_zero(stripped):
             return True
         if stripped == "fi" or stripped.startswith("fi "):
             return False
@@ -2718,6 +2718,20 @@ def _condition_refuses(block, condition):
         # refusal is on the SAME line as the condition, after the
         # "then".
         if _one_line_refusal(stripped):
+            return True
+    return False
+
+
+def _the_exit_is_non_zero(line):
+    """Does this line exit NON-ZERO?
+
+    "exit 0" reports SUCCESS: the step ends, the job continues, and
+    the deploy PUBLISHES. So a refusal must exit non-zero -- and a
+    rule that only asked whether the block contained an "exit " at all
+    -- NOT which exit -- certified a fail-open.
+    """
+    for match in re.finditer(r"\bexit\s+(\d+)\b", line):
+        if int(match.group(1)) != 0:
             return True
     return False
 
