@@ -2590,8 +2590,13 @@ def _exit_is_a_refusal(block, condition):
     """
     lines = block.split("\n")
     inside = False
-    for line in lines:
+    data = _the_data_lines(lines)
+    if _the_condition_never_runs(condition):
+        return False
+    for index, line in enumerate(lines):
         stripped = line.strip()
+        if index in data:
+            continue
         if not inside:
             # The line must BE the condition: it may carry the
             # refusal on the same line, which is legal and normal.
@@ -2692,6 +2697,151 @@ def _condition_core(condition):
     return " ".join(stripped.split())
 
 
+def _the_data_lines(lines):
+    """The lines of the block that are DATA, not commands.
+
+    Three kinds of line carry data rather than a command:
+
+      * the body of a HERE-DOCUMENT -- "cat <<'HOLD' ... exit 1 ...
+        HOLD" -- the body is handed to the command's stdin, and the
+        command PRINTS it. The nineteenth reviewer reproduced this
+        with real bash: the publication was reached with rc=0.
+
+      * the continuation of a MULTI-LINE quoted string -- "MSG=\"
+        ... exit 1 ... \"" -- the quote state was reset for every
+        line, so the second line's "exit 1" looked like a command.
+
+      * the continuation of a BACKSLASH -- "echo \"HOLD\" \\" then
+        "exit 1" -- the backslash continues the echo, so the exit is
+        an ARGUMENT to it.
+
+      * the body of a nested condition that NEVER holds -- "if false;
+        then" on one line and "exit 1" on the next -- the shell
+        never runs that body.
+
+    Their indexes are returned, so the walk can skip them.
+    """
+    data = _the_data_lines_of_the_syntax(lines)
+    data |= _the_lines_of_a_never_true_condition(lines)
+    return data
+
+
+def _the_lines_of_a_never_true_condition(lines):
+    """The lines of a nested condition whose test can never hold."""
+    skipped = set()
+    index = 0
+    while index < len(lines):
+        stripped = lines[index].strip()
+        if _the_nested_condition_never_runs(stripped):
+            # The body runs until the matching "fi".
+            depth = 0
+            index += 1
+            while index < len(lines):
+                inner = lines[index].strip()
+                skipped.add(index)
+                if inner.startswith("if ") and inner.endswith("then"):
+                    depth += 1
+                elif inner == "fi" or inner.startswith("fi "):
+                    if depth == 0:
+                        break
+                    depth -= 1
+                index += 1
+        index += 1
+    return skipped
+
+
+def _the_data_lines_of_the_syntax(lines):
+    """The lines of the block that are DATA, not commands.
+
+    Three kinds of line carry data rather than a command:
+
+      * the body of a HERE-DOCUMENT -- "cat <<'HOLD' ... exit 1 ...
+        HOLD" -- the body is handed to the command's stdin, and the
+        command PRINTS it. The nineteenth reviewer reproduced this
+        with real bash: the publication was reached with rc=0.
+
+      * the continuation of a MULTI-LINE quoted string -- "MSG=\"
+        ... exit 1 ... \"" -- the quote state was reset for every
+        line, so the second line's "exit 1" looked like a command.
+
+      * the continuation of a BACKSLASH -- "echo \"HOLD\" \\" then
+        "exit 1" -- the backslash continues the echo, so the exit is
+        an ARGUMENT to it.
+
+    Their indexes are returned, so the walk can skip them.
+    """
+    data = set()
+    heredoc = None
+    quote = None
+    continued = False
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        # The body of a here-document is DATA until its terminator.
+        if heredoc is not None:
+            data.add(index)
+            if stripped == heredoc:
+                heredoc = None
+            continue
+        if quote is not None:
+            # The line continues an open quoted string.
+            data.add(index)
+            if quote in stripped:
+                quote = None
+            continue
+        if continued:
+            # The line continues the previous command.
+            data.add(index)
+            continued = stripped.endswith("\\")
+            continue
+        # A here-document opens: "cat <<'HOLD'" or "cat <<HOLD".
+        match = re.search(r"<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1", stripped)
+        if match:
+            heredoc = match.group(2)
+            continued = stripped.endswith("\\")
+            continue
+        # A quote that is not closed on this line stays open.
+        opened = _the_open_quote(stripped)
+        if opened:
+            quote = opened
+            continued = stripped.endswith("\\")
+            continue
+        continued = stripped.endswith("\\")
+    return data
+
+
+def _the_open_quote(line):
+    """The quote character a line opens and does not close."""
+    quote = None
+    index = 0
+    while index < len(line):
+        char = line[index]
+        if quote:
+            if char == quote:
+                quote = None
+            index += 1
+            continue
+        if char in "\"'":
+            quote = char
+        index += 1
+    return quote
+
+
+def _the_condition_never_runs(condition):
+    """Is this condition one that NEVER holds?
+
+    "if false; then exit 1; fi" -- the exit is nested in a
+    condition that is never true, so the shell never runs it. The
+    nineteenth reviewer reproduced this with real bash: the
+    publication was reached with rc=0.
+    """
+    core = _condition_core(condition)
+    if not core:
+        return False
+    if core.strip().lower() in ("false", "0", "''", '""'):
+        return True
+    return False
+
+
 def _condition_refuses(block, condition):
     """Does the GIVEN condition refuse?
 
@@ -2707,8 +2857,17 @@ def _condition_refuses(block, condition):
     # prefix and the "; then" suffix are stripped, and the test that
     # remains must be the one the caller passed in.
     wanted = _condition_core(condition)
-    for line in lines:
+    # The lines that carry DATA are not commands, so an "exit" in one
+    # of them is not a refusal.
+    data = _the_data_lines(lines)
+    # A refusal nested in a condition that never holds is not a
+    # refusal: the shell never runs it.
+    if _the_condition_never_runs(condition):
+        return False
+    for index, line in enumerate(lines):
         stripped = line.strip()
+        if index in data:
+            continue
         if not inside:
             if _condition_core(stripped) == wanted:
                 inside = True
@@ -2771,6 +2930,12 @@ def _the_exit_is_non_zero(line):
             # The command is a stage of a pipeline: the pipeline's
             # status is its LAST stage's, so this one is discarded.
             continue
+        if tail in ("||", "&&"):
+            # The command is ONE BRANCH of a list: "true || exit 1"
+            # runs the exit only if the true failed, and "false &&
+            # exit 1" runs it only if the false succeeded. Neither
+            # is a refusal -- the shell reaches the publication.
+            continue
         # The tail is what follows the command: a backgrounding "&",
         # a pipeline, a "|| true" -- anything that discards the
         # command's status and lets the step continue.
@@ -2790,6 +2955,22 @@ def _the_condition_is_closed(line):
     must not continue into the NEXT condition and borrow its exit.
     """
     return bool(re.search(r"\bfi\b", line))
+
+
+def _the_nested_condition_never_runs(command):
+    """Does this command open a condition that never holds?
+
+    "if false; then exit 1; fi" -- the body runs only when the test
+    holds, so the shell never runs the exit. The nineteenth reviewer
+    reproduced this with real bash: the publication was reached with
+    rc=0.
+    """
+    stripped = command.strip()
+    match = re.match(r"^if\s+(.*?)(?:;\s*then\b)?$", stripped, re.DOTALL)
+    if not match:
+        return False
+    test = _unquote(match.group(1).strip()).lower()
+    return test in ("false", "0", "''", '""')
 
 
 def _the_commands_of(line):
@@ -2826,9 +3007,48 @@ def _the_commands_of(line):
             index += 2
             continue
         if char == ";":
-            commands.append(("".join(current), ""))
+            # The ";" of an "if <test>; then" belongs to the "if" --
+            # it is not a command separator. So the whole condition is
+            # one command, and its body follows.
+            pending = "".join(current).strip()
+            if pending.startswith("if ") and not re.search(r";\s*then\b", pending):
+                current.append(char)
+                index += 1
+                continue
+            # An "if <test>; then <body>" carries its body: the body
+            # is a command of its own, and it runs only when the test
+            # holds. So the body must not be mistaken for a refusal
+            # that always happens -- nor for a refusal that never
+            # happens.
+            body = ""
+            if pending.startswith("if "):
+                match = re.match(r"^if\s+(.*?);\s*then\b(.*)$", pending,
+                                 re.DOTALL)
+                if match:
+                    # The command stays "if <test>" -- the reader must
+                    # see that the body is CONDITIONAL. The body is a
+                    # command of its own.
+                    pending = "if " + match.group(1).strip()
+                    body = match.group(2).strip()
+                    if body.endswith("; fi"):
+                        body = body[:-4].strip()
+                    elif body == "fi":
+                        body = ""
+            commands.append((pending, ""))
+            if body:
+                commands.append((body, ""))
             current = []
             index += 1
+            continue
+        if char == "&" and index + 1 < len(stripped) \
+                and stripped[index + 1] == "&":
+            # An AND-list: the second command runs only if the first
+            # SUCCEEDED. So a refusal there is conditional -- and the
+            # first command's failure ends the step anyway, by
+            # errexit, for the wrong reason.
+            commands.append(("".join(current), "&&"))
+            current = []
+            index += 2
             continue
         if char == "&" and (index + 1 >= len(stripped)
                             or stripped[index + 1] in " ;"):
@@ -2841,6 +3061,13 @@ def _the_commands_of(line):
         if char == "|" or (char == "&" and index + 1 < len(stripped)
                            and stripped[index + 1] == "&"):
             if char == "|":
+                if index + 1 < len(stripped) and stripped[index + 1] == "|":
+                    # An OR-list: the second command runs only if the
+                    # first FAILED. So a refusal there is conditional.
+                    commands.append(("".join(current), "||"))
+                    current = []
+                    index += 2
+                    continue
                 # A pipeline: the stages are separated, and the WHOLE
                 # pipeline's status is its last stage's.
                 commands.append(("".join(current), "|"))
@@ -2866,13 +3093,45 @@ def _the_commands_of(line):
     # "{ exit 1; }". The group's body is what the shell runs, so the
     # body is what the lexer must see.
     expanded = []
+    conditional = False
+    skip_until_fi = False
     for command, tail in cleaned:
+        # A nested condition that NEVER holds: its body is not a
+        # command the shell runs. "if false; then exit 1; fi" -- the
+        # nineteenth reviewer reproduced this with real bash: the
+        # publication was reached with rc=0.
+        if skip_until_fi:
+            if command.strip() == "fi":
+                skip_until_fi = False
+            continue
+        if _the_nested_condition_never_runs(command):
+            # The ONE-LINE form carries its body on the SAME line,
+            # after the "then": "if false; then exit 1; fi".
+            match = re.match(r"^if\s+(.*?);\s*then\b(.*)$", command.strip())
+            body = match.group(2).strip() if match else ""
+            if body:
+                # The body is data: the shell never runs it.
+                body = re.sub(r"\bexit\s+[+-]?\d+\b.*$", "", body).strip()
+                if body:
+                    expanded.append((body, ""))
+            skip_until_fi = True
+            continue
         body = _the_body_of_a_group(command)
         if body is None:
+            # A branch of a list inherits the list's conditionality:
+            # in "true || exit 1" the exit is only the OR-branch, and
+            # in "false && exit 1" it is only the AND-branch. So the
+            # shell does not necessarily run it.
+            if conditional:
+                tail = tail or "||"
             expanded.append((command, tail))
-            continue
-        for inner, inner_tail in _the_commands_of(body):
-            expanded.append((inner, inner_tail))
+        else:
+            for inner, inner_tail in _the_commands_of(body):
+                expanded.append((inner, inner_tail))
+        if tail in ("|", "||", "&&"):
+            conditional = True
+        else:
+            conditional = False
     return expanded
 
 
