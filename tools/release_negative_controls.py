@@ -2594,13 +2594,11 @@ def _exit_is_a_refusal(block, condition):
                 # exit is searched in the line itself, and the tail
                 # after the condition is searched too.
                 tail = stripped[len(condition):] or stripped
-                match = re.search(r"\bexit\s+(\d+)\b", tail)
-                if match:
-                    return int(match.group(1)) != 0
+                if _the_exit_is_non_zero(tail):
+                    return True
             continue
-        match = re.match(r"^exit\s+(\d+)", stripped)
-        if match:
-            return int(match.group(1)) != 0
+        if _the_exit_is_non_zero(stripped):
+            return True
         if stripped == "fi" or stripped.startswith("fi "):
             return False
     return False
@@ -2705,9 +2703,20 @@ def _condition_refuses(block, condition):
         if not inside:
             if _condition_core(stripped) == wanted:
                 inside = True
-                # The refusal may already be on this line.
+                # The refusal may already be on this line -- and the
+                # ONE-LINE form carries it there: "then exit 1; fi".
                 tail = stripped[len(stripped):]
                 if _the_exit_is_non_zero(stripped):
+                    return True
+                # A ONE-LINE condition ends at its own "fi": the
+                # refusal must belong to THIS condition, and a
+                # condition with no refusal of its own must not
+                # borrow the next condition's exit.
+                if _the_condition_is_closed(stripped):
+                    return False
+                # The one-line form's refusal is AFTER the "then" and
+                # BEFORE the "fi" -- and it is a COMMAND, not a string.
+                if _one_line_refusal(stripped):
                     return True
             continue
         if _the_exit_is_non_zero(stripped):
@@ -2723,17 +2732,137 @@ def _condition_refuses(block, condition):
 
 
 def _the_exit_is_non_zero(line):
-    """Does this line exit NON-ZERO?
+    """Does this line exit NON-ZERO, as a COMMAND that stops the step?
 
     "exit 0" reports SUCCESS: the step ends, the job continues, and
     the deploy PUBLISHES. So a refusal must exit non-zero -- and a
     rule that only asked whether the block contained an "exit " at all
     -- NOT which exit -- certified a fail-open.
+
+    But the token being there is not enough either. Three ways the
+    token was present and the refusal was harmless, all reproduced
+    with real bash under the platform's own shell:
+
+      * the token inside a QUOTED STRING -- "echo \"HOLD: exit 1\""
+        prints and continues; the step exits 0.
+      * the refusal BACKGROUNDED -- "exit 1 &" -- a backgrounded
+        command's status is discarded; the step exits 0.
+      * the refusal PIPED -- "exit 1 | true" -- the pipeline's status
+        is its LAST stage's, so the step exits 0 unless the block
+        sets pipefail.
+
+    So the exit must be a COMMAND: outside the quotes, not
+    backgrounded, and not swallowed by a pipeline -- and it must exit
+    non-zero.
     """
-    for match in re.finditer(r"\bexit\s+(\d+)\b", line):
-        if int(match.group(1)) != 0:
+    for command, tail in _the_commands_of(line):
+        if not _the_command_is_an_exit(command):
+            continue
+        if tail == "|":
+            # The command is a stage of a pipeline: the pipeline's
+            # status is its LAST stage's, so this one is discarded.
+            continue
+        # The tail is what follows the command: a backgrounding "&",
+        # a pipeline, a "|| true" -- anything that discards the
+        # command's status and lets the step continue.
+        if _discards_the_status(tail):
+            continue
+        match = re.match(r"^exit\s+(\d+)\b", command)
+        if match and int(match.group(1)) != 0:
             return True
     return False
+
+
+def _the_condition_is_closed(line):
+    """Is this condition closed on its OWN line?
+
+    "if [ -z "$V" ]; then echo "HOLD"; fi" is one line: its "fi"
+    ends it. The refusal must belong to the condition, so the walk
+    must not continue into the NEXT condition and borrow its exit.
+    """
+    return bool(re.search(r"\bfi\b", line))
+
+
+def _the_commands_of(line):
+    """The COMMANDS of a shell line.
+
+    A line may hold several commands, separated by ";" or by "&&" and
+    "||", and each command may carry a pipeline of its own. The
+    commands are what the shell RUNS -- the text inside the quotes is
+    data, not a command.
+
+    This is what a shell lexer does, and doing it properly is the
+    only way to tell a refusal from a string that merely mentions one.
+    """
+    stripped = line.strip()
+    commands = []
+    current = []
+    quote = None
+    index = 0
+    while index < len(stripped):
+        char = stripped[index]
+        if quote:
+            if char == quote:
+                quote = None
+            else:
+                current.append(char)
+            index += 1
+            continue
+        if char in "\"'":
+            quote = char
+            index += 1
+            continue
+        if char == "\\" and index + 1 < len(stripped):
+            # A line continuation: the next line continues this one.
+            index += 2
+            continue
+        if char == ";":
+            commands.append(("".join(current), ""))
+            current = []
+            index += 1
+            continue
+        if char == "&" and (index + 1 >= len(stripped)
+                            or stripped[index + 1] in " ;"):
+            # A BACKGROUNDED command: its status is discarded, so the
+            # step carries on whatever it reports.
+            commands.append(("".join(current), "&"))
+            current = []
+            index += 1
+            continue
+        if char == "|" or (char == "&" and index + 1 < len(stripped)
+                           and stripped[index + 1] == "&"):
+            if char == "|":
+                # A pipeline: the stages are separated, and the WHOLE
+                # pipeline's status is its last stage's.
+                commands.append(("".join(current), "|"))
+                current = []
+                index += 1
+                continue
+            commands.append(("".join(current), "&&"))
+            current = []
+            index += 2
+            continue
+        current.append(char)
+        index += 1
+    commands.append(("".join(current), ""))
+    # A command may OPEN with a shell keyword: "then exit 1", "do
+    # something", "else something". The keyword is not part of the
+    # command it introduces.
+    cleaned = []
+    for command, tail in commands:
+        command = re.sub(r"^(?:then|do|else)\b\s*", "", command.strip())
+        if command:
+            cleaned.append((command, tail))
+    return cleaned
+
+
+def _the_command_is_an_exit(command):
+    """Is this command an "exit"?
+
+    "exit 1" is a refusal; "echo exit 1" is not; "( exit 1 )" is a
+    subshell, which is a different mechanism.
+    """
+    return bool(re.match(r"^exit\b", command.strip()))
 
 
 def _one_line_refusal(line):
@@ -2751,9 +2880,9 @@ def _one_line_refusal(line):
     if not match:
         return False
     after = match.group(1)
-    if "exit " in after:
-        return True
-    return False
+    # The token must be a COMMAND, not a string that mentions one:
+    # "then echo \"HOLD: exit 1\"; fi" prints and continues.
+    return _the_exit_is_non_zero(after)
 
 
 
