@@ -79,6 +79,42 @@
              manual staging/phase3/feature/tag/pull_request/schedule
              DENY, a failed required job DENY.
 
+### H-37 — the seventeenth review: the refusal must exit non-zero
+
+    Status:  PROVEN DEFECT — FIXED
+    Found:   the seventeenth reviewer reproduced a HIGH with real bash:
+
+               "exit 0" in a refusal is a FAIL-OPEN. "exit 0" reports
+               SUCCESS: the step ends, the job continues, and the
+               deploy PUBLISHES. Under the platform's own shell:
+
+                 bash -e -c 'set -euo pipefail; MASTER_SHA="";
+                   if [ -z "$MASTER_SHA" ]; then echo HOLD; exit 0; fi'
+                 -> EXIT=0
+
+               The rule that the master check fails closed used
+               _condition_refuses, which only asked whether the block
+               contained an "exit " at all -- NOT which exit. So "exit
+               0" satisfied it and the harness was silent on a
+               workflow that publishes whatever the tip says.
+
+               NOTE: this is NOT the adjudicated "; exit 0" case.
+               There, errexit fires FIRST and the script exits 1. Here
+               the "exit 0" IS the refusal, so nothing fires before
+               it -- the step simply succeeds. The distinction is
+               exactly where the reasoning had been too coarse.
+
+    Fix:     commit 0d3e402 -- a refusal must exit NON-ZERO, and all
+             four refusals are now checked that way.
+    Proof:   the controls are 34 of 34 RED, with and without pyyaml;
+             each of the four "exit 0" mutations is now caught.
+
+    NOTE:   the seventeenth reviewer exhausted its iteration budget
+             before it could write its verdict, so its reasoning --
+             in the live transcript -- and its battery are the
+             evidence. Its battery and the sixteenth's are kept at
+             r17-work and r16-work.
+
 ### H-36 — the sixteenth review: the scope comment and the flow mapping
 
     Status:  PROVEN DEFECT — FIXED
