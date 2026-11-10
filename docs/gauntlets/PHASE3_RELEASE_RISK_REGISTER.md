@@ -79,6 +79,52 @@
              manual staging/phase3/feature/tag/pull_request/schedule
              DENY, a failed required job DENY.
 
+### H-42 — the shell lexer gets a unit test of its own
+
+    Status:  PROVEN DEFECT — FIXED
+    Found:   the nineteenth reviewer named the reason three classes of
+             hole survived in the lexer: "the lexer has no unit test of
+             its own".
+
+             Every rule in this harness is tested by MUTATING the
+             workflow -- but the lexer that reads the shell was only
+             ever tested through the workflow, so a hole in it was
+             invisible. Three classes of hole lived there: the token
+             in a quoted string, the backgrounded and the piped
+             refusal, and the refusal in the DATA of a here-document
+             or a continued string.
+
+    Fix:     commit 73eacea -- the lexer is tested DIRECTLY, against
+             a table of seventeen shell snippets with the expected
+             verdict for each, and the property also checks that the
+             WORKFLOW's own refusals -- every condition of the tip
+             check and of the master check -- are read as refusals.
+             Every entry of the table was verified with real bash
+             under the platform's own shell.
+    Proof:   the controls are 35 of 35 RED, with and without pyyaml.
+
+    THE PRINCIPLE, ANSWERED:
+      the harness cannot certify ITSELF -- an edit that makes a
+      property return [], deletes a property, or calls sys.exit(0)
+      early is invisible from inside it. That is INHERENT, and it is
+      not a reason to hold the branch. It can be closed only
+      EXTERNALLY, and the shapes are:
+
+        * a separate script that reads the harness as TEXT and asserts
+          its structural invariants -- every prop_* registered, the
+          mutation registry and the property registry equal, MUTATIONS
+          covering every property, no sys.exit(0) before the
+          summary, and the summary's count matching the registry;
+        * a committed DIGEST of the harness, compared by CI, so any
+          edit to the harness requires a deliberate, visible update;
+        * a CI job that runs the harness from a DIFFERENT file -- a
+          copy restored from a pinned ref -- so the harness under
+          test cannot rewrite its own judge.
+
+      Without one of these the harness's GREEN is a statement about
+      the harness as written, not about the workflow. The first shape
+      is the cheapest and the most local.
+
 ### H-41 — the nineteenth review: a refusal must be a command the shell RUNS
 
     Status:  PROVEN DEFECT — FIXED
