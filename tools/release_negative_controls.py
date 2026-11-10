@@ -2767,7 +2767,7 @@ def _the_exit_is_non_zero(line):
         # command's status and lets the step continue.
         if _discards_the_status(tail):
             continue
-        match = re.match(r"^exit\s+(\d+)\b", command)
+        match = re.search(r"\bexit\s+([+-]?\d+)\b", command)
         if match and int(match.group(1)) != 0:
             return True
     return False
@@ -2853,16 +2853,67 @@ def _the_commands_of(line):
         command = re.sub(r"^(?:then|do|else)\b\s*", "", command.strip())
         if command:
             cleaned.append((command, tail))
-    return cleaned
+    # A GROUP carries commands of its own: "( exit 1 )" and
+    # "{ exit 1; }". The group's body is what the shell runs, so the
+    # body is what the lexer must see.
+    expanded = []
+    for command, tail in cleaned:
+        body = _the_body_of_a_group(command)
+        if body is None:
+            expanded.append((command, tail))
+            continue
+        for inner, inner_tail in _the_commands_of(body):
+            expanded.append((inner, inner_tail))
+    return expanded
+
+
+def _the_body_of_a_group(command):
+    """The body of a group command, or None.
+
+    "( exit 1 )" is a subshell and "{ exit 1; }" is a brace group.
+    Both carry commands of their own, and both were verified with
+    real bash to refuse: the subshell's non-zero status is the
+    parent's, and the brace group runs in the current shell, so its
+    exit ends the step.
+    """
+    stripped = command.strip()
+    for opener, closer in (("(", ")"), ("{", "}")):
+        if stripped.startswith(opener) and stripped.endswith(closer):
+            return stripped[1:-1].strip()
+    return None
 
 
 def _the_command_is_an_exit(command):
     """Is this command an "exit"?
 
-    "exit 1" is a refusal; "echo exit 1" is not; "( exit 1 )" is a
-    subshell, which is a different mechanism.
+    "exit 1" is a refusal; "echo exit 1" is not.
+
+    And a refusal may be WRAPPED: "( exit 1 )" is a subshell whose
+    non-zero status the parent sees, and "{ exit 1; }" is a brace
+    group that runs in the current shell -- so the exit ends the
+    step. Both were verified with real bash: both exit non-zero, so
+    both are refusals -- and a lexer that cannot see them turns a
+    LEGAL edit into a false red in the required CI job.
     """
-    return bool(re.match(r"^exit\b", command.strip()))
+    stripped = command.strip()
+    if re.match(r"^exit\b", stripped):
+        return True
+    # A subshell or a brace group: look inside it. "( exit 1 )" -- the
+    # subshell's non-zero status is the parent's. "{ exit 1; }" -- the
+    # group runs in the current shell, so the exit ends the STEP.
+    for opener, closer in (("(", ")"), ("{", "}")):
+        if stripped.startswith(opener):
+            inner = stripped[1:].strip()
+            if inner.endswith(closer):
+                inner = inner[:-1].strip()
+            if inner and inner != stripped:
+                return _the_command_is_an_exit(inner)
+    # "exec exit 1" replaces the shell with the exit: the step's
+    # status is the exit's.
+    match = re.match(r"^exec\s+(.*)$", stripped)
+    if match:
+        return _the_command_is_an_exit(match.group(1))
+    return False
 
 
 def _one_line_refusal(line):
