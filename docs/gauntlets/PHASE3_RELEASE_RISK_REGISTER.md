@@ -79,6 +79,37 @@
              manual staging/phase3/feature/tag/pull_request/schedule
              DENY, a failed required job DENY.
 
+### H-40 — the boolean literal is a YAML boolean
+
+    Status:  PROVEN DEFECT — FIXED
+    Found:   the twelfth reviewer's battery, replayed by the
+             nineteenth, caught a spelling the harness had not
+             learned: "if: False".
+
+             The boolean literal is a YAML boolean, so the capital
+             spelling is exactly as disabling as the lower-case one.
+             But the tokenizer keeps the spelling and the model
+             compared it with the lower-case one -- so the capital
+             spelling of the DISABLING boolean was invisible, and a
+             step disabled with "if: False" was CERTIFIED.
+
+             The same class as the quoted keys: the value is read as a
+             YAML boolean, in every spelling.
+
+    Fix:     commit 2cc6f8b -- the boolean literal is normalised
+             before it is evaluated, and all three spellings
+             ("false", "False", "FALSE") are caught, at the step
+             level and at the job level.
+    Proof:   the controls are 34 of 34 RED, with and without pyyaml.
+
+    NOTE:   the other five MISSED cases of that battery are the
+             twelfth reviewer's own CONTROL PROBES -- cases the
+             author marked as probes, not as openings -- and three
+             legitimate forms (the trailing space on the step's name,
+             the trailing comment on the tip read, the permissions in
+             the flow-mapping and quoted forms) that the harness now
+             accepts.
+
 ### H-39 — the lexer must see every REAL refusal
 
     Status:  PROVEN DEFECT — FIXED
