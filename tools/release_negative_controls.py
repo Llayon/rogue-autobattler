@@ -3938,6 +3938,7 @@ MANDATORY_TEST_STEPS = (
     "Check the A-H differential negative controls",
     "Check the battle entry negative controls",
     "Run the release negative controls",
+    "Verify the release harness from outside",
     "Audit the standalone harness exit contract",
     "Audit the legacy test reachability",
     "Save and Battle Migration",
@@ -4417,6 +4418,9 @@ PROPERTIES = {
     # The shell LEXER's own unit test: the lexer had no test of its
     # own, which is why three classes of hole survived in it.
     "NC-RB-25": prop_25_the_shell_lexer_knows_its_table,
+    # The external verifier's step: the same mandatory-step property
+    # covers it -- a deleted step makes the property fire.
+    "NC-RB-26": prop_23_the_mandatory_steps_are_present,
 }
 
 
@@ -4721,6 +4725,24 @@ MUTATIONS = [
        "  cancel-in-progress: true"),
       ("      - uses: actions/checkout@v4\n        with:\n"
        "          fetch-depth: 1\n\n",
+       "")]),
+
+    ("NC-RB-26",
+     "delete the external verifier's step from the required job",
+     "test.yml",
+     [("      - name: Verify the release harness from outside\n"
+       "        # The controls above certify the release gate -- but they\n"
+       "        # cannot certify THEMSELVES: an edit that replaced their\n"
+       "        # main path with an unconditional success would be invisible\n"
+       "        # from inside them. So an independent verifier runs them\n"
+       "        # against a fixture with a real release defect in it, and\n"
+       "        # checks that they REFUSE it. A harness that refuses nothing\n"
+       "        # is not a harness.\n"
+       "        #\n"
+       "        # It is deliberately NOT allowed to be optional: it carries\n"
+       "        # no condition, no error tolerance and no shell escape. The\n"
+       "        # step's failure must fail the job the deployment depends on.\n"
+       "        run: python tests/ci/release_harness_external_test.py\n",
        "")]),
 ]
 

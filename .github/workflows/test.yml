@@ -218,6 +218,20 @@ jobs:
         # the required job the deployment depends on.
         run: python tools/release_negative_controls.py
 
+      - name: Verify the release harness from outside
+        # The controls above certify the release gate -- but they
+        # cannot certify THEMSELVES: an edit that replaced their
+        # main path with an unconditional success would be invisible
+        # from inside them. So an independent verifier runs them
+        # against a fixture with a real release defect in it, and
+        # checks that they REFUSE it. A harness that refuses nothing
+        # is not a harness.
+        #
+        # It is deliberately NOT allowed to be optional: it carries
+        # no condition, no error tolerance and no shell escape. The
+        # step's failure must fail the job the deployment depends on.
+        run: python tests/ci/release_harness_external_test.py
+
       - name: Audit the standalone harness exit contract
         run: python tools/audit_test_exit_contract.py
 
