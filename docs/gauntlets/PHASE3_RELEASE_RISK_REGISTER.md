@@ -79,6 +79,47 @@
              manual staging/phase3/feature/tag/pull_request/schedule
              DENY, a failed required job DENY.
 
+### H-41 — the nineteenth review: a refusal must be a command the shell RUNS
+
+    Status:  PROVEN DEFECT — FIXED
+    Found:   the nineteenth reviewer confirmed every earlier closure
+             and then found five more ways to hide a refusal from the
+             lexer -- and a sixth, a false red. All six were
+             reproduced with real bash under the platform's own shell;
+             in the five openings the publication was reached with
+             rc=0:
+
+               a HERE-DOCUMENT -- "cat <<'HOLD' ... exit 1 ... HOLD":
+                 the body is DATA handed to the command's stdin, and
+                 the cat PRINTS it.
+               a MULTI-LINE quoted string -- the quote state was
+                 reset for every line, so the second line's "exit 1"
+                 looked like a command.
+               a CONTINUATION line -- "echo \"HOLD\" \\" then
+                 "exit 1": the backslash continues the echo, so the
+                 exit is an ARGUMENT to it.
+               a CONDITIONAL refusal -- "true || exit 1" and "false
+                 && exit 1": the exit is only one branch of a list.
+               a refusal NESTED in a condition that never holds --
+                 "if false; then exit 1; fi".
+
+               and a FALSE RED: the tip was cut on the NEXT line,
+                 and the reader required the cut line to mention the
+                 same variable -- so a value read into one variable
+                 and cut into another was invisible, and the rule
+                 rejected a legal edit in the required CI job.
+
+    Fix:     commits cda5753 and db0e87f -- the harness now knows
+             what a shell reader must know: which lines are DATA
+             (here-documents, continued strings, continued commands,
+             the body of a never-true condition), which commands are
+             CONDITIONAL (a list's branch, a nested condition), and
+             which are merely an ARGUMENT. A refusal must be a
+             command the shell RUNS, on the path the shell TAKES.
+    Proof:   the controls are 34 of 34 RED, with and without pyyaml;
+             six openings are caught and four legitimate forms pass
+             clean.
+
 ### H-40 — the boolean literal is a YAML boolean
 
     Status:  PROVEN DEFECT — FIXED
