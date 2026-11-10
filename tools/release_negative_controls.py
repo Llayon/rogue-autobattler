@@ -2433,7 +2433,7 @@ def _workflow_permissions(release):
             # here, so a file whose FIRST permissions: was a scalar
             # never reached the block that followed it -- and the
             # elevation in that block was CERTIFIED.
-            permissions = [(value, value)]
+            permissions = _the_scopes_of_a_value(value)
             continue
         # The BLOCK form: the scopes are deeper than the key, exactly
         # as in the per-job reader.
@@ -2454,10 +2454,47 @@ def _workflow_permissions(release):
     return []
 
 
+def _the_scopes_of_a_value(value):
+    """The scopes of a permissions VALUE.
+
+    The value is either a scalar -- "read-all", "write-all" -- or a
+    FLOW MAPPING: "{pages: write, contents: read}". The flow mapping
+    is legal YAML and GitHub reads it as the scope map, so it ELEVATES
+    the default exactly like the block form does.
+
+    The job-level reader had this branch and the workflow-level reader
+    did not -- so the two readers disagreed about the same spelling,
+    and a workflow-level "permissions: {contents: write}" was read as
+    one scope called "{contents: write}" that no rule recognised. The
+    elevation was INVISIBLE.
+    """
+    if value.startswith("{") and value.endswith("}"):
+        scopes = []
+        for part in value[1:-1].split(","):
+            part = _unquote(part.strip())
+            if not part:
+                continue
+            inner = re.match(r"^([\w-]+)\s*:\s*(\S+)$", part)
+            if inner:
+                scopes.append((inner.group(1),
+                               _unquote(inner.group(2))))
+            else:
+                scopes.append((part, part))
+        return scopes
+    return [(value, value)]
+
+
 # The pattern of a scope and its value, with the optional quotes and
 # any case: "contents: write", "'contents': 'write'", "Contents: Write".
+# The value may be followed by a trailing COMMENT: "contents: read
+#  # read only" is legal YAML, and the comment is not part of the
+# value. The pattern's value group ran to the end of the line, so
+# the comment became part of the value -- and the reader saw a scope
+# called "read  # read only", which the "the deploy job may hold
+# only these three scopes" rule rejected: a FALSE RED on a legal
+# edit, in the required CI job.
 SCOPE_PATTERN = (r'^[\"\']?\{?\s*[\"\']?([\w-]+)[\"\']?\s*:\s*'
-                 r'[\"\']?(\S+?)[\"\']?\}?$')
+                 r'[\"\']?([\w-]+)[\"\']?\s*\}?\s*(?:#.*)?$')
 
 
 def _job_permissions(job_body):
