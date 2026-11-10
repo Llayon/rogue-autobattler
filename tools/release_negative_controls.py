@@ -1602,6 +1602,15 @@ def _condition_disables_the_step(condition):
     if not expression:
         return False
 
+    # The boolean literal is a YAML boolean, so its spelling is the
+    # capital one too: "if: False" is exactly as disabling as "if:
+    # false". The tokenizer keeps the spelling, and the model compared
+    # it with the lower-case one -- so the capital spelling of the
+    # DISABLING boolean was invisible, and a step disabled with
+    # "if: False" was certified.
+    if expression.lower() in ("false", "true"):
+        expression = expression.lower()
+
     tokens = _tokenize(expression)
     if tokens is None:
         return False
