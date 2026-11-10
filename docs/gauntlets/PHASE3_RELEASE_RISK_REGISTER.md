@@ -79,6 +79,32 @@
              manual staging/phase3/feature/tag/pull_request/schedule
              DENY, a failed required job DENY.
 
+### H-39 — the lexer must see every REAL refusal
+
+    Status:  PROVEN DEFECT — FIXED
+    Found:   the new shell lexer recognised the openings but not every
+             REAL refusal, so a legal edit was a false red in the
+             required CI job. Four forms were verified with real bash
+             -- each of them exits non-zero, so each of them IS a
+             refusal:
+
+               ( exit 1 )     a subshell: its non-zero status is the
+                              parent's.
+               { exit 1; }    a brace group: it runs in the current
+                              shell, so the exit ends the step.
+               exit -1        bash turns a negative code into 255 --
+                              still a refusal (exit +1 is the
+                              explicit form).
+               exec exit 1    replaces the shell with the exit, so the
+                              step's status is the exit's.
+
+    Fix:     commit 5684540 -- a GROUP carries the commands of its own
+             body, the exit's CODE is read wherever the word sits in
+             the command, and a signed code counts.
+    Proof:   the controls are 34 of 34 RED, with and without pyyaml;
+             four openings fail closed and four legitimate refusals
+             pass clean.
+
 ### H-38 — the eighteenth review: the token must be a COMMAND
 
     Status:  PROVEN DEFECT — FIXED
