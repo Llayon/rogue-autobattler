@@ -79,6 +79,52 @@
              manual staging/phase3/feature/tag/pull_request/schedule
              DENY, a failed required job DENY.
 
+### H-38 — the eighteenth review: the token must be a COMMAND
+
+    Status:  PROVEN DEFECT — FIXED
+    Found:   the eighteenth reviewer proved that the SEVENTEENTH
+             reviewer's class was not closed. The refusal check looked
+             for the PRESENCE of the token "exit", and three ways the
+             token was there and the refusal was harmless all slipped
+             through. All three reproduced with real bash under the
+             platform's own shell:
+
+               (a) the token inside a QUOTED STRING:
+                 if [ -z "$V" ]; then echo "HOLD: exit 1"; fi
+                 -> the shell PRINTS and continues; EXIT=0; the
+                    publication is reached. The search was unanchored,
+                    so the token inside the quotes satisfied it.
+
+               (b) the refusal BACKGROUNDED: "exit 1 &" -- a
+                 backgrounded command's status is discarded; EXIT=0.
+
+               (c) the refusal PIPED: "exit 1 | true" -- the
+                 pipeline's status is its last stage's, so EXIT=0
+                 unless the block sets pipefail.
+
+               and the refusal could be found in the WRONG
+                 CONDITION: the one-line form has no refusal of its
+                 own, but the walk went on to the next condition,
+                 found ITS exit 1 and attributed it to the first -- so
+                 a condition with no refusal at all was certified as
+                 refusing.
+
+    Fix:     commit 3d0016a -- the harness now LEXES the shell: the
+             commands of a line, their quotes and their tails. A
+             refusal must be a COMMAND -- outside the quotes, not
+             backgrounded, not swallowed by a pipeline -- it must
+             exit non-zero, and it must belong to its own condition.
+    Proof:   the controls are 34 of 34 RED, with and without pyyaml;
+             six openings are caught and three legitimate forms
+             (the one-line "then exit 1; fi", the same-line
+             "then echo HOLD; exit 1; fi", the multi-line block) pass
+             clean.
+
+    NOTE:   the reviewer also confirmed the whole scope: the game
+             code is untouched, the one content/ change is a no-op,
+             the workflow itself is sound, and every prior closure
+             still holds.
+
 ### H-37 — the seventeenth review: the refusal must exit non-zero
 
     Status:  PROVEN DEFECT — FIXED
