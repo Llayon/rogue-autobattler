@@ -1290,6 +1290,82 @@ def _every_workflow(release, test):
     return workflows
 
 
+# The lexer's own table: (snippet, is it a refusal?).
+#
+# Every entry was verified with real bash under the platform's own
+# shell -- "bash -e {0}". The snippets that are NOT refusals are the
+# ones that reach the publication with rc=0.
+SHELL_LEXER_TABLE = (
+    # A refusal: a command that exits non-zero.
+    ("exit 1", True),
+    ("exit 2", True),
+    ("exit -1", True),
+    ("exit +1", True),
+    ("( exit 1 )", True),
+    ("{ exit 1; }", True),
+    ("exec exit 1", True),
+    ("then exit 1", True),
+    # NOT a refusal: the token is DATA.
+    ('echo "HOLD: exit 1"', False),
+    ("echo exit 1", False),
+    ("MSG=\"not the tip\nexit 1\"", False),
+    # NOT a refusal: the status is discarded.
+    ("exit 1 &", False),
+    ("exit 1 | true", False),
+    # NOT a refusal: the command is CONDITIONAL.
+    ("true || exit 1", False),
+    ("false && exit 1", False),
+    # NOT a refusal: the body never runs.
+    ("if false; then exit 1; fi", False),
+    # NOT a refusal: it reports SUCCESS.
+    ("exit 0", False),
+)
+
+
+def prop_25_the_shell_lexer_knows_its_table(release, test):
+    """The shell lexer must agree with its own table.
+
+    Every rule in this harness is tested by MUTATING the workflow --
+    but the LEXER that reads the shell was only ever tested through
+    the workflow, so a hole in it was invisible. The nineteenth
+    reviewer named the reason three classes survived: "the lexer has
+    no unit test of its own".
+
+    So the lexer is tested DIRECTLY: each snippet of the table, with
+    the expected verdict. Every entry was verified with real bash
+    under the platform's own shell.
+    """
+    out = []
+    for snippet, expected in SHELL_LEXER_TABLE:
+        actual = _the_exit_is_non_zero(snippet)
+        if actual != expected:
+            out.append("the shell lexer reads %r as a refusal: %s, but "
+                       "bash says %s" % (snippet, actual,
+                                         "a refusal" if expected
+                                         else "not a refusal"))
+    # And the WORKFLOW's own refusals must be read as refusals: the
+    # table proves the lexer knows the rules, and this proves it
+    # applies them to the gate as written.
+    deploy = release["jobs"].get("deploy", "")
+    for label, needle in (("branch tip", "tip of the branch"),
+                          ("master tip", "master")):
+        block = _step_block(_body_without_comments(deploy), needle)
+        if block is None:
+            continue
+        # EVERY condition of the block must refuse: the step has
+        # more than one -- the unreadable tip and the comparison --
+        # and a hole in either of them neuters the mechanism.
+        for line in block.split("\n"):
+            stripped = line.strip()
+            if not stripped.startswith("if "):
+                continue
+            if not _the_exit_is_non_zero(stripped) and \
+                    not _condition_refuses(block, stripped):
+                out.append("the %s check's refusal is not read as a "
+                           "refusal: %s" % (label, stripped))
+    return out
+
+
 def prop_19_the_two_readers_agree(release, test):
     """The two readers of the deploy's condition MUST agree.
 
@@ -4338,6 +4414,9 @@ PROPERTIES = {
     # to disagree about it three times in this series. The agreement
     # is a property now, checked on every legal spelling.
     "NC-RB-24": prop_19_the_two_readers_agree,
+    # The shell LEXER's own unit test: the lexer had no test of its
+    # own, which is why three classes of hole survived in it.
+    "NC-RB-25": prop_25_the_shell_lexer_knows_its_table,
 }
 
 
@@ -4616,6 +4695,22 @@ MUTATIONS = [
       ("      - name: Verify the SHA is still the tip of the branch\n",
        "      - name: Verify the SHA is still the tip of the branch\n"
        "        if: always()\n")]),
+
+    ("NC-RB-25",
+     "the master check's refusal hides in a here-document, so the "
+     "whole SHA mechanism is neutered",
+     "release.yml",
+     [('          if [ "$MASTER_SHA" != "${{ github.sha }}" ]; then\n'
+       '            echo "HOLD: ${{ github.sha }} is not the tip of master '
+       '($MASTER_SHA is)."\n'
+       '            echo "Only the tip of master may be published."\n'
+       '            exit 1\n'
+       '          fi\n',
+       '          if [ "$MASTER_SHA" != "${{ github.sha }}" ]; then\n'
+       "            cat <<'HOLD'\n"
+       '          exit 1\n'
+       '          HOLD\n'
+       '          fi\n')]),
 
     ("NC-REL-07",
      "remove the checkout that lets the tip check read the remote",
