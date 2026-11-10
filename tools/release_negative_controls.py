@@ -1122,19 +1122,32 @@ def _the_tip_is_read_as_a_sha(block, variable):
     """
     lines = [line.strip() for line in block.split("\n")]
     for index, stripped in enumerate(lines):
-        if "ls-remote" not in stripped or variable not in stripped:
+        if "ls-remote" not in stripped:
             continue
         # The cut may be ON THE READ LINE -- which is how the
-        # workflow writes it -- or on the next one.
+        # workflow writes it -- or on the next one. And the next line
+        # may cut a DIFFERENT variable: the value is read into one
+        # variable and cut into another, which is legal shell and
+        # still reads the tip as a SHA.
         if _cuts_the_tip(stripped):
             return True
-        for follow in lines[index + 1:]:
-            if not follow:
-                continue
-            if _cuts_the_tip(follow):
-                return True
-            break
-        return False
+        if variable in stripped:
+            for follow in lines[index + 1:]:
+                if not follow:
+                    continue
+                if _cuts_the_tip(follow):
+                    return True
+                break
+        else:
+            # Another variable's read: the cut may still be on the
+            # next line, and it is that variable's value that is
+            # cut.
+            for follow in lines[index + 1:]:
+                if not follow:
+                    continue
+                if _cuts_the_tip(follow):
+                    return True
+                break
     return False
 
 
