@@ -79,6 +79,52 @@
              manual staging/phase3/feature/tag/pull_request/schedule
              DENY, a failed required job DENY.
 
+### H-36 — the sixteenth review: the scope comment and the flow mapping
+
+    Status:  PROVEN DEFECT — FIXED
+    Found:   the sixteenth reviewer built its own battery (over 130
+             probes) and found two real holes and two false reds:
+
+               a trailing COMMENT on a scope line -- "contents: read
+                 # read only" and "pages: write  # needed" are legal
+                 YAML, but the pattern's value group ran to the end of
+                 the line, so the comment became part of the value
+                 and the reader saw a scope called "read  # read
+                 only". The rule that the deploy job may hold only
+                 three scopes then rejected a LEGAL edit -- a false
+                 red in the required CI job, which blocks the
+                 publication.
+
+               and "permissions: {contents: write}" is legal YAML and
+                 GitHub reads it as the scope map, so it ELEVATES the
+                 workflow default. But the workflow-level reader had
+                 no flow-mapping branch at all: it returned the whole
+                 string as one scope called "{contents: write}" that
+                 no rule recognised -- so the elevation was INVISIBLE
+                 to every rule. The job-level reader HAD that branch,
+                 so the two readers disagreed about the same spelling.
+                 The flow mapping is now parsed in ONE place and both
+                 readers use it.
+
+    Fix:     both, in commit 7a48075.
+    Proof:   the controls are 34 of 34 RED, with and without pyyaml.
+
+    ADJUDICATED by the reviewer itself:
+      the deploy's needs as a QUOTED SCALAR ("needs: 'required-tests,
+        web-build'") -- GitHub reads a needs as a LIST or a single
+        job NAME, so a comma-joined string is one job that does not
+        exist: the workflow is invalid and the deploy never runs.
+        That is fail closed, not an opening.
+
+      the master's refusal in the ONE-LINE form ("then exit 1; fi")
+        and with the exit on the SAME line as the test -- both are
+        legal shell and legal YAML, and both PRESERVE the refusal.
+        Not openings.
+
+    NOTE:   the reviewer crashed before it could write its verdict,
+             so its battery -- not its prose -- is the evidence. The
+             battery is kept at r16-work/battery16.py and replays.
+
 ### H-35 — the fifteenth review: the operator, the command and the self-certification
 
     Status:  PROVEN DEFECT — FIXED
