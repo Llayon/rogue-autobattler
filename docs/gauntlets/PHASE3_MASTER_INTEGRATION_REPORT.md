@@ -685,6 +685,45 @@ DENIED
     environment-level protection, and the only protection is the
     deploy job's condition.
 
+## N3. THE STAGING PUBLICATION -- REMOTE EVIDENCE
+
+    The staging publication has been made, and its remote CI is GREEN.
+
+    Authorized SHA   0ed62296b123055e2f989064fa04cee354f9d098
+    Remote branch    staging/phase3-master-verification
+    Run              42867465947  ->  success
+    URL              https://github.com/Llayon/rogue-autobattler/actions/runs/42867465947
+
+    The push was a FAST-FORWARD over the earlier staging SHA
+    f42e68e (an ancestor of the local HEAD), so no history was
+    rewritten and no --force was used. The protected refs did not
+    move: master 02fe83ef and Phase 3 4316a32 are UNCHANGED.
+
+    WHAT THE RUN PROVED, ON THE RUNNER:
+      120 of 120 suites, 9174 assertions, 0 fail, 0 unparsed
+      release controls: 35, clean: 35, problems: 0
+        -- and pyyaml is ABSENT on the runner, so the yaml
+           dependency is really gone
+      CI-01: 13, failed: 0; CI-02: 20, failed: 0
+      the ledger validator's controls: 7, clean: 7
+      the standalone runner's: 3; the A-H differential's: 5;
+      the battle entry's: 5 -- all clean
+      A-H SEMANTIC DIFFERENTIAL: PASS (8 fixtures)
+
+    The earlier run 42474970253 was the REAL remote evidence for the
+    PREVIOUS candidate f42e68e, which carried ten controls; the
+    branch authorization work that followed had only run LOCALLY at
+    that point. This run carries the FIXED candidate, so its
+    thirty-five controls are the ones that are REMOTE VERIFIED.
+
+    WHAT THE RUN DID NOT DO:
+      it did not deploy. The release workflow does not react to a
+      staging branch, the github-pages environment was last updated
+      2026-08-02 -- before the push -- and no deployment event
+      carries the staging SHA.
+
+    The full record is in PHASE3_STAGING_PUBLICATION_REPORT.md.
+
 ## N. KNOWN LIMITATIONS
 
     1. The LIVE PAGES deployment is NOT verified: there is no

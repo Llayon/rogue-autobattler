@@ -1,16 +1,41 @@
 # PHASE 3 STAGING PUBLICATION REPORT
 
     The dated supplement to PHASE3_PUBLICATION_RUNBOOK.md.
-    NOT COMMITTED: this file is prepared for the owner to review and
-    to decide whether it is committed later.
+
+    This file records TWO staging publications of the same branch.
+    The first is historical; the second is the current evidence and
+    the one that supersedes the first. They are kept apart on
+    purpose: the first publication proved that a staging push does
+    NOT publish, and the second publication carries the branch
+    authorization fix -- the whole release gate -- so its release
+    controls are the ones that matter.
 
 ```
 Repository:            Llayon/rogue-autobattler
 Source branch:         integration/phase3-master-release-rehearsal
-Authorized SHA:        f42e68ed8d671a022e3f77b8984fe6e3a4afeec4
+Authorized SHA:        0ed62296b123055e2f989064fa04cee354f9d098
 Remote staging branch: staging/phase3-master-verification
-Remote staging SHA:    f42e68ed8d671a022e3f77b8984fe6e3a4afeec4
+Remote staging SHA:    0ed62296b123055e2f989064fa04cee354f9d098
 ```
+
+## THE TWO PUBLICATIONS
+
+```
+    FIRST    f42e68ed8d671a022e3f77b8984fe6e3a4afeec4
+             run 42474970253  ->  success
+             the release gate was NOT yet fixed: the controls that
+             ran were ten of them, and the branch authorization work
+             that followed had only run LOCALLY.
+
+    SECOND   0ed62296b123055e2f989064fa04cee354f9d098
+             run 42867465947  ->  success
+             the release gate IS fixed: thirty-five controls, all of
+             them REMOTE VERIFIED on the runner.
+```
+
+    The second publication is a FAST-FORWARD over the first: the
+    first staging SHA is an ancestor of the second, so no history was
+    rewritten and no force was used.
 
 ## PRE-PUSH
 
@@ -30,8 +55,8 @@ Remote staging SHA:    f42e68ed8d671a022e3f77b8984fe6e3a4afeec4
     ancestry
       merge-base(master, HEAD)   == 02fe83ef378d13965184c6224a512a91ae6263a1
       merge-base(4316a32, HEAD)  == 4316a32e210b8660b77a6eda916fb28c4f3bcb8a
-      32 commits over the published Phase 3
-      305 commits over master
+      140 commits over the published Phase 3
+      413 commits over master
       0 merge commits in the series
 
     remote state
@@ -39,8 +64,13 @@ Remote staging SHA:    f42e68ed8d671a022e3f77b8984fe6e3a4afeec4
       canonical/phase3   4316a32e210b8660b77a6eda916fb28c4f3bcb8a
       neither had changed
 
+    fast-forward
+      the remote staging SHA was f42e68e, an ancestor of the local
+      HEAD: FAST_FORWARD_YES
+      ahead 108 / behind 0
+      so the push needed no --force and no history rewrite
+
     staging safety
-      the destination did not exist: refs/heads/staging/* was empty
       test.yml:    on: push (no branch filter) -> it reacts to the
                    staging push
       release.yml: on: push: branches: [master] -> it does NOT react
@@ -53,22 +83,34 @@ Remote staging SHA:    f42e68ed8d671a022e3f77b8984fe6e3a4afeec4
 
     command
       git push canonical \
-        f42e68ed8d671a022e3f77b8984fe6e3a4afeec4:refs/heads/staging/phase3-master-verification
+        0ed62296b123055e2f989064fa04cee354f9d098:refs/heads/staging/phase3-master-verification
 
     exit code      0
-    output         * [new branch] f42e68e -> staging/phase3-master-verification
-    remote SHA     f42e68ed8d671a022e3f77b8984fe6e3a4afeec4  (identical)
+    output         f42e68e..0ed6229  0ed6229 -> staging/phase3-master-verification
+    remote SHA     0ed62296b123055e2f989064fa04cee354f9d098  (identical)
     no --force, no extra refspec, no push to master or Phase 3
+
+    POST-PUSH VERIFICATION
+      REMOTE_EQ_LOCAL          the remote SHA equals the local HEAD
+      ahead/behind             0 / 0
+      TRACKED_CLEAN            the local tree was not touched by the push
+      DIFF_CHECK_CLEAN
+      canonical/master         02fe83ef... UNCHANGED
+      canonical/phase3         4316a32e... UNCHANGED
 
 ## REMOTE CI
 
-    run ID          42474970253
-    URL             https://github.com/Llayon/rogue-autobattler/actions/runs/42474970253
-    head SHA        f42e68ed8d671a022e3f77b8984fe6e3a4afeec4
+    run ID          42867465947
+    URL             https://github.com/Llayon/rogue-autobattler/actions/runs/42867465947
+    head SHA        0ed62296b123055e2f989064fa04cee354f9d098
     branch          staging/phase3-master-verification
     event           push
     status          completed
     conclusion      success
+
+    The run carried the FIXED candidate, so its release controls are
+    the ones that matter: thirty-five of them, and every one of them
+    RED.
 
 ## BATTLE ECS
 
@@ -91,30 +133,25 @@ Remote staging SHA:    f42e68ed8d671a022e3f77b8984fe6e3a4afeec4
                    CI-02: 20, failed: 0
     ledger         the ledger validated; the ledger validator's
                    negative controls: 7, clean: 7, problems: 0
+    other NC       the standalone runner's: 3, clean: 3, problems: 0
+                   the A-H differential's: 5, clean: 5, problems: 0
+                   the battle entry's: 5, clean: 5, problems: 0
     audits         the exit-contract audit: PASS -- every non-zero
                    quit cannot fall through to quit(0)
                    the reachability audit: PASS -- every declared
                    _test_* function is reachable
-    release NC     NC-REL-01 .. NC-REL-10: 10 of 10 semantic RED
-                   0 SKIP, 0 INVALID
-                   release controls: 10, clean: 10, problems: 0
+    release NC     release controls: 35, clean: 35, problems: 0
 
     The release controls ran on the RUNNER, where pyyaml is absent.
     That is the proof that the yaml dependency is really gone: the
     step would have failed with an ImportError if it were still
-    there.
+    there. The log carries no "No module named 'yaml'" line at all.
 
-    NOTE: the run above is the REAL REMOTE EVIDENCE for the staging
-    candidate f42e68e, and it ran the controls AS THEY WERE AT THAT
-    SHA -- ten of them. The branch authorization work that followed
-    added more, and all of them have run LOCALLY only. The count is
-    read from the repository:
+    The control COUNT is read from the repository, not written here,
+    so it cannot go stale:
 
         python -c "import sys; sys.path.insert(0, 'tools'); \
           import release_negative_controls as nc; print(len(nc.MUTATIONS))"
-
-    A republication of the fixed candidate is what would make them
-    REMOTE VERIFIED.
 
 ## SAVE/BATTLE MIGRATION
 
@@ -129,6 +166,11 @@ Remote staging SHA:    f42e68ed8d671a022e3f77b8984fe6e3a4afeec4
 
     No step failed. Nothing was deleted.
 
+    The runner's own annotations, neither of which blocks anything:
+      actions/checkout@v4 targets Node.js 20 and is forced onto
+      Node.js 24
+      the ubuntu-latest label migrates to Ubuntu 26 on 2026-10-19
+
 ## DEPLOYMENT
 
     the release workflow triggered?          NO
@@ -136,20 +178,21 @@ Remote staging SHA:    f42e68ed8d671a022e3f77b8984fe6e3a4afeec4
     the staging SHA deployed?                NO
 
     The evidence:
-      the only workflow run for the staging SHA is 42474970253, the
+      the only workflow run for the staging SHA is 42867465947, the
       "Save and Battle Migration" workflow
-      no deployment event carries the staging SHA: every deployment
-      on the repository is from master, the newest from 2026-09-11
-      the github-pages environment was last updated 2026-08-02
+      no deployment event carries the staging SHA
+      the github-pages environment was last updated 2026-08-02 --
+      BEFORE this push, so the push did not touch it
       the repository's own web-build.yml (still on master) has
       on: push: branches: [master], so the staging push never
       reached it either
+      no pull request was created
 
 ## PROTECTED REFS
 
     canonical/master   02fe83ef378d13965184c6224a512a91ae6263a1   UNCHANGED
     canonical/phase3   4316a32e210b8660b77a6eda916fb28c4f3bcb8a   UNCHANGED
-    all 20 worktrees   on their previous SHAs
+    all worktrees      on their previous SHAs
     no pull request was created
     no unplanned commit, merge or push
 
@@ -174,6 +217,24 @@ Remote staging SHA:    f42e68ed8d671a022e3f77b8984fe6e3a4afeec4
       exercised.
       NOT YET REMOTE VERIFIED
 
+    The old publisher on master
+      The repository's own .github/workflows/web-build.yml is still
+      on master, and it is an UNGATED publisher. The candidate
+      deletes it, but the deletion lands only at the merge. Until
+      then the hole is open ON MASTER, not on this branch.
+      OPEN ON MASTER / CLOSED IN THE CANDIDATE
+
+    The self-certifying harness
+      The release controls cannot certify themselves: an edit that
+      makes a property return [], drops a property from the registry,
+      or calls sys.exit(0) early is invisible from inside them.
+      That is INHERENT to a self-certifying harness, not a defect of
+      this candidate. It can be closed only EXTERNALLY -- a separate
+      script that reads the harness as text and asserts its
+      structural invariants, a committed digest compared by CI, or a
+      CI job that runs the harness from a pinned ref.
+      INHERENT / NOT CLOSED
+
     Pre-release saves
       The backward compatibility of the old user save formats is not
       a requirement, and nothing was migrated for it.
@@ -183,6 +244,10 @@ Remote staging SHA:    f42e68ed8d671a022e3f77b8984fe6e3a4afeec4
 ```
 PHASE 3 STAGING PUBLICATION
 = PUBLISHED / REMOTE CI GREEN
+
+THE RELEASE GATE:
+REMOTE VERIFIED -- 35 of 35 release controls RED on the runner,
+without pyyaml
 
 MASTER:
 UNCHANGED
