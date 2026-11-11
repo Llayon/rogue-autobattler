@@ -1916,7 +1916,9 @@ func _apply_shrine_effect() -> void:
 			GameBus.emit_lives_changed(state.lives)
 			GameLog.info("run", "SHRINE: lives +1 (now %d)" % state.lives)
 		2:
-			# +HP всем board units (cap = max_hp * 1.5)
+			# +HP всем board units: MAP_SHRINE_HP_BONUS ПРОЦЕНТОВ от max_hp.
+			# (Старый комментарий говорил "cap = max_hp * 1.5" и
+			# противоречил коду: константа — процент, а не доля.)
 			for u in state.get_board_units():
 				var def: Resource = ContentDB_static.get_by_id(u.definition_id)
 				if def == null:
