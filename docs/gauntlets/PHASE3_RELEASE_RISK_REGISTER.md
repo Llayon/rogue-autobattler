@@ -1816,6 +1816,42 @@
              browser, 1x restores the ordinary speed, and New Run
              still starts a run.
 
+    THE INDEPENDENT CRITIC'S FINDINGS ON THE HOTFIX:
+    The critic returned PASS with no HIGH and signed the hotfix off.
+    Its findings and their state:
+      M-1  MEDIUM  the suite called the HANDLER, never the BUTTON,
+                   so a button whose 'pressed' signal was not
+                   connected would have shipped green -- which is
+                   the original defect in a new shape.
+                   FIXED -- the suite now presses the button, and a
+                   mutation that drops the connection is CAUGHT.
+      M-2  MEDIUM  `expand` fixes the cropping but scales the whole
+                   UI to ~28% on a phone, so the button text is small.
+                   ACCEPTED, NOT A BLOCKER -- the alternative was
+                   WORSE (the menu was cropped and the buttons were
+                   unreachable). The real lever is the base viewport
+                   size, which is a DESIGN change for the mobile
+                   target, not a hotfix. Named as a follow-up.
+      L-1   LOW    an assertion compared a digest with a second read
+                   of the same file, so it could never fail.
+                   FIXED -- it is gone; the assertion that carries
+                   the guarantee is the before/after that spans the
+                   whole suite.
+      L-2   LOW    the suite wrote a FIXED directory in the shared
+                   user:// and left it behind, so two concurrent runs
+                   could race on it.
+                   FIXED -- the directory carries the run's own id
+                   and is removed when the suite ends.
+      L-3   LOW    a null-parent fallback re-introduced the overlay
+                   for the next caller.
+                   FIXED -- the fallback is gone; the parent is
+                   required.
+
+    The critic's own A/B on the real scene at 360x640:
+      the base commit: all five nodes CLIPPED=true -- the title cut
+      to "ROGUE AUTOBATTLE" and the buttons off both edges;
+      the fixed commit: all five nodes CLIPPED=false.
+
 ### H-03 — the release negative controls proved nothing
 
     Status:  PROVEN DEFECT — FIXED

@@ -285,10 +285,13 @@ func _build_settings_panel(parent: Node) -> void:
     hbox.add_child(_speed_2_button)
     hbox.add_child(_speed_4_button)
     vbox.add_child(hbox)
-    if parent != null:
-        parent.add_child(_settings_panel)
-    else:
-        add_child(_settings_panel)
+    # The parent is REQUIRED. Adding the panel to the root Control
+    # would re-introduce the overlay this hotfix removed: it would
+    # cover the New Run and Continue buttons. The independent critic
+    # found the old fallback branch as a foot-gun for the next
+    # caller, so it is gone rather than left as a trap.
+    assert(parent != null, "the settings panel needs the menu's vbox")
+    parent.add_child(_settings_panel)
 
 
 func _make_small_button(text: String, callback: Callable) -> Button:

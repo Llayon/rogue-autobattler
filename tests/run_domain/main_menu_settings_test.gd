@@ -32,7 +32,14 @@ extends SceneTree
 const MainMenuScript = preload("res://scenes/main_menu/main_menu.gd")
 const MetaProfileScript = preload("res://core/progression/meta_profile.gd")
 
-const ISOLATED_DIR: String = "user://main_menu_settings_test/"
+## The isolated directory. It carries the run's own id, so two
+## concurrent runs -- the repo's own docs warn that the suites share
+## `user://` and must run sequentially -- cannot race on one file.
+## It is removed when the suite ends.
+const ISOLATED_DIR_BASE: String = "user://main_menu_settings_test/"
+
+var _isolated_dir: String = ""
+var _isolated_parent: String = ""
 const PRODUCTION_META: String = "user://saves/meta.tres"
 
 var _passed: int = 0
@@ -76,7 +83,10 @@ class FailingMeta:
 
 
 func _initialize() -> void:
-	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(ISOLATED_DIR))
+	# A directory of this run's own, removed at the end.
+	_isolated_parent = ISOLATED_DIR_BASE + str(get_instance_id()) + "/"
+	_isolated_dir = _isolated_parent
+	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(_isolated_dir))
 	var production_before: String = _production_meta_digest()
 	await _test_A_the_settings_button_exists_and_is_reachable()
 	await _test_B_the_panel_opens_and_closes()
@@ -90,6 +100,10 @@ func _initialize() -> void:
 	var production_after: String = _production_meta_digest()
 	_assert(production_before == production_after,
 		"the production meta.tres is byte-identical after the suite")
+	# The isolated directory is this run's own, and it goes away with
+	# it: the suite leaves nothing behind in the shared user data
+	# directory.
+	_remove_isolated_dir()
 	print("\n=== main menu settings: %d passed, %d failed ===\n" % [_passed, _failed])
 	if _failed > 0:
 		quit(1)
@@ -104,6 +118,42 @@ func _assert(cond: bool, label: String) -> void:
 	else:
 		_failed += 1
 		print("  [FAIL] %s" % label)
+
+
+## Removes this run's isolated directory, so the shared user data
+## directory is left as it was found.
+##
+## The removal is RECURSIVE: the per-run directory holds the saved
+## meta file, and `DirAccess.remove()` only removes a FILE.
+func _remove_isolated_dir() -> void:
+	if _isolated_dir == "":
+		return
+	var dir: DirAccess = DirAccess.open(_isolated_dir)
+	if dir == null:
+		return
+	for name in dir.get_files():
+		dir.remove(name)
+	for name in dir.get_directories():
+		_remove_tree(_isolated_dir + name)
+	# And the directories themselves. `DirAccess.remove()` removes a
+	# FILE; a DIRECTORY needs `remove_absolute()` on its globalised
+	# path -- the per-run directory was left behind otherwise.
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(_isolated_dir))
+	var base: DirAccess = DirAccess.open(ISOLATED_DIR_BASE)
+	if base != null and base.get_directories().is_empty() and base.get_files().is_empty():
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(ISOLATED_DIR_BASE))
+
+
+## Removes a directory and everything in it.
+func _remove_tree(path: String) -> void:
+	var dir: DirAccess = DirAccess.open(path)
+	if dir == null:
+		return
+	for name in dir.get_files():
+		dir.remove(name)
+	for name in dir.get_directories():
+		_remove_tree(path + name)
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
 
 
 ## The digest of the production meta file, or "" when it does not
@@ -123,7 +173,7 @@ func _production_meta_digest() -> String:
 ## A menu wired to the isolated persistence.
 func _make_menu() -> Node:
 	var menu: Node = MainMenuScript.new()
-	var seam: IsolatedMeta = IsolatedMeta.new(ISOLATED_DIR)
+	var seam: IsolatedMeta = IsolatedMeta.new(_isolated_dir)
 	menu.set_meta_persistence_for_test(seam, seam)
 	return menu
 
@@ -189,12 +239,21 @@ func _test_B_the_panel_opens_and_closes() -> void:
 		menu.queue_free()
 		return
 	_assert(not panel.visible, "the panel starts hidden")
-	menu._on_settings_pressed()
-	_assert(panel.visible, "the first press opens the panel")
-	menu._on_settings_pressed()
-	_assert(not panel.visible, "the second press closes the panel")
-	menu._on_settings_pressed()
-	_assert(panel.visible, "the third press opens it again")
+	# The BUTTON is pressed, not the handler called. The handler could
+	# work while the button's signal is not connected -- and that is
+	# exactly the defect this hotfix closed: a Settings button the
+	# player can press and nothing happens.
+	var button: Button = _settings_button_of(menu)
+	_assert(button != null, "the settings button exists")
+	if button == null:
+		menu.queue_free()
+		return
+	button.pressed.emit()
+	_assert(panel.visible, "the first press of the button opens the panel")
+	button.pressed.emit()
+	_assert(not panel.visible, "the second press of the button closes the panel")
+	button.pressed.emit()
+	_assert(panel.visible, "the third press of the button opens it again")
 	menu.queue_free()
 
 
@@ -236,9 +295,14 @@ func _test_D_repeated_opening_creates_no_duplicate() -> void:
 	await process_frame
 	var panel_before: PanelContainer = _settings_panel_of(menu)
 	var count_before: int = _count_panels(menu)
+	var button: Button = _settings_button_of(menu)
+	_assert(button != null, "the settings button exists")
+	if button == null:
+		menu.queue_free()
+		return
 	for i in 5:
-		menu._on_settings_pressed()
-		menu._on_settings_pressed()
+		button.pressed.emit()
+		button.pressed.emit()
 	var panel_after: PanelContainer = _settings_panel_of(menu)
 	var count_after: int = _count_panels(menu)
 	_assert(panel_before == panel_after, "the panel is the SAME object after ten presses")
@@ -293,7 +357,7 @@ func _test_E_the_panel_has_exactly_three_switches() -> void:
 
 func _test_F_the_speed_is_persisted_and_restored() -> void:
 	print("[F] the speed is persisted and restored")
-	var seam: IsolatedMeta = IsolatedMeta.new(ISOLATED_DIR)
+	var seam: IsolatedMeta = IsolatedMeta.new(_isolated_dir)
 	# A FRESH profile, so the restored value cannot be a leftover.
 	var fresh: MetaProfile = MetaProfileScript.new()
 	fresh.battle_speed = 1.0
@@ -434,9 +498,11 @@ func _test_I_the_production_meta_is_untouched() -> void:
 	# file is compared by the caller, before and after the whole suite;
 	# here we check that the production file was not created by the
 	# suite either.
-	var digest: String = _production_meta_digest()
-	_assert(digest == _production_meta_digest(),
-		"the production meta.tres is unchanged while the suite runs")
+	# The production file's digest is compared by the CALLER, before
+	# and after the whole suite -- that is the assertion that carries
+	# the guarantee. A digest compared with a second read of the same
+	# file taken microseconds later can never fail, so it is not
+	# asserted here.
 	# And the isolated file is where the writes landed.
-	_assert(FileAccess.file_exists(ISOLATED_DIR + "meta.tres"),
+	_assert(FileAccess.file_exists(_isolated_dir + "meta.tres"),
 		"the writes landed in the isolated directory")
