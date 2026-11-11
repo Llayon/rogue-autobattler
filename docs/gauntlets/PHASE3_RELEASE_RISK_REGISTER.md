@@ -129,13 +129,22 @@
 
              The last one is the load-bearing. The no-op and the
              fake-green harness are INDISTINGUISHABLE from the real
-             one by their exit code and their summary line: both
-             print "release controls: 35, clean: 35, problems: 0" and
+             one by their exit code and their summary line: on the
+             clean tree all three print the same "release controls:
+             N, clean: N, problems: 0" -- N read from the harness's
+             own declaration, so it cannot go stale -- and all three
              exit 0. So a verifier that checked only the exit code
              and the summary would certify a harness that checks
              nothing. The verifier asks the question the summary
              cannot answer: does the harness REFUSE a defect it must
              refuse?
+
+             The critic found the earlier form of this claim stale:
+             the mutants printed 35 while the harness printed 36, so
+             they were distinguishable by a number and the proof was
+             overstated. A fake that can be told apart by a number is
+             not the dangerous fake. The count is now read from the
+             harness's own declaration.
 
     Proof:   the four scenarios are confirmed by running the
              verifier; the CI step is in battle-ecs, right after the

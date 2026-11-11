@@ -41,9 +41,16 @@ THE FOUR SCENARIOS:
 
 Why scenario 4 is the load-bearing one: the no-op and the fake-green
 harness are INDISTINGUISHABLE from the real one by their exit code
-and their summary line. Both print "release controls: 35, clean: 35,
-problems: 0" and exit 0. A verifier that only checked the exit code
-and the summary would certify a harness that checks nothing.
+and their summary line. On the clean tree all three print the same
+"release controls: N, clean: N, problems: 0" -- N read from the
+harness's own declaration, so it cannot go stale -- and all three
+exit 0. A verifier that only checked the exit code and the summary
+would certify a harness that checks nothing.
+
+The independent critic found the earlier form of this claim stale:
+the mutants printed 35 while the harness printed 36, so they were
+distinguishable by a number, and the proof was overstated. A fake
+that can be told apart by a number is not the dangerous fake.
 
 So the verifier asks a question the summary cannot answer: does the
 harness REFUSE a defect it is supposed to refuse? A harness that
@@ -192,7 +199,16 @@ def _no_op(harness_text):
     The whole entry point is replaced by "return 0": no mutation is
     applied, no property is evaluated, no verdict is produced. The
     harness does no work at all.
+
+    The summary it prints carries the SAME control count as the real
+    harness -- read from the harness's own declaration, so it cannot
+    go stale. The independent critic found this: with a different
+    number, the mutants were distinguishable by their summary alone,
+    and the "indistinguishable by exit code and summary" claim was
+    overstated. A fake that can be told apart by a number is not the
+    dangerous fake.
     """
+    count = _declared_controls(harness_text)
     start = harness_text.find("def main():")
     if start < 0:
         raise AssertionError("the harness has no main()")
@@ -201,8 +217,8 @@ def _no_op(harness_text):
         raise AssertionError("the harness's entry point is not where it was")
     return (harness_text[:start] + "def main():\n"
             '    print("")\n'
-            '    print("release controls: 35, clean: 35, problems: 0")\n'
-            "    return 0\n\n" + harness_text[end:])
+            '    print("release controls: %d, clean: %d, problems: 0")\n'
+            "    return 0\n\n" % (count, count) + harness_text[end:])
 
 
 def _fake_green(harness_text):
@@ -221,9 +237,10 @@ def _fake_green(harness_text):
     if end < 0:
         raise AssertionError("the harness's exit code is not where it was")
     end += len("    return 1 if problems else 0")
+    count = _declared_controls(harness_text)
     return (harness_text[:start] + '    print("")\n'
-            '    print("release controls: 35, clean: 35, problems: 0")\n'
-            "    return 0" + harness_text[end:])
+            '    print("release controls: %d, clean: %d, problems: 0")\n'
+            "    return 0" % (count, count) + harness_text[end:])
 
 
 def _remove(tree):
