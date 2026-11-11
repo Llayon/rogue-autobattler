@@ -13,9 +13,9 @@
 ```
 Repository:            Llayon/rogue-autobattler
 Source branch:         integration/phase3-master-release-rehearsal
-Authorized SHA:        40dd321e4a9b6e28b31ef294c589a6c5140c411e
+Authorized SHA:        12dfcdac0046480267e0e10101080531aeb51937
 Remote staging branch: staging/phase3-master-verification
-Remote staging SHA:    40dd321e4a9b6e28b31ef294c589a6c5140c411e
+Remote staging SHA:    12dfcdac0046480267e0e10101080531aeb51937
 ```
 
 ## THE TWO PUBLICATIONS
@@ -38,6 +38,13 @@ Remote staging SHA:    40dd321e4a9b6e28b31ef294c589a6c5140c411e
              controls, and the EXTERNAL VERIFIER that proves the
              release controls still refuse a real defect. Both
              REMOTE VERIFIED on the runner.
+
+    FOURTH   12dfcdac0046480267e0e10101080531aeb51937
+             run 43024131213  ->  success
+             the SETTINGS UI HOTFIX: the main menu's Settings button
+             is created, the panel is inside the menu's layout, and
+             the speed survives a reload. The new suite ran on the
+             runner: 48 pass / 0 fail.
 ```
 
     The second publication is a FAST-FORWARD over the first: the
@@ -83,6 +90,36 @@ Remote staging SHA:    40dd321e4a9b6e28b31ef294c589a6c5140c411e
       staging branch, no deployment event carries the staging SHA,
       and the github-pages environment was last updated 2026-08-02
       -- before the push.
+
+## THE FOURTH PUBLICATION -- THE SETTINGS UI HOTFIX
+
+    Authorized SHA   12dfcdac0046480267e0e10101080531aeb51937
+    Run              43024131213  ->  success
+    URL              https://github.com/Llayon/rogue-autobattler/actions/runs/43024131213
+
+    The push was a FAST-FORWARD over the third staging SHA e71b68e
+    (an ancestor of the local HEAD), so no history was rewritten and
+    no --force was used. The protected refs did not move: master
+    02fe83ef and Phase 3 4316a32 are UNCHANGED.
+
+    WHAT THE RUN PROVED, ON THE RUNNER:
+      121 of 121 suites, 9222 assertions, 0 fail, 0 unparsed
+      release controls: 36, clean: 36, problems: 0
+      THE EXTERNAL VERIFICATION: PASS
+      A-H SEMANTIC DIFFERENTIAL: PASS (8 fixtures)
+      CI-01: 13, failed: 0; CI-02: 20, failed: 0
+      the ledger validator's controls: 7, clean: 7
+      the standalone runner's: 3; the A-H differential's: 5;
+      the battle entry's: 5 -- all clean
+      the SETTINGS suite itself, on the runner:
+        [OK] tests/run_domain/main_menu_settings_test.gd
+              -- 48 pass / 0 fail
+
+    WHAT THE RUN DID NOT DO:
+      it did not deploy. The release workflow does not react to a
+      staging branch, no deployment event carries the staging SHA,
+      the Pages deployments list is empty, and the github-pages
+      environment was last updated 2026-08-02 -- before the push.
 
 ## PRE-PUSH
 
