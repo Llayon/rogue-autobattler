@@ -178,13 +178,37 @@ def _fake_green(harness_text):
             "    return 0" + harness_text[end:])
 
 
+def _remove(tree):
+    """Remove a temporary tree, and REPORT a failure to remove it.
+
+    shutil.rmtree(..., ignore_errors=True) swallows the error, and on
+    Windows a file the harness has just written can still be locked --
+    so the tree silently survived, and the verifier left a temporary
+    tree behind on every run. That is litter in the CI workspace, and
+    it is worse than litter: the tree holds a COPY of the harness and
+    of the workflows, and a later reader would not know it was a
+    throwaway.
+
+    So the removal is checked, and a leftover is a failure of the
+    verifier -- not a silent no-op.
+    """
+    shutil.rmtree(tree, ignore_errors=True)
+    if os.path.isdir(tree):
+        return False
+    return True
+
+
 def _run_in_tree(harness_text=None, with_defect=False):
-    """The exit code of the harness, on a tree that is thrown away."""
+    """The exit code of the harness, on a tree that is thrown away.
+
+    Returns (exitcode, stdout, removed_cleanly).
+    """
     tree = _build_tree(harness_text, with_defect)
     try:
-        return _run(tree)
+        code, out = _run(tree)
     finally:
-        shutil.rmtree(tree, ignore_errors=True)
+        removed = _remove(tree)
+    return code, out, removed
 
 
 def _check_disabled(label, harness_text, failures):
@@ -201,9 +225,12 @@ def _check_disabled(label, harness_text, failures):
     """
     print("")
     print(label)
-    defect_code, defect_out = _run_in_tree(harness_text, with_defect=True)
+    defect_code, defect_out, removed = _run_in_tree(harness_text,
+                                                    with_defect=True)
     print("   the exit code:      %s" % defect_code)
     print("   the summary:        %s" % (_summary(defect_out),))
+    if not removed:
+        failures.append("%s left a temporary tree behind" % label)
     if defect_code == 0:
         print("   DETECTED -- it accepted a defect it must refuse")
     else:
@@ -219,10 +246,13 @@ def main():
 
     # ---- 1. the CLEAN harness ----
     print("CLEAN HARNESS")
-    code, out = _run_in_tree()
+    code, out, removed = _run_in_tree()
     summary = _summary(out)
     print("   the exit code:      %s" % code)
     print("   the summary:        %s" % (summary,))
+    if not removed:
+        failures.append("the clean harness run left a temporary tree "
+                        "behind")
     if code != 0:
         failures.append("the clean harness did not pass: exit %s" % code)
     elif summary is None:
@@ -243,10 +273,12 @@ def main():
     # ---- 4. the REAL defect, and the REAL harness ----
     print("")
     print("REAL DEFECT")
-    code, out = _run_in_tree(with_defect=True)
+    code, out, removed = _run_in_tree(with_defect=True)
     summary = _summary(out)
     print("   the exit code:      %s" % code)
     print("   the summary:        %s" % (summary,))
+    if not removed:
+        failures.append("the real-defect run left a temporary tree behind")
     if code == 0:
         failures.append("the real harness accepted a real defect")
         print("   NOT DETECTED -- the harness is broken")
