@@ -54,6 +54,11 @@ func _assert(cond: bool, msg: String) -> void:
 		printerr("  [FAIL] %s" % msg)
 
 
+## Removes a file from the shared user directory, if it is there.
+func _remove_file(path: String) -> void:
+	var global_path: String = ProjectSettings.globalize_path(path)
+	if FileAccess.file_exists(global_path):
+		DirAccess.remove_absolute(global_path)
 func _run() -> void:
 	# --- 1. the balance file declares the cap ---
 	# The constant must EXIST. A missing constant is a failure, not a
@@ -91,10 +96,19 @@ func _run() -> void:
 			% [cap_value, BalanceScript.STARTING_LIVES])
 
 	# --- 3. the HEAL effect respects the cap ---
+	# The seed is THIS suite's own: 8109 is not used by any other
+	# suite. The legacy suite writes current_run_seed = 42 into the
+	# shared meta, and the settings suite looks for THAT seed's
+	# checkpoint -- so a run on 42 would leave a checkpoint the
+	# settings suite then sees, and the Continue button would be
+	# visible where the suite expects it hidden.
 	var ctrl: Node = RunControllerScript.new()
 	root.add_child.call_deferred(ctrl)
 	await process_frame
-	ctrl.start_run(42)
+	var seed_value: int = 8109
+	var checkpoint: String = "user://saves/runs/run_%d.tres" % seed_value
+	_remove_file(checkpoint)
+	ctrl.start_run(seed_value)
 
 	ctrl.state.lives = BalanceScript.STARTING_LIVES
 	ctrl._apply_heal_effect()
@@ -129,6 +143,9 @@ func _run() -> void:
 
 	ctrl.queue_free()
 	await process_frame
+	# The suite leaves the shared user:// exactly as it found it: the
+	# checkpoint start_run() wrote is removed.
+	_remove_file(checkpoint)
 
 	# --- 5. the logic holds no hard-coded multiplier ---
 	# The cap must come from the balance file. A formula next to the
