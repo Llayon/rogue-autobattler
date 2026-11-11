@@ -153,6 +153,40 @@
              the whole trust boundary. A further chain of "a test for
              the test for the test" is explicitly out of scope.
 
+    MEASURED: the verifier's own size is 236 code lines against a
+             100-200 target and a 250 hard limit, it imports only the
+             standard library, and it touches nothing of the harness's
+             internals: its references to PROPERTIES, MUTATIONS,
+             load_jobs, load_text, run_control and _tokenize are all
+             zero.
+
+             The four scenarios were confirmed by RUNNING the
+             verifier against a neutered production harness in an
+             isolated copy, and the attacks were confirmed against
+             the verifier itself:
+               the harness inverts the verdict        -> CAUGHT
+               the harness prints to stderr           -> CAUGHT
+               the harness recognises the fixture
+               tree and behaves there                -> CAUGHT
+               the harness runs one control and
+               fakes the count                       -> CAUGHT
+               the harness behaves only in the
+               temporary tree                         -> CAUGHT
+             In every case the verifier's exit code was 1, so the CI
+             job fails and the deployment does not happen.
+
+    NOTE:   the task's expected figure of "44 RED" for the
+             historical negative controls does not match the
+             repository. The measured counts are:
+               tools/negative_controls.py        14
+               tools/ci_negative_controls.py      3
+               tools/ah_negative_controls.py      5
+               tools/entry_negative_controls.py   5
+               ------------------------------------------
+               the historical negative controls   27
+             and the release controls are 36. The counts are read
+             from the repository, never written by hand.
+
 ### H-42 — the shell lexer gets a unit test of its own
 
     Status:  PROVEN DEFECT — FIXED
