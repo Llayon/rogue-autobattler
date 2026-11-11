@@ -152,6 +152,15 @@
              and no shell escape; and NC-RB-26 proves that the step
              cannot be deleted from the required job.
 
+             REMOTE VERIFIED -- run 42992906605, head SHA
+             40dd321e4a9b6e28b31ef294c589a6c5140c411e, conclusion
+             success. The verifier ran on the runner, where pyyaml
+             is absent, and its four scenarios behaved as claimed:
+             the clean harness (36, 36, 0) PASS, the no-op and the
+             fake-green DETECTED, and the real defect DETECTED with
+             (36, 29, 7). The release controls were 36 of 36 clean
+             on the same runner.
+
     LIMIT:   the verifier cannot certify ITSELF either. The
              independent critic corrected an earlier, understated
              form of this limit: it needs an edit of the verifier

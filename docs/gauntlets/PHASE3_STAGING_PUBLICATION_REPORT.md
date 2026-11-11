@@ -13,9 +13,9 @@
 ```
 Repository:            Llayon/rogue-autobattler
 Source branch:         integration/phase3-master-release-rehearsal
-Authorized SHA:        0ed62296b123055e2f989064fa04cee354f9d098
+Authorized SHA:        40dd321e4a9b6e28b31ef294c589a6c5140c411e
 Remote staging branch: staging/phase3-master-verification
-Remote staging SHA:    0ed62296b123055e2f989064fa04cee354f9d098
+Remote staging SHA:    40dd321e4a9b6e28b31ef294c589a6c5140c411e
 ```
 
 ## THE TWO PUBLICATIONS
@@ -31,11 +31,58 @@ Remote staging SHA:    0ed62296b123055e2f989064fa04cee354f9d098
              run 42867465947  ->  success
              the release gate IS fixed: thirty-five controls, all of
              them REMOTE VERIFIED on the runner.
+
+    THIRD    40dd321e4a9b6e28b31ef294c589a6c5140c411e
+             run 42992906605  ->  success
+             the F6 external harness verification: thirty-six
+             controls, and the EXTERNAL VERIFIER that proves the
+             release controls still refuse a real defect. Both
+             REMOTE VERIFIED on the runner.
 ```
 
     The second publication is a FAST-FORWARD over the first: the
     first staging SHA is an ancestor of the second, so no history was
     rewritten and no force was used.
+
+## THE THIRD PUBLICATION -- THE F6 VERIFICATION
+
+    Authorized SHA   40dd321e4a9b6e28b31ef294c589a6c5140c411e
+    Run              42992906605  ->  success
+    URL              https://github.com/Llayon/rogue-autobattler/actions/runs/42992906605
+
+    The push was a FAST-FORWARD over the second staging SHA
+    b14cdb2 (an ancestor of the local HEAD), so no history was
+    rewritten and no --force was used. The protected refs did not
+    move: master 02fe83ef and Phase 3 4316a32 are UNCHANGED.
+
+    WHAT THE RUN PROVED, ON THE RUNNER:
+      120 of 120 suites, 9174 assertions, 0 fail, 0 unparsed
+      release controls: 36, clean: 36, problems: 0
+        -- and pyyaml is ABSENT on the runner, so the yaml
+           dependency is really gone
+      THE EXTERNAL VERIFICATION: PASS
+        the harness declares 36 controls
+        CLEAN HARNESS      (36, 36, 0)  PASS
+        NO-OP HARNESS      DETECTED -- it accepted a defect it
+                           must refuse
+        FAKE-GREEN HARNESS DETECTED -- it accepted a defect it
+                           must refuse
+        REAL DEFECT        (36, 29, 7)  DETECTED -- the real
+                           harness refuses it
+      A-H SEMANTIC DIFFERENTIAL: PASS (8 fixtures)
+      CI-01: 13, failed: 0; CI-02: 20, failed: 0
+      the ledger validator's controls: 7, clean: 7
+      the standalone runner's: 3; the A-H differential's: 5;
+      the battle entry's: 5 -- all clean
+
+    Every step of the battle-ecs job is green, including the new
+    one: "Verify the release harness from outside".
+
+    WHAT THE RUN DID NOT DO:
+      it did not deploy. The release workflow does not react to a
+      staging branch, no deployment event carries the staging SHA,
+      and the github-pages environment was last updated 2026-08-02
+      -- before the push.
 
 ## PRE-PUSH
 

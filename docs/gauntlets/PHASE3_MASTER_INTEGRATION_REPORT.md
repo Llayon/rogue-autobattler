@@ -689,10 +689,10 @@ DENIED
 
     The staging publication has been made, and its remote CI is GREEN.
 
-    Authorized SHA   0ed62296b123055e2f989064fa04cee354f9d098
+    Authorized SHA   40dd321e4a9b6e28b31ef294c589a6c5140c411e
     Remote branch    staging/phase3-master-verification
-    Run              42867465947  ->  success
-    URL              https://github.com/Llayon/rogue-autobattler/actions/runs/42867465947
+    Run              42992906605  ->  success
+    URL              https://github.com/Llayon/rogue-autobattler/actions/runs/42992906605
 
     The push was a FAST-FORWARD over the earlier staging SHA
     f42e68e (an ancestor of the local HEAD), so no history was
@@ -701,9 +701,15 @@ DENIED
 
     WHAT THE RUN PROVED, ON THE RUNNER:
       120 of 120 suites, 9174 assertions, 0 fail, 0 unparsed
-      release controls: 35, clean: 35, problems: 0
+      release controls: 36, clean: 36, problems: 0
         -- and pyyaml is ABSENT on the runner, so the yaml
            dependency is really gone
+      THE EXTERNAL VERIFICATION: PASS -- the F6 verifier runs the
+        release controls against a fixture with a real release
+        defect in it, and checks that they REFUSE it: the no-op
+        harness, the fake-green harness and the real harness all
+        print (36, 36, 0) and exit 0 on a clean tree, and only the
+        real one refuses the defect
       CI-01: 13, failed: 0; CI-02: 20, failed: 0
       the ledger validator's controls: 7, clean: 7
       the standalone runner's: 3; the A-H differential's: 5;
