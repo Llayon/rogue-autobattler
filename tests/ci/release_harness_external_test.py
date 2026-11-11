@@ -84,6 +84,18 @@ SUMMARY = re.compile(r"release controls:\s*(\d+),\s*clean:\s*(\d+),\s*"
 DEFECT_OLD = '          if [ "$MASTER_SHA" != "${{ github.sha }}" ]; then'
 DEFECT_NEW = '          if [ "$MASTER_SHA" == "${{ github.sha }}" ]; then'
 
+# The number of controls the release harness DECLARES. It is counted
+# from the harness's own text -- the entries of its MUTATIONS
+# registry -- and NOT imported, so the verifier stays independent of
+# the harness's code. A harness that runs a single control and
+# reports "(1, 1, 0)" is caught against this number.
+CONTROL_COUNT = re.compile(r'^    \("NC-[A-Z]+-\d+",', re.MULTILINE)
+
+
+def _declared_controls(harness_text):
+    """How many controls the harness's own text declares."""
+    return len(CONTROL_COUNT.findall(harness_text))
+
 
 def _read(path):
     with io.open(path, encoding="utf-8-sig") as handle:
@@ -244,6 +256,12 @@ def main():
     print("the external verification of the release harness")
     print("")
 
+    # The floor for the control count, from the PRODUCTION harness's
+    # own declaration. A mutated copy cannot lower it: the floor is
+    # read from the repository's file, not from the copy under test.
+    declared = _declared_controls(_read(HARNESS))
+    print("   the harness declares %d controls" % declared)
+
     # ---- 1. the CLEAN harness ----
     print("CLEAN HARNESS")
     code, out, removed = _run_in_tree()
@@ -262,6 +280,18 @@ def main():
                         % summary[2])
     elif summary[0] == 0:
         failures.append("the clean harness checked nothing")
+    elif summary[0] < declared:
+        # A harness that runs ONE control and honestly reports
+        # "(1, 1, 0)" is caught HERE. The independent critic found it:
+        # the verifier asked only "did the harness refuse the
+        # defect", and a harness that runs a single control can do
+        # that while checking almost nothing. So the clean run must
+        # also show that the harness checked a SUFFICIENT number of
+        # controls -- and the number is compared with the count the
+        # harness itself declares, so it cannot go stale.
+        failures.append("the clean harness checked only %d controls: a "
+                        "harness that checks almost nothing can still "
+                        "refuse one defect" % summary[0])
     else:
         print("   PASS")
 
