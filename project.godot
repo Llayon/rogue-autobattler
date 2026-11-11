@@ -28,6 +28,14 @@ ReactionSystem="*res://core/reactions/reaction_system_autoload.gd"
 
 window/size/viewport_width=1280
 window/size/viewport_height=720
+; The canvas is scaled to the window and the HEIGHT grows to match the
+; window's aspect. Without a stretch mode a window whose aspect
+; differs from 16:9 -- every phone -- CROPS the canvas: the menu's
+; title and buttons ran off the sides. Nothing in the game assumes a
+; fixed height, and the controls are laid out by containers, so the
+; extra height is simply used.
+window/stretch/mode="canvas_items"
+window/stretch/aspect="expand"
 
 [rendering]
 
