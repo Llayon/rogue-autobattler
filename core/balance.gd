@@ -9,6 +9,11 @@ class_name Balance extends RefCounted
 # === Старт рана ===
 const STARTING_GOLD: int = 10                # золото в начале рана
 const STARTING_LIVES: int = 1                # сколько раз можно проиграть
+# Кап жизней: сколько раз можно проиграть ПОСЛЕ всех бонусов (HEAL, SHRINE).
+# Живёт здесь, а не формулой в контроллере: формула рядом с
+# использованием — это ровно тот случай, который header этого файла
+# предупреждает (балансируешь не ту переменную через два месяца).
+const MAX_LIVES: int = STARTING_LIVES * 2
 const STARTING_UNIT_IDS: Array[StringName] = [&"warrior", &"archer"]
 
 # === Прогрессия рана ===

@@ -1821,8 +1821,8 @@ func _apply_heal_effect() -> void:
 			continue
 		var heal_amount: int = int(round(float(u.max_hp) * BalanceScript.MAP_HEAL_HP_RATIO))
 		_heal_run_unit(u, heal_amount)
-	# +1 жизнь cap = STARTING_LIVES * 2 (можно перенести в Balance).
-	state.lives = mini(state.lives + 1, BalanceScript.STARTING_LIVES * 2)
+	# +1 жизнь, до капа из balance.gd.
+	state.lives = mini(state.lives + 1, BalanceScript.MAX_LIVES)
 	GameBus.emit_lives_changed(state.lives)
 	GameLog.info("run", "HEAL: restored HP + 1 life",
 		{"hp_ratio": BalanceScript.MAP_HEAL_HP_RATIO, "lives": state.lives})
@@ -1912,7 +1912,7 @@ func _apply_shrine_effect() -> void:
 			GameBus.emit_gold_changed(state.gold)
 			GameLog.info("run", "SHRINE: gold +%d" % BalanceScript.MAP_SHRINE_GOLD_BONUS)
 		1:
-			state.lives = mini(state.lives + 1, BalanceScript.STARTING_LIVES * 2)
+			state.lives = mini(state.lives + 1, BalanceScript.MAX_LIVES)
 			GameBus.emit_lives_changed(state.lives)
 			GameLog.info("run", "SHRINE: lives +1 (now %d)" % state.lives)
 		2:
