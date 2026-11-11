@@ -269,6 +269,34 @@
                 VERIFIED -- it is RED, so the external verifier's
                 step cannot be deleted from the required job.
 
+      H1  --      can the VERIFIER's own step be made optional?
+                VERIFIED -- all six ways were tried, and every one
+                of them is caught by the existing controls:
+                  continue-on-error on the step   -> caught
+                  "|| true" on the run line      -> caught
+                  "if: false" on the step        -> caught
+                  the step renamed off the list  -> caught
+                  the run replaced by "echo ok"  -> caught
+                  the whole step deleted         -> caught
+
+      H3  --      the HIGH reproduction, end to end in ONE tree: a
+                harness that runs ONE control, and the verifier
+                certifying it.
+                FIXED -- the clean run must show at least the
+                DECLARED number of controls, and the floor is read
+                from the production file, so a mutated copy cannot
+                lower its own floor. Measured on the fixed head:
+                the release-controls step exits 0, and the F6
+                verifier step exits 1.
+
+      H5  --      the E attack in its PRODUCTION shape: the harness
+                checks nothing in the repository and exits 0.
+                FIXED -- the fixture and the repository must
+                DISAGREE, and they do: the fixture run refuses
+                nothing while the production run does. The verifier
+                reports "the real harness accepted a real defect"
+                and exits 1.
+
     The critic's own attack script was replayed against the fixed
     head, and the nine attacks it had already confirmed caught stay
     caught: the inverted verdict, the discarded verdict with and
