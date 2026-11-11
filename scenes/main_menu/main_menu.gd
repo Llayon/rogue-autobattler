@@ -33,6 +33,13 @@ var _speed_4_button: Button = null
 ## repository sees its own runs and the production runs are not
 ## touched.
 var _save_repository: Object = null
+## The persistence seam for the settings. A test injects a writer and
+## a reader that point at a temporary directory, so the suites never
+## write into the production `user://saves/meta.tres` and never touch
+## the developer's own profile. This is the SAME seam shape the
+## RunController uses for its meta publication.
+var _meta_writer: Object = null
+var _meta_reader: Object = null
 ## R-04: the seed the Continue button would restore, and whether the
 ## choice needs the player.
 var _continue_seed_value: int = 0
@@ -40,7 +47,7 @@ var _continue_needs_a_choice: bool = false
 
 
 func _ready() -> void:
-    _profile = SaveService.load_meta()
+    _profile = _load_meta()
     if _profile == null:
         _profile = MetaProfileScript.new()
     _build_layout()
@@ -83,6 +90,14 @@ func _build_vbox() -> VBoxContainer:
     vbox.add_child(_new_run_button)
     _continue_button = _make_button("Continue", _on_continue_pressed, Color(0.20, 0.40, 0.55))
     vbox.add_child(_continue_button)
+    # The settings are reachable from the main screen. The button was
+    # declared but never CREATED, so the panel could not be opened at
+    # all: the whole settings feature was dead code.
+    _settings_button = _make_button("Settings", _on_settings_pressed, Color(0.28, 0.28, 0.42))
+    vbox.add_child(_settings_button)
+    # The panel lives INSIDE the vbox, so it is laid out with the menu
+    # and can never cover the New Run and Continue buttons.
+    _build_settings_panel(vbox)
     return vbox
 
 
@@ -206,19 +221,43 @@ func set_save_repository_for_test(repository: Object) -> void:
     _save_repository = repository
 
 
+## The test seam: the persistence the settings use. A test injects a
+## writer and a reader that point at a temporary directory, so the
+## suite never writes the production `user://saves/meta.tres`.
+func set_meta_persistence_for_test(writer: Object, reader: Object) -> void:
+    _meta_writer = writer
+    _meta_reader = reader
+
+
 func _on_settings_pressed() -> void:
     _toggle_settings_panel()
 
 
 func _toggle_settings_panel() -> void:
     if _settings_panel == null:
-        _build_settings_panel()
+        # Only if it was never built. Repeated presses must NOT create
+        # a second panel: the panel is built once, in the layout.
+        _build_settings_panel(_settings_parent())
     _settings_panel.visible = not _settings_panel.visible
     if _settings_panel.visible:
         _refresh_speed_buttons()
 
 
-func _build_settings_panel() -> void:
+## The node the settings panel belongs to. The panel is created inside
+## the menu's vbox, so it is found through the button's own parent.
+func _settings_parent() -> Node:
+    if _settings_button != null and _settings_button.get_parent() != null:
+        return _settings_button.get_parent()
+    return self
+
+
+func _build_settings_panel(parent: Node) -> void:
+    # The panel is a CHILD of the menu's vbox, not of the root
+    # Control. Positioned against the root it could cover the New Run
+    # and Continue buttons; inside the vbox it is laid out with the
+    # menu and pushes the layout instead of overlapping it.
+    if _settings_panel != null:
+        return
     _settings_panel = PanelContainer.new()
     _settings_panel.visible = false
     var sb: StyleBoxFlat = StyleBoxFlat.new()
@@ -246,8 +285,10 @@ func _build_settings_panel() -> void:
     hbox.add_child(_speed_2_button)
     hbox.add_child(_speed_4_button)
     vbox.add_child(hbox)
-    _settings_panel.set_anchors_preset(Control.PRESET_CENTER)
-    add_child(_settings_panel)
+    if parent != null:
+        parent.add_child(_settings_panel)
+    else:
+        add_child(_settings_panel)
 
 
 func _make_small_button(text: String, callback: Callable) -> Button:
@@ -274,9 +315,35 @@ func _on_speed_4_pressed() -> void:
 func _set_speed(s: float) -> void:
     if _profile == null:
         return
+    var previous: float = _profile.battle_speed
     _profile.battle_speed = s
-    SaveService.save_meta(_profile)
+    if not _save_meta(_profile):
+        # The write FAILED. The profile keeps the value it had, so the
+        # menu never shows a speed that is not on the disk -- and the
+        # buttons show the speed that is actually persisted.
+        _profile.battle_speed = previous
+        GameLog.warn("ui", "the battle speed could not be saved", {"speed": s})
+        _refresh_speed_buttons()
+        return
     _refresh_speed_buttons()
+
+
+## Writes the profile through the injected seam when there is one.
+## Returns whether the profile IS on the disk afterwards.
+func _save_meta(profile: MetaProfileScript) -> bool:
+    if _meta_writer != null and _meta_writer.has_method("write_meta"):
+        return bool(_meta_writer.write_meta(profile))
+    return SaveService.save_meta(profile)
+
+
+## Reads the profile through the injected seam when there is one.
+func _load_meta() -> MetaProfileScript:
+    if _meta_reader != null and _meta_reader.has_method("read_meta"):
+        var loaded: Variant = _meta_reader.read_meta()
+        if loaded is MetaProfileScript:
+            return loaded
+        return MetaProfileScript.new()
+    return SaveService.load_meta()
 
 
 func _refresh_speed_buttons() -> void:
