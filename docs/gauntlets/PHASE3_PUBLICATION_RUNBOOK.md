@@ -56,11 +56,20 @@
        the candidate SHA itself:
          python tools/run_battle_ecs_suites.py --godot <godot> --root .
          python tools/release_negative_controls.py
+         python tests/ci/release_harness_external_test.py
          python tests/ci/standalone_runner_test.py
          python tests/ci/ah_differential_test.py
          python tools/negative_controls.py
          python tests/ci/ledger_validator_test.py
        Every one must exit 0.
+
+       The release controls prove that the RELEASE GATE refuses what it
+       must refuse. The external verifier proves that the release
+       CONTROLS still refuse it: it runs the harness against a
+       workflow fixture carrying a real release defect, and a harness
+       that refuses nothing is caught. Both are required -- the first
+       without the second certifies a gate nobody is watching, and the
+       second without the first certifies nothing.
     3. Verify the Web export readiness:
          python tools/validate_web_artifact.py <the build directory>
        The validation must PASS.

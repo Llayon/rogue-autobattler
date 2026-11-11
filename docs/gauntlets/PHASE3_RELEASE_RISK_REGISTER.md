@@ -79,6 +79,80 @@
              manual staging/phase3/feature/tag/pull_request/schedule
              DENY, a failed required job DENY.
 
+### H-43 — the self-certifying harness, and its external verification
+
+    Status:  PROVEN LIMITATION — CLOSED EXTERNALLY
+    Found:   the fifteenth reviewer named the limit the nineteenth
+             confirmed: "the harness cannot certify ITSELF". An edit
+             that makes a property return [], drops a property from
+             the registry, or calls sys.exit(0) early is INVISIBLE
+             from inside the harness — the properties are what the
+             edit disabled.
+
+             The nineteenth reviewer accepted the principle as
+             inherent, and named the three external shapes that can
+             close it. The first one — a separate script that reads
+             the harness as TEXT and asserts its structural
+             invariants — was chosen, and done BEHAVIOURALLY rather
+             than textually.
+
+    Fix:     commit bc150d7 — tests/ci/release_harness_external_test.py.
+             The trust boundary is now:
+
+                 REAL RELEASE HARNESS
+                         |
+                         v
+                 EXTERNAL BEHAVIOURAL VERIFICATION
+                         |
+                         v
+                 PASS / FAIL
+
+             The verifier does NOT import the harness, and does not
+             use its parser, its table of properties, its verdict
+             logic, or its output as the source of truth. It runs the
+             harness as an EXECUTABLE, against a fixture it controls.
+
+             The seam needs no change to the harness: the harness
+             resolves every path from its own __file__, so a copy
+             placed in <tmp>/tools/ reads <tmp>/.github/workflows/ —
+             the fixture — and never the repository's workflows.
+
+             The four scenarios:
+               CLEAN HARNESS        passes, with a non-empty set
+               NO-OP HARNESS        detected — the main path does
+                                     no work at all
+               FAKE-GREEN HARNESS   detected — the controls run and
+                                     the verdicts are discarded, and
+                                     a plausible summary is printed
+               REAL DEFECT          the real harness refuses an
+                                     inverted master-tip comparison
+
+             The last one is the load-bearing. The no-op and the
+             fake-green harness are INDISTINGUISHABLE from the real
+             one by their exit code and their summary line: both
+             print "release controls: 35, clean: 35, problems: 0" and
+             exit 0. So a verifier that checked only the exit code
+             and the summary would certify a harness that checks
+             nothing. The verifier asks the question the summary
+             cannot answer: does the harness REFUSE a defect it must
+             refuse?
+
+    Proof:   the four scenarios are confirmed by running the
+             verifier; the CI step is in battle-ecs, right after the
+             release controls, with no condition, no error tolerance
+             and no shell escape; and NC-RB-26 proves that the step
+             cannot be deleted from the required job.
+
+    LIMIT:   the verifier cannot certify ITSELF either. An edit that
+             makes it always pass is invisible from inside it, and
+             an edit of the harness AND the verifier AND the workflow
+             that runs them is undetectable by any single test. That
+             is the accepted limit: the protection is demonstrated
+             against the TYPICAL disabling — a neutered or
+             always-green harness — not against a coordinated edit of
+             the whole trust boundary. A further chain of "a test for
+             the test for the test" is explicitly out of scope.
+
 ### H-42 — the shell lexer gets a unit test of its own
 
     Status:  PROVEN DEFECT — FIXED
