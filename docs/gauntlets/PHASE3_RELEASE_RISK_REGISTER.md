@@ -297,6 +297,19 @@
                 reports "the real harness accepted a real defect"
                 and exits 1.
 
+      F4  --      is the mandatory-step list really CLOSED? The
+                verifier's own step had to be added to it, and the
+                list is a closed one: a step that is not on it is
+                reported as unexpected.
+                VERIFIED -- 27 steps, the new one on it, and all
+                three cases behave:
+                  the untouched workflow        -> clean
+                  the step deleted              -> caught
+                  an unlisted step added        -> caught
+                So the harness protects the verifier's step from
+                deletion, from renaming, and from an unlisted
+                neighbour -- the same way it protects its own.
+
     The critic's own attack script was replayed against the fixed
     head, and the nine attacks it had already confirmed caught stay
     caught: the inverted verdict, the discarded verdict with and
