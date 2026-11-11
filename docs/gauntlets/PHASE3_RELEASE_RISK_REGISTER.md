@@ -236,6 +236,26 @@
              directory, and the fixture's extra file changes what the
              clean run reports.
 
+             WHO OWNS THE VERIFIER'S OWN STEP:
+             The verifier reads test.yml only to COPY it into its
+             fixture; it never asserts anything about that step. That
+             is the RIGHT division: the reusable workflow's step list
+             belongs to the harness, and NC-RB-22 and NC-RB-26
+             protect it there. Measured end to end, with both steps
+             run on the same tree:
+               the untouched workflow    release-controls 0,
+                                           verifier 0       -> GREEN
+               "|| true" on the step      release-controls 1,
+                                           verifier 1       -> the JOB FAILS
+               the step deleted          release-controls 1,
+                                           verifier 1       -> the JOB FAILS
+               "if: false" on the step   release-controls 1,
+                                           verifier 1       -> the JOB FAILS
+             So every way of making the verifier's own step optional
+             fails the required job, and the guard is the harness
+             that owns the list -- not the verifier that copies the
+             file.
+
     MEASURED: the verifier's own size is 91 lines of pure code
              (371 total, with the reasoning in the comments and the
              docstrings) against a 100-200 target and a 250 hard
