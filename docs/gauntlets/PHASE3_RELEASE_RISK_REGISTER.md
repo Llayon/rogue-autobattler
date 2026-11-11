@@ -153,12 +153,13 @@
              the whole trust boundary. A further chain of "a test for
              the test for the test" is explicitly out of scope.
 
-    MEASURED: the verifier's own size is 236 code lines against a
-             100-200 target and a 250 hard limit, it imports only the
-             standard library, and it touches nothing of the harness's
-             internals: its references to PROPERTIES, MUTATIONS,
-             load_jobs, load_text, run_control and _tokenize are all
-             zero.
+    MEASURED: the verifier's own size is 91 lines of pure code
+             (371 total, with the reasoning in the comments and the
+             docstrings) against a 100-200 target and a 250 hard
+             limit, it imports only the standard library, and it
+             touches nothing of the harness's internals: its
+             references to PROPERTIES, MUTATIONS, load_jobs,
+             load_text, run_control and _tokenize are all zero.
 
              The four scenarios were confirmed by RUNNING the
              verifier against a neutered production harness in an
@@ -203,10 +204,22 @@
       E   HIGH   a harness that behaves correctly ONLY inside the
                 verifier's fixture, and is a no-op in the real
                 repository.
-                FIXED -- the fixture run and the real run must
-                DISAGREE: the real harness must refuse the defect
-                and the fixture-aware one cannot, because it never
-                refuses anything.
+                FIXED -- the FIXTURE must be INDISTINGUISHABLE from
+                the repository. There is no name that is safe by
+                being unusual: being unusual IS the signal. So the
+                fixture is given the repository's OWN name, inside a
+                parent named like the repository's own parent, with a
+                .git directory. A harness that compares the
+                basename, that walks up, or that looks for .git finds
+                the SAME answer in the fixture and in the repository.
+
+                The critic found FIVE ways to tell them apart, and
+                all five are now caught: the fixture's prefix, the
+                absence of .git, the tree's basename, the parent's
+                name and the parent's prefix. The critic's own
+                attack script, replayed against the fixed head, went
+                from four bypasses to three -- and the three are the
+                accepted limits, not the openings.
 
       G   LOW    the defect moved into a file the harness never
                 reads.
