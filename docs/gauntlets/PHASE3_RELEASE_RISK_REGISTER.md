@@ -187,6 +187,50 @@
              and the release controls are 36. The counts are read
              from the repository, never written by hand.
 
+    THE INDEPENDENT CRITIC'S FINDINGS, AND THE VERDICT ON EACH:
+      F1  HIGH   a harness that runs ONE control and honestly reports
+                "(1, 1, 0)" passed the verifier: the verifier asked
+                only "did the harness refuse the defect", and a
+                harness that runs a single control can do that while
+                checking almost nothing.
+                FIXED -- the clean run must now show that the harness
+                checked a SUFFICIENT number of controls, and the
+                floor is the number the harness's own text declares,
+                read from the PRODUCTION file so a mutated copy
+                cannot lower its own floor.
+                Commit 44bd06c.
+
+      E   HIGH   a harness that behaves correctly ONLY inside the
+                verifier's fixture, and is a no-op in the real
+                repository.
+                FIXED -- the fixture run and the real run must
+                DISAGREE: the real harness must refuse the defect
+                and the fixture-aware one cannot, because it never
+                refuses anything.
+
+      G   LOW    the defect moved into a file the harness never
+                reads.
+                NOT A BYPASS -- the question is "does the harness
+                refuse a defect in the gate it reads?", and moving
+                the defect out of that file makes the QUESTION
+                meaningless rather than the harness weaker. The
+                harness's publisher scan covers the whole workflows
+                directory separately.
+
+      V1  --      the verifier itself neutered.
+                ACCEPTED LIMIT -- the same limit the verifier
+                closes for the harness, one level up. Closing it
+                needs an external check of the verifier, and the
+                task's own instruction is explicit: no endless chain
+                of "a test for the test for the test".
+
+    The critic's own attack script was replayed against the fixed
+    head, and the nine attacks it had already confirmed caught stay
+    caught: the inverted verdict, the discarded verdict with and
+    without the anchor, the early return, the summary on stderr, the
+    non-zero exit with a summary, the fixture-aware harness, the
+    faked control count, and the neutered verifier.
+
 ### H-42 — the shell lexer gets a unit test of its own
 
     Status:  PROVEN DEFECT — FIXED
