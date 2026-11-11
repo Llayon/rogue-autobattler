@@ -1770,29 +1770,51 @@
 
 ### H-05 — the settings UI is unreachable
 
-    Status:  PROVEN DEFECT — NOT FIXED HERE (out of scope)
+    Status:  PROVEN DEFECT — FIXED
     Found:   `_settings_button` is DECLARED in
              scenes/main_menu/main_menu.gd and never created, so the
              "Battle Speed" panel cannot be opened. The commit that
              introduced the feature (ebb304c) claimed in its message
              that the Settings button opens the panel and never wrote
              that button.
-    Scope:   this is a PRE-EXISTING defect, NOT a regression of this
-             series: the same is true on master, and the panel is
-             never exercised by any test, which is why it survived.
-    Impact:  the setting itself WORKS -- `_set_speed()` writes
+    Scope:   this was a PRE-EXISTING defect, NOT a regression of the
+             release series: the same was true on master, and the
+             panel was never exercised by any test, which is why it
+             survived.
+    Impact:  the setting itself WORKED -- `_set_speed()` writes
              `MetaProfile.battle_speed` through
              `SaveService.save_meta()`, and `battle_scene.gd` reads
              `profile.battle_speed` for the battle speed -- but the
-             PLAYER cannot reach it.
-    Verified: in the real browser the main menu carries only "New
-             Run" and "Continue"; clicking every plausible spot opens
-             no panel.
-    Decision: adding the missing button is a UI FEATURE change, and
-             this closure is an integration and staging-readiness
-             pass, not a feature sprint. It is recorded here as an
-             ACCEPTED RISK for the staging run and named as a
-             separate follow-up.
+             PLAYER could not reach it.
+    Fixed:   commit 5dc23b2. `_build_vbox()` now CREATES the
+             Settings button, right after Continue, with the existing
+             `_make_button()` and `_on_settings_pressed()`. The panel
+             now lives INSIDE the menu's VBoxContainer instead of the
+             ROOT Control, so it is the buttons' SIBLING and can no
+             longer cover them. It is built once, so repeated presses
+             cannot create a second panel. `_set_speed()` now checks
+             what `save_meta()` returns: a FAILED write leaves the
+             profile's speed unchanged and logs a warning, so the menu
+             never shows a speed that is not on the disk.
+    Tested:  tests/run_domain/main_menu_settings_test.gd, 47
+             assertions: the button exists and is reachable, the press
+             opens and the next press closes the panel, the panel is
+             the vbox's child and the buttons' sibling, ten presses
+             leave exactly one panel, the panel has exactly three
+             switches, 1x/2x/4x are persisted and restored across a
+             fresh menu, a failed write changes nothing, and the
+             production `user://saves/meta.tres` is byte-identical
+             after the suite runs.
+             The suite is NOT vacuous: three mutations of the
+             production menu -- the button not created, the panel in
+             the root, the save failure ignored -- are all caught.
+    Verified: in the real browser, on the real WASM build in Chrome
+             157, at 1280x720, 390x844 and 360x640: the Settings
+             button is on the menu, the panel opens below it with all
+             three switches reachable, 2x is selected and stays
+             selected after closing, reopening and RELOADING the
+             browser, 1x restores the ordinary speed, and New Run
+             still starts a run.
 
 ### H-03 — the release negative controls proved nothing
 
@@ -1926,8 +1948,12 @@
     meta profile gained one unlock, the checkpoint recorded the stable
     phase, and a reload restored everything. Re-selecting the
     treasure granted nothing twice.
-    WEB-15 (settings) remains NOT VERIFIED: the UI is unreachable --
-    see H-05.
+    WEB-15 (settings) is now VERIFIED: the real WASM build was
+    walked in Chrome 157 at 1280x720, 390x844 and 360x640. The
+    Settings button is on the menu, the panel opens with all three
+    speed switches, 2x is selected and stays selected after closing,
+    reopening and RELOADING the browser, 1x restores the ordinary
+    speed, and New Run still starts a run. See H-05.
 
 ## LOW
 
