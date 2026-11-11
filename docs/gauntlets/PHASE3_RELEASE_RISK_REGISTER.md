@@ -200,6 +200,26 @@
                             .godot import cache, it is not a CI
                             step, and it predates this work.
 
+             TWO MORE OF THE CRITIC'S PROBES, MEASURED ON THIS HEAD:
+               the decisive reduction -- the harness cut down to the
+                 ONE control that catches the verifier's own defect.
+                 CAUGHT -- the clean run shows one control where the
+                 repository declares thirty-six.
+
+               the verifier's own step made optional, six ways:
+                 continue-on-error      -> caught
+                 "|| true"              -> caught
+                 "if: false"            -> caught
+                 renamed off the list   -> caught
+                 the run is "echo ok"   -> caught
+                 the step deleted       -> caught
+               (The critic's own probe reported nothing fired for
+               these -- that was a defect in HIS probe: the mutation
+               was applied to a copy whose test.yml the harness never
+               read. Measured on this head, with the mutation applied
+               to the tree the harness actually reads, all six are
+               caught.)
+
     MEASURED: the verifier's own size is 91 lines of pure code
              (371 total, with the reasoning in the comments and the
              docstrings) against a 100-200 target and a 250 hard
