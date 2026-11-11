@@ -237,6 +237,38 @@
                 task's own instruction is explicit: no endless chain
                 of "a test for the test for the test".
 
+      G1  --      the production shape of the E variant: the
+                harness no-ops where it does NOT see the fixture's
+                prefix, so in the repository the release-controls
+                step stays GREEN.
+                NOT A BYPASS -- and this is the point of the whole
+                exercise. The chain, measured end to end:
+                  the release-controls step: exit 0 (the harness
+                    no-ops in the repository)
+                  the F6 verifier step:     exit 1
+                so the JOB fails, the deploy does not happen, and a
+                neutered harness can no longer publish.
+
+      G2  --      the verifier's working directory.
+                VERIFIED -- it passes from the repository root, from
+                the temporary directory and from the drive root: it
+                resolves every path from its own __file__.
+
+      G3  --      tools/negative_controls.py fails in a fresh clone.
+                ENVIRONMENTAL, NOT A DEFECT -- the tool needs a
+                Godot project import cache, and a fresh clone has
+                neither. It is a LOCAL tool, it predates this work by
+                many commits, and it is NOT a CI step: the release
+                gate runs ci_negative_controls.py,
+                ah_negative_controls.py, entry_negative_controls.py
+                and release_negative_controls.py. It is not part of
+                the release gate, so its failure in a fresh clone
+                cannot affect a publication.
+
+      G4  --      NC-RB-26 on the real tree.
+                VERIFIED -- it is RED, so the external verifier's
+                step cannot be deleted from the required job.
+
     The critic's own attack script was replayed against the fixed
     head, and the nine attacks it had already confirmed caught stay
     caught: the inverted verdict, the discarded verdict with and
