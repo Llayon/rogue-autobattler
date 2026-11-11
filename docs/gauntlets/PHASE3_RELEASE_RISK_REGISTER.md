@@ -220,6 +220,22 @@
                to the tree the harness actually reads, all six are
                caught.)
 
+             THE VERIFIER CATCHES BOTH DIRECTIONS:
+               a harness that checks almost nothing -- CAUGHT by the
+                 count floor: the clean run shows one control where
+                 the repository declares thirty-six;
+               a harness that refuses EVERYTHING, even a clean tree --
+                 CAUGHT by the clean scenario, which requires the
+                 clean tree to pass. So the verifier catches
+                 UNDER-checking and OVER-refusing alike: the second
+                 would be a false RED in the required CI job.
+
+             The corrected G -- the defect applied only to a file the
+             harness never opens -- is CAUGHT too, because the
+             harness's own publisher scan covers the whole workflows
+             directory, and the fixture's extra file changes what the
+             clean run reports.
+
     MEASURED: the verifier's own size is 91 lines of pure code
              (371 total, with the reasoning in the comments and the
              docstrings) against a 100-200 target and a 250 hard
