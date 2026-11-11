@@ -152,15 +152,53 @@
              and no shell escape; and NC-RB-26 proves that the step
              cannot be deleted from the required job.
 
-    LIMIT:   the verifier cannot certify ITSELF either. An edit that
-             makes it always pass is invisible from inside it, and
-             an edit of the harness AND the verifier AND the workflow
-             that runs them is undetectable by any single test. That
-             is the accepted limit: the protection is demonstrated
-             against the TYPICAL disabling — a neutered or
-             always-green harness — not against a coordinated edit of
-             the whole trust boundary. A further chain of "a test for
-             the test for the test" is explicitly out of scope.
+    LIMIT:   the verifier cannot certify ITSELF either. The
+             independent critic corrected an earlier, understated
+             form of this limit: it needs an edit of the verifier
+             AND an edit of the harness AND an edit of the workflow
+             that runs them. A single flip in the verifier was
+             enough on the earlier head -- but on THIS head the
+             count check catches that shape too, because a crippled
+             harness runs fewer controls than it declares. The limit
+             is therefore stated conservatively: the protection is
+             demonstrated against the TYPICAL disabling — a neutered
+             or always-green harness — and against the ways the
+             verifier itself can be weakened that the count check
+             happens to cover. It is NOT demonstrated against a
+             coordinated edit of the whole trust boundary. A further
+             chain of "a test for the test for the test" is
+             explicitly out of scope.
+
+             THE CRITIC'S FINDINGS, AND THEIR STATE ON THIS HEAD:
+               F-01  HIGH   a harness that runs ONE control, and the
+                            verifier certifying it.
+                            FIXED -- the clean run must show at
+                            least the declared number of controls.
+               F-02  HIGH   a harness that recognises the fixture
+                            and behaves correctly there.
+                            FIXED -- the fixture is given the
+                            repository's own name, its parent's name
+                            and a .git directory, so it cannot be
+                            told apart from the repository.
+               F-03  MED    the verifier's blind spot understated.
+                            FIXED -- the limit is now stated
+                            conservatively, and the count check
+                            covers the flip the critic found.
+               F-04  LOW    the mutants printed 35 while the harness
+                            prints 36, so the indistinguishability
+                            claim was stale.
+                            FIXED -- the mutants print the same
+                            count, read from the harness's own
+                            declaration.
+               F-05  LOW    fixture fragility: the defect in a file
+                            the harness does not read.
+                            ACCEPTED -- not a bypass; the question
+                            would be about another file.
+               F-06  INFO   tools/negative_controls.py exits 1 in a
+                            fresh clone.
+                            ENVIRONMENTAL, NO ACTION -- it needs a
+                            .godot import cache, it is not a CI
+                            step, and it predates this work.
 
     MEASURED: the verifier's own size is 91 lines of pure code
              (371 total, with the reasoning in the comments and the
