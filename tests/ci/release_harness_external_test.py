@@ -116,9 +116,45 @@ def _build_tree(harness_text=None, with_defect=False):
     seam: no line of the harness is changed to point it at a
     fixture.
     """
-    tmp = tempfile.mkdtemp(prefix="release_harness_external_")
+    # The fixture must be INDISTINGUISHABLE from the repository in
+    # the ways a harness can look.
+    #
+    # The independent critic found three ways to tell them apart:
+    # by the fixture's PREFIX, by the ABSENCE of a .git directory,
+    # and by the tree's BASENAME. Each was a real bypass, because
+    # the verifier only ever looked at the fixture -- so a harness
+    # that behaved correctly there and was a no-op everywhere else
+    # was certified.
+    #
+    # There is no name that is safe by being unusual: being unusual
+    # IS the signal. So the fixture is given the repository's OWN
+    # name, inside a generic temporary parent. A harness that
+    # compares the basename finds the same answer in both; one that
+    # walks up finds a generic parent in both; one that looks for
+    # .git finds it in both.
+    parent = tempfile.mkdtemp(prefix="gate_probe_")
+    tmp = os.path.join(parent, os.path.basename(REPO))
+    os.makedirs(tmp)
+    # The PARENT must not carry a signal either: the critic's next
+    # attack recognised the fixture by the name of its parent. So the
+    # fixture's parent is given the repository's OWN parent's name --
+    # the same answer a harness finds by walking up from the
+    # repository.
+    repo_parent = os.path.basename(os.path.dirname(REPO))
+    if repo_parent:
+        hidden = os.path.join(parent, repo_parent)
+        os.rename(tmp, hidden)
+        tmp = hidden
     for rel in ("tools", os.path.join(".github", "workflows")):
         os.makedirs(os.path.join(tmp, rel))
+    # The fixture must be indistinguishable from the repository in
+    # the ways a harness can look. The independent critic's E2 attack
+    # recognised the fixture by the ABSENCE of a .git directory --
+    # so the fixture gets one. It is an empty directory, not a
+    # repository: it holds no history and the harness never reads it.
+    # It exists only so that "is this a git tree?" has the same
+    # answer in the fixture and in the repository.
+    os.makedirs(os.path.join(tmp, ".git"))
     source = harness_text if harness_text is not None else _read(HARNESS)
     _write(os.path.join(tmp, "tools", "release_negative_controls.py"), source)
     shutil.copyfile(VALIDATOR,
@@ -206,6 +242,11 @@ def _remove(tree):
     """
     shutil.rmtree(tree, ignore_errors=True)
     if os.path.isdir(tree):
+        return False
+    # The generic parent goes too.
+    parent = os.path.dirname(tree)
+    shutil.rmtree(parent, ignore_errors=True)
+    if os.path.isdir(parent):
         return False
     return True
 
