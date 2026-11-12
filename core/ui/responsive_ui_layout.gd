@@ -170,6 +170,30 @@ func font_px(base_px: int) -> int:
 	return maxi(MIN_FONT_PX, int(round(float(base_px) / engine_scale)))
 
 
+## The font size for a text that must fit a width.
+##
+## Godot's Label reports the TEXT's width as its minimum size, and
+## `custom_minimum_size` only RAISES it. So a label whose text is
+## wider than the panel makes the panel wider than the screen: on a
+## 390 px phone the item's line at the phone's 46 px font is ~900 px
+## wide, and the BUY button was pushed off the screen.
+##
+## The font is therefore capped so the text fits the width, and the
+## label's own minimum stays at the cap.
+func font_px_for(text: String, base_px: int, max_width_base: float) -> int:
+	## The font size for a text that must fit a width.
+	##
+	## `max_width_base` is the width in the BASE space (the same space
+	## as the font size), and the returned size is a BASE font size.
+	var theSize: int = font_px(base_px)
+	if mode == Mode.DESKTOP:
+		return theSize
+	# The text's width is about 0.58 em per character for this font.
+	var theChars: float = maxf(1.0, float(text.length()))
+	var theEm: float = 0.58
+	var theMaxSize: float = max_width_base / (theChars * theEm)
+	return maxi(MIN_FONT_PX, mini(theSize, int(round(theMaxSize))))
+
 ## Физический размер интерактивной области с заданным base-space размером.
 ##
 ## Гарантирует не меньше `MIN_TOUCH_PX` по обеим сторонам, чтобы

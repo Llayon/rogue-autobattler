@@ -120,6 +120,12 @@ func _build_background() -> void:
 	_ui_root.add_child(bg)
 
 
+## The font size for a text that must fit a width.
+func _font_px_for(text: String, base_px: int, max_width_px: float) -> int:
+	if _layout == null:
+		return base_px
+	return _layout.font_px_for(text, base_px, max_width_px)
+
 func _build_panel() -> void:
 	var center: CenterContainer = CenterContainer.new()
 	center.name = "Center"
@@ -141,13 +147,21 @@ func _build_panel() -> void:
 	title.name = "Title"
 	title.text = "SHOP (50% off!) — press SPACE/ESC to leave"
 	title.add_theme_color_override("font_color", Color(1.0, 0.92, 0.65))
-	title.add_theme_font_size_override("font_size", _font_px(22))
+	# The title's font is capped so the text fits the panel: a
+	# Label's minimum size is its TEXT's width, and a title wider
+	# than the screen made the whole panel wider than the screen.
+	title.add_theme_font_size_override("font_size",
+		_font_px_for(title.text, 22,
+				maxf(120.0, _fit_size(Vector2(820, 480)).x - 80.0)))
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	vbox.add_child(title)
 	# Gold counter.
 	var counter: Label = Label.new()
 	counter.name = "Counter"
 	counter.add_theme_color_override("font_color", Color(1.0, 0.95, 0.6))
+	counter.add_theme_font_size_override("font_size",
+		_font_px_for("Your gold: 000", 16,
+				maxf(120.0, _fit_size(Vector2(820, 480)).x - 80.0)))
 	counter.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	vbox.add_child(counter)
 	# Items list.
@@ -230,7 +244,12 @@ func _build_item_buttons() -> void:
 		var def: Resource = run_controller.merchant_shop.get_item_def(i)
 		var price: int = run_controller.merchant_shop.get_discounted_price(i)
 		# Row: name + bonuses | Buy button.
-		var row: HBoxContainer = HBoxContainer.new()
+		# On a narrow screen the text and the button go on SEPARATE
+		# rows: side by side, the text would need a 10 px font to fit,
+		# and the button would be pushed off the screen.
+		var theStacked: bool = _layout != null and _layout.is_mobile() \
+				and _layout.view_width < 560.0
+		var row: BoxContainer = VBoxContainer.new() if theStacked else HBoxContainer.new()
 		row.add_theme_constant_override("separation", _px_i(12))
 		list.add_child(row)
 		var info: Label = Label.new()
@@ -249,17 +268,37 @@ func _build_item_buttons() -> void:
 				bonuses.append("+%d HP" % def.bonus_max_hp)
 			var bonus_str: String = " ".join(bonuses) if not bonuses.is_empty() else "(passive)"
 			var line1: String = "%s  [tier %d, was %d g]" % [def.display_name, def.tier, def.cost]
-			info.text = line1 + "\n" + bonus_str + "  —  now %d g (50 percent off)" % price
+			# On a narrow screen the text is split into short lines: the
+			# longest line sets the label's minimum width, and a 36
+			# character line would need an 11 px font.
+			if theStacked:
+				info.text = def.display_name + "\n" + "[tier %d, was %d g]" % [def.tier, def.cost] + "\n" + bonus_str + " — now %d g" % price
+			else:
+				info.text = line1 + "\n" + bonus_str + "  —  now %d g (50 percent off)" % price
 		else:
 			info.text = "(unknown item slot %d)" % i
-		info.add_theme_font_size_override("font_size", _font_px(14))
+		# The font is capped so the item's line fits the panel: a
+		# Label's minimum size is its TEXT's width, and a wider text
+		# would push the BUY button off the screen.
+		var theText: String = info.text
+		# The width that is left for the label: the panel's width minus
+		# the margins, the separation and the BUY button. The button's
+		# size is a PHYSICAL one (120 px), so it is converted into the
+		# base space here.
+		var thePanelWidth: float = _fit_size(Vector2(820, 480)).x
+		var theButtonWidth: float = 0.0 if theStacked else _touch_size(Vector2(120, 50)).x
+		var theRowWidth: float = thePanelWidth - 80.0 - theButtonWidth - 40.0
+		info.add_theme_font_size_override("font_size",
+			_font_px_for(theText, 14, maxf(120.0, theRowWidth)))
 		info.add_theme_color_override("font_color", Color(0.95, 0.95, 0.9))
 		info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		row.add_child(info)
 		var buy_btn: Button = Button.new()
 		buy_btn.name = "BuyItem_%d" % i
 		buy_btn.text = "BUY\n%d g" % price
-		buy_btn.custom_minimum_size = _touch_size(Vector2(120, 50))
+		buy_btn.custom_minimum_size = Vector2(
+			_fit_size(Vector2(820, 480)).x - 80.0,
+			_touch_size(Vector2(120, 50)).y) if theStacked else _touch_size(Vector2(120, 50))
 		buy_btn.add_theme_font_size_override("font_size", _font_px(14))
 		buy_btn.add_theme_stylebox_override("normal",
 			_make_btn_style(Color(0.40, 0.55, 0.30)))
