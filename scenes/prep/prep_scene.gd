@@ -294,7 +294,7 @@ func _make_unit_button(kind: String, index: int, def: Resource) -> Button:
 	var btn: Button = Button.new()
 	btn.name = "%s_%d" % [kind.capitalize(), index]
 	btn.custom_minimum_size = Vector2(_px(120.0), _px(110.0))
-	btn.add_theme_font_size_override("font_size", 14)
+	btn.add_theme_font_size_override("font_size", _font_px(14))
 	if def != null:
 		btn.text = "%s\nATK %d\nHP %d" % [def.display_name, def.attack, def.max_hp]
 	else:

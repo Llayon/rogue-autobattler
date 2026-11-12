@@ -60,6 +60,7 @@ func _initialize() -> void:
 	await _test_L_a_hidden_overlay_has_no_touch_target()
 	await _test_M_the_modal_backdrops_consume_the_taps()
 	await _test_N_the_touch_bar_is_above_the_overlays()
+	await _test_O_the_prep_unit_buttons_have_a_readable_font()
 	var theAfter: String = _saves_digest()
 	_assert(theBefore == theAfter,
 		"the production saves are byte-identical after the suite")
@@ -472,6 +473,60 @@ func _has_visible_button(root: Node) -> bool:
 ## is created with the `suppress_run` meta: the scene's UI tree is
 ## built (which is what this suite is about) and no run starts, so
 ## nothing is written.
+func _test_O_the_prep_unit_buttons_have_a_readable_font() -> void:
+	# The unit buttons are the PREP's main interactive elements: the
+	# player picks the units to fight with. Their font must be
+	# PHYSICAL, like every other control, or the player cannot read
+	# the unit's name and stats on a phone.
+	var thePrep: Node = load("res://scenes/prep/prep_scene.gd").new()
+	root.add_child(thePrep)
+	await process_frame
+	# The headless window is 64x64, so the scene built the DESKTOP
+	# layout. The PHONE layout is installed explicitly, otherwise the
+	# phone's compensation is never exercised and the test proves
+	# nothing.
+	var thePhone: ResponsiveUILayoutScript = ResponsiveUILayoutScript.from_window(Vector2(390, 844))
+	thePrep.set("_layout", thePhone)
+	thePrep.call("_build_ui_root")
+	thePrep.call("_build_background")
+	thePrep.call("_build_panel")
+	await process_frame
+	# The unit buttons are built by _rebuild(), which needs a run
+	# controller -- and the suite must not start a run (the user's
+	# saves). The button's own factory is called instead: it is the
+	# production code path that creates the button.
+	var theButtons: Array = []
+	for theKind in ["board", "bench"]:
+		for theIndex in range(2):
+			var theButton: Button = thePrep.call("_make_unit_button", theKind, theIndex, null)
+			theButtons.append(theButton)
+	_assert(theButtons.size() == 4, "the PREP makes the unit buttons")
+	# The threshold is the PHYSICAL 14 px expressed in the base space:
+	# the phone's engine scale is 0.305, so 14 / 0.305 = 46. A raw 14
+	# would render as 4.3 CSS px -- unreadable.
+	var theMinimum: int = int(round(14.0 / thePhone.engine_scale))
+	var theTiny: int = 0
+	for theButton in theButtons:
+		var theFont: int = theButton.get_theme_font_size("font_size")
+		if theFont < theMinimum:
+			theTiny += 1
+	_assert(theTiny == 0,
+		"every unit button's font is readable on a phone"
+		+ " (the tiny ones: %d of %d, the minimum: %d)"
+		% [theTiny, theButtons.size(), theMinimum])
+	for theButton in theButtons:
+		theButton.free()
+	thePrep.queue_free()
+	await process_frame
+
+
+func _collect_buttons(theNode: Node, theOut: Array) -> void:
+	if theNode is Button:
+		theOut.append(theNode)
+	for theChild in theNode.get_children():
+		_collect_buttons(theChild, theOut)
+
+
 func _make_battle_scene() -> Node:
 	var theScene: Node = BattleSceneScript.instantiate()
 	# The meta is read in `_ready()`, so it must be set BEFORE the node
