@@ -33,8 +33,6 @@ func _ready() -> void:
 	_build_ui_root()
 	_build_background()
 	_build_panel()
-	_build_background()
-	_build_panel()
 	# S6.2: если set_run_controller был вызван ДО add_child (например, из test),
 	# пересобираем панель сейчас когда UI tree построен.
 	if run_controller != null:
@@ -120,12 +118,24 @@ func _fit_size(desired: Vector2) -> Vector2:
 	return _layout.fit(desired, 16.0)
 
 ## The window's size in physical (CSS) pixels.
+
+## The window's size in physical (CSS) pixels.
+##
+## `get_window().size` is the window's own pixel size. In the web
+## build that IS the canvas's CSS size -- the physical size the player
+## sees.
+##
+## The headless `--script` mode reports Godot's default 64x64 window,
+## which is not a real viewport. A size below the base width is
+## therefore rejected, and the base size is used: the desktop layout.
 func _window_size() -> Vector2:
 	var theWindow := get_window()
 	if theWindow == null:
 		return Vector2(ResponsiveUILayoutScript.BASE_WIDTH, ResponsiveUILayoutScript.BASE_HEIGHT)
 	var theSize := theWindow.size
-	if theSize.x <= 0.0 or theSize.y <= 0.0:
+	# A degenerate or tiny window is the headless default, not a
+	# viewport.
+	if theSize.x < 200.0 or theSize.y < 200.0:
 		return Vector2(ResponsiveUILayoutScript.BASE_WIDTH, ResponsiveUILayoutScript.BASE_HEIGHT)
 	return theSize
 
@@ -250,7 +260,7 @@ func _clear_buttons() -> void:
 
 
 func _build_board_buttons() -> void:
-	var row: HBoxContainer = get_node_or_null("Center/Panel/VBox/BoardRow")
+	var row: HBoxContainer = get_node_or_null("UiRoot/Center/Panel/VBox/BoardRow")
 	if row == null:
 		return
 	var board: Array[RunUnit] = run_controller.state.get_board_units()
@@ -262,8 +272,8 @@ func _build_board_buttons() -> void:
 
 
 func _build_bench_buttons() -> void:
-	var row: HBoxContainer = get_node_or_null("Center/Panel/VBox/BenchRow")
-	var label: Label = get_node_or_null("Center/Panel/VBox/BenchLabel")
+	var row: HBoxContainer = get_node_or_null("UiRoot/Center/Panel/VBox/BenchRow")
+	var label: Label = get_node_or_null("UiRoot/Center/Panel/VBox/BenchLabel")
 	if row == null:
 		return
 	var bench: Array[RunUnit] = run_controller.state.get_bench_units()
@@ -283,7 +293,7 @@ func _build_bench_buttons() -> void:
 func _make_unit_button(kind: String, index: int, def: Resource) -> Button:
 	var btn: Button = Button.new()
 	btn.name = "%s_%d" % [kind.capitalize(), index]
-	btn.custom_minimum_size = Vector2(120, 110)
+	btn.custom_minimum_size = Vector2(_px(120.0), _px(110.0))
 	btn.add_theme_font_size_override("font_size", 14)
 	if def != null:
 		btn.text = "%s\nATK %d\nHP %d" % [def.display_name, def.attack, def.max_hp]

@@ -51,12 +51,24 @@ func _font_px(base_px: int) -> int:
 
 
 ## The window's size in physical (CSS) pixels.
+
+## The window's size in physical (CSS) pixels.
+##
+## `get_window().size` is the window's own pixel size. In the web
+## build that IS the canvas's CSS size -- the physical size the player
+## sees.
+##
+## The headless `--script` mode reports Godot's default 64x64 window,
+## which is not a real viewport. A size below the base width is
+## therefore rejected, and the base size is used: the desktop layout.
 func _window_size() -> Vector2:
 	var theWindow := get_window()
 	if theWindow == null:
 		return Vector2(ResponsiveUILayoutScript.BASE_WIDTH, ResponsiveUILayoutScript.BASE_HEIGHT)
 	var theSize := theWindow.size
-	if theSize.x <= 0.0 or theSize.y <= 0.0:
+	# A degenerate or tiny window is the headless default, not a
+	# viewport.
+	if theSize.x < 200.0 or theSize.y < 200.0:
 		return Vector2(ResponsiveUILayoutScript.BASE_WIDTH, ResponsiveUILayoutScript.BASE_HEIGHT)
 	return theSize
 
@@ -87,8 +99,6 @@ func _fit_size(desired: Vector2) -> Vector2:
 func _ready() -> void:
 	_layout = ResponsiveUILayoutScript.from_window(_window_size())
 	_build_ui_root()
-	_build_background()
-	_build_panel()
 	_build_background()
 	_build_panel()
 	if run_controller != null:
@@ -212,7 +222,7 @@ func _clear_item_buttons() -> void:
 
 
 func _build_item_buttons() -> void:
-	var list: VBoxContainer = get_node_or_null("Center/Panel/VBox/ItemsList")
+	var list: VBoxContainer = get_node_or_null("UiRoot/Center/Panel/VBox/ItemsList")
 	if list == null:
 		return
 	var offered: int = run_controller.merchant_shop.get_offered_count()
@@ -224,7 +234,11 @@ func _build_item_buttons() -> void:
 		row.add_theme_constant_override("separation", _px_i(12))
 		list.add_child(row)
 		var info: Label = Label.new()
-		info.custom_minimum_size = Vector2(540, 50)
+		# The label's MINIMUM width is physical and small, and it EXPANDS
+		# into the free space: on the desktop it takes 540 px, on a phone
+		# it shrinks so the BUY button still fits beside it.
+		info.custom_minimum_size = Vector2(_px(120.0), _px(50.0))
+		info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		if def != null:
 			var bonuses: Array = []
 			if def.bonus_attack > 0:
@@ -255,7 +269,7 @@ func _build_item_buttons() -> void:
 
 
 func _update_counter() -> void:
-	var counter: Label = get_node_or_null("Center/Panel/VBox/Counter")
+	var counter: Label = get_node_or_null("UiRoot/Center/Panel/VBox/Counter")
 	if counter != null:
 		counter.text = "Your gold: %d" % run_controller.state.gold
 

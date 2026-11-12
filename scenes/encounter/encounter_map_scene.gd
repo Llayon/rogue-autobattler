@@ -41,12 +41,24 @@ func _font_px(base_px: int) -> int:
 
 
 ## The window's size in physical (CSS) pixels.
+
+## The window's size in physical (CSS) pixels.
+##
+## `get_window().size` is the window's own pixel size. In the web
+## build that IS the canvas's CSS size -- the physical size the player
+## sees.
+##
+## The headless `--script` mode reports Godot's default 64x64 window,
+## which is not a real viewport. A size below the base width is
+## therefore rejected, and the base size is used: the desktop layout.
 func _window_size() -> Vector2:
 	var theWindow := get_window()
 	if theWindow == null:
 		return Vector2(ResponsiveUILayoutScript.BASE_WIDTH, ResponsiveUILayoutScript.BASE_HEIGHT)
 	var theSize := theWindow.size
-	if theSize.x <= 0.0 or theSize.y <= 0.0:
+	# A degenerate or tiny window is the headless default, not a
+	# viewport.
+	if theSize.x < 200.0 or theSize.y < 200.0:
 		return Vector2(ResponsiveUILayoutScript.BASE_WIDTH, ResponsiveUILayoutScript.BASE_HEIGHT)
 	return theSize
 
@@ -70,9 +82,6 @@ func _build_ui_root() -> void:
 func _ready() -> void:
 	_layout = ResponsiveUILayoutScript.from_window(_window_size())
 	_build_ui_root()
-	_setup_background()
-	_setup_map_view()
-	_setup_status_label()
 	_setup_background()
 	_setup_map_view()
 	_setup_status_label()

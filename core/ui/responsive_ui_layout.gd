@@ -107,16 +107,29 @@ func apply_to(root: Control) -> void:
 func fit(desired: Vector2, margin: float = 0.0) -> Vector2:
 	if mode == Mode.DESKTOP:
 		return desired
-	# The panel keeps the DESKTOP's physical layout: a desired size is
-	# a physical size (820x480 px on the desktop), so on a phone it is
-	# expressed in the base space as desired / engine_scale. The
-	# available base space is the window's physical size divided by the
-	# engine's scale -- which is the viewport's own size.
+	# The panel's PHYSICAL size is the desktop's physical size (820x480
+	# px on the desktop), expressed in the base space as desired /
+	# engine_scale. But it must never exceed the available physical
+	# space: on a 390-wide phone the desktop's 820 px would be twice
+	# the screen, and the panel's buttons would fall off it.
 	var theMaxW: float = maxf(120.0, (view_width - margin * 2.0) / engine_scale)
 	var theMaxH: float = maxf(120.0, (view_height - margin * 2.0) / engine_scale)
+	# The panel takes the WHOLE available area on a phone: the
+	# desktop's 480 px height is not enough for a portrait screen (the
+	# PREP's Ready button was pushed off the panel), and the CONTENT
+	# adapts instead (the labels shrink, the panels scroll).
+	return Vector2(theMaxW, theMaxH)
+
+
+## The available PHYSICAL space, in the base space.
+##
+## The whole window minus the margin, expressed in the base space.
+func available(margin: float = 0.0) -> Vector2:
+	if mode == Mode.DESKTOP:
+		return Vector2(BASE_WIDTH - margin * 2.0, BASE_HEIGHT - margin * 2.0)
 	return Vector2(
-		clampf(desired.x / engine_scale, 120.0, theMaxW),
-		clampf(desired.y / engine_scale, 120.0, theMaxH))
+		maxf(120.0, (view_width - margin * 2.0) / engine_scale),
+		maxf(120.0, (view_height - margin * 2.0) / engine_scale))
 
 
 ## Физический (CSS) размер элемента с заданным base-space размером.

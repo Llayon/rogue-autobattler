@@ -70,12 +70,24 @@ func _font_px(base_px: int) -> int:
 
 
 ## The window's size in physical (CSS) pixels.
+
+## The window's size in physical (CSS) pixels.
+##
+## `get_window().size` is the window's own pixel size. In the web
+## build that IS the canvas's CSS size -- the physical size the player
+## sees.
+##
+## The headless `--script` mode reports Godot's default 64x64 window,
+## which is not a real viewport. A size below the base width is
+## therefore rejected, and the base size is used: the desktop layout.
 func _window_size() -> Vector2:
 	var theWindow := get_window()
 	if theWindow == null:
 		return Vector2(ResponsiveUILayoutScript.BASE_WIDTH, ResponsiveUILayoutScript.BASE_HEIGHT)
 	var theSize := theWindow.size
-	if theSize.x <= 0.0 or theSize.y <= 0.0:
+	# A degenerate or tiny window is the headless default, not a
+	# viewport.
+	if theSize.x < 200.0 or theSize.y < 200.0:
 		return Vector2(ResponsiveUILayoutScript.BASE_WIDTH, ResponsiveUILayoutScript.BASE_HEIGHT)
 	return theSize
 
@@ -128,8 +140,6 @@ func _current_picked_item_idx() -> int:
 func _ready() -> void:
 	_layout = ResponsiveUILayoutScript.from_window(_window_size())
 	_build_ui_root()
-	_build_background()
-	_build_panel()
 	_build_background()
 	_build_panel()
 	if run_controller != null:
@@ -282,10 +292,10 @@ func _clear_item_buttons() -> void:
 
 
 func _build_item_buttons() -> void:
-	var list: VBoxContainer = get_node_or_null("Center/Panel/VBox/ItemsList")
+	var list: VBoxContainer = get_node_or_null("UiRoot/Center/Panel/VBox/ItemsList")
 	if list == null:
 		return
-	var empty_hint: Label = get_node_or_null("Center/Panel/VBox/ItemsList/EmptyHint")
+	var empty_hint: Label = get_node_or_null("UiRoot/Center/Panel/VBox/ItemsList/EmptyHint")
 	var total: int = run_controller.inventory_count()
 	if total == 0:
 		if empty_hint != null:
@@ -306,7 +316,10 @@ func _build_item_buttons() -> void:
 func _make_item_button(idx: int, def: Resource) -> Button:
 	var btn: Button = Button.new()
 	btn.name = "Item_%d" % idx
-	btn.custom_minimum_size = _touch_size(Vector2(720, 56))
+	# The item's row fills the panel's width: a fixed 720 px would
+	# overflow a 358 px phone panel.
+	btn.custom_minimum_size = Vector2(_px(120.0), _touch_size(Vector2(720, 56)).y)
+	btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	if def != null:
 		# Show name + bonuses + tier/cost + optional equip marker.
 		var bonuses: Array = []
@@ -353,7 +366,7 @@ func _apply_item_style(btn: Button) -> void:
 
 
 func _update_counter() -> void:
-	var counter: Label = get_node_or_null("Center/Panel/VBox/Counter")
+	var counter: Label = get_node_or_null("UiRoot/Center/Panel/VBox/Counter")
 	if counter == null:
 		return
 	var total: int = run_controller.inventory_count()
@@ -362,8 +375,8 @@ func _update_counter() -> void:
 
 
 func _update_pagination() -> void:
-	var prev: Button = get_node_or_null("Center/Panel/VBox/PrevButton")
-	var next: Button = get_node_or_null("Center/Panel/VBox/NextButton")
+	var prev: Button = get_node_or_null("UiRoot/Center/Panel/VBox/PrevButton")
+	var next: Button = get_node_or_null("UiRoot/Center/Panel/VBox/NextButton")
 	if prev == null or next == null:
 		return
 	var total: int = run_controller.inventory_count()

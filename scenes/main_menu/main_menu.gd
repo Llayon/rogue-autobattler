@@ -60,7 +60,9 @@ func _ready() -> void:
     _profile = _load_meta()
     if _profile == null:
         _profile = MetaProfileScript.new()
-        _layout = ResponsiveUILayoutScript.from_window(_window_size())
+    # The layout is set UNCONDITIONALLY: a player with an existing
+    # profile must get the same compensation as a fresh one.
+    _layout = ResponsiveUILayoutScript.from_window(_window_size())
     _build_layout()
     _refresh()
 
@@ -69,12 +71,24 @@ func _ready() -> void:
 ##
 ## `get_window().size` is the viewport's size in the base space, so the
 ## window's own size is used: it is the canvas's real pixel count.
+
+## The window's size in physical (CSS) pixels.
+##
+## `get_window().size` is the window's own pixel size. In the web
+## build that IS the canvas's CSS size -- the physical size the player
+## sees.
+##
+## The headless `--script` mode reports Godot's default 64x64 window,
+## which is not a real viewport. A size below the base width is
+## therefore rejected, and the base size is used: the desktop layout.
 func _window_size() -> Vector2:
     var theWindow := get_window()
     if theWindow == null:
         return Vector2(ResponsiveUILayoutScript.BASE_WIDTH, ResponsiveUILayoutScript.BASE_HEIGHT)
     var theSize := theWindow.size
-    if theSize.x <= 0.0 or theSize.y <= 0.0:
+    # A degenerate or tiny window is the headless default, not a
+    # viewport.
+    if theSize.x < 200.0 or theSize.y < 200.0:
         return Vector2(ResponsiveUILayoutScript.BASE_WIDTH, ResponsiveUILayoutScript.BASE_HEIGHT)
     return theSize
 
@@ -108,8 +122,12 @@ func _build_vbox() -> VBoxContainer:
     vbox.add_theme_constant_override("separation", _px_i(18))
     vbox.alignment = BoxContainer.ALIGNMENT_CENTER
     _title_label = Label.new()
-    _title_label.text = "ROGUE AUTOBATTLER"
-    _title_label.add_theme_font_size_override("font_size", _font_px(36))
+    # On a phone the title wraps into two lines: the longest word
+    # ("AUTOBATTLER") must fit the screen's width.
+    _title_label.text = "ROGUE\nAUTOBATTLER" if _layout != null and _layout.is_mobile() \
+            else "ROGUE AUTOBATTLER"
+    _title_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+    _title_label.add_theme_font_size_override("font_size", _title_font_px())
     _title_label.add_theme_color_override("font_color", Color(1.0, 0.95, 0.7))
     _title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
     vbox.add_child(_title_label)
@@ -119,7 +137,7 @@ func _build_vbox() -> VBoxContainer:
     _stats_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
     vbox.add_child(_stats_label)
     var spacer: Control = Control.new()
-    spacer.custom_minimum_size = Vector2(0, 20)
+    spacer.custom_minimum_size = Vector2(0, _px(20.0))
     vbox.add_child(spacer)
     _new_run_button = _make_button("New Run", _on_new_run_pressed, Color(0.30, 0.50, 0.30))
     vbox.add_child(_new_run_button)
@@ -169,6 +187,26 @@ func _font_px(base_px: int) -> int:
     if _layout == null:
         return base_px
     return _layout.font_px(base_px)
+
+## The title's font size.
+##
+## The title is the widest element. At the desktop's 36 px the text
+## "ROGUE AUTOBATTLER" is wider than a 390 px phone, so it would be
+## cut off at both edges. The size is therefore capped so the longest
+## word fits the screen with a margin.
+func _title_font_px() -> int:
+    var theSize: int = _font_px(36)
+    if _layout == null:
+        return theSize
+    if not _layout.is_mobile():
+        return theSize
+    # The title's text is 17 characters wide at roughly 0.62 em per
+    # character, so the width is about 36 * 0.62 * 17 = 380 px at the
+    # base size. The longest WORD ("AUTOBATTLER", 11 characters) must
+    # fit: 36 * 0.62 * 11 = 245 px. The cap keeps it inside the
+    # screen's width.
+    var theMax: float = (_layout.view_width - 32.0) / (0.62 * 11.0)
+    return maxi(16, mini(theSize, int(round(theMax))))
 
 func _make_button(text: String, callback: Callable, color: Color) -> Button:
     var btn: Button = Button.new()
