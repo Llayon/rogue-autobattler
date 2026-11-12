@@ -354,6 +354,7 @@ func toggle_inventory() -> void:
 	inventory_scene.visible = theNext
 	if theNext:
 		inventory_scene.set_run_controller(run_controller)
+	_refresh_touch_bar()
 	get_viewport().set_input_as_handled()
 
 
@@ -410,10 +411,16 @@ func _build_touch_bar() -> void:
 	_touch_bar = HBoxContainer.new()
 	_touch_bar.name = "TouchBar"
 	_touch_bar.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
-	_touch_bar.offset_top = -64
-	_touch_bar.offset_bottom = -8
-	_touch_bar.offset_left = 8
-	_touch_bar.offset_right = -8
+	# The offsets are physical lengths: the bar is 64 CSS px tall on
+	# every screen.
+	_touch_bar.offset_top = -_px(64.0)
+	_touch_bar.offset_bottom = -_px(8.0)
+	_touch_bar.offset_left = _px(8.0)
+	_touch_bar.offset_right = -_px(8.0)
+	# The bar is the TOPMOST layer: the inventory must be closable by
+	# tapping the Inventory button again, even while the inventory's
+	# panel is on the screen.
+	_touch_bar.z_index = 100
 	_touch_bar.alignment = BoxContainer.ALIGNMENT_CENTER
 	_touch_bar.add_theme_constant_override("separation", _px_i(12))
 	_touch_bar.mouse_filter = Control.MOUSE_FILTER_PASS
@@ -461,6 +468,19 @@ func _refresh_touch_bar() -> void:
 	if _touch_bar == null or run_controller == null:
 		return
 	var thePhase: int = run_controller.phase
+	# A MODAL overlay owns the screen: its own controls are the only
+	# actions the player may take. The shop and the reward are modal --
+	# the shop has its Leave Shop, the reward has its choices and Skip.
+	# The inventory is NOT modal: it is opened on top of the run, so
+	# the Inventory button stays available to close it again.
+	var theModal: bool = (shop_scene != null and shop_scene.visible) \
+			or (reward_modal != null and reward_modal.visible)
+	if theModal:
+		_inventory_button.visible = false
+		_speed_button.visible = false
+		_buy_button.visible = false
+		_restart_button.visible = false
+		return
 	_inventory_button.visible = (thePhase != RunController.Phase.GAMEOVER)
 	_speed_button.visible = (thePhase == RunController.Phase.BATTLE
 			or thePhase == RunController.Phase.PREP)

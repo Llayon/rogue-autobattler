@@ -106,7 +106,7 @@ func _build_background() -> void:
 	bg.name = "Backdrop"
 	bg.color = Color(0.06, 0.04, 0.10, 0.82)
 	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
-	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	bg.mouse_filter = Control.MOUSE_FILTER_STOP
 	_ui_root.add_child(bg)
 
 

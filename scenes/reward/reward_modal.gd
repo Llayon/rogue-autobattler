@@ -110,7 +110,7 @@ func _build_background() -> void:
 	# сквозь backdrop к Panel/Buttons. Если backdrop STOP — он бы
 	# перехватывал клики вне панели, но клики НАД панелью всё равно идут в панель.
 	# IGNORE безопаснее и не блокирует future click-outside-to-close поведение.
-	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	bg.mouse_filter = Control.MOUSE_FILTER_STOP
 	_ui_root.add_child(bg)
 
 

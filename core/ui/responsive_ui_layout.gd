@@ -107,12 +107,16 @@ func apply_to(root: Control) -> void:
 func fit(desired: Vector2, margin: float = 0.0) -> Vector2:
 	if mode == Mode.DESKTOP:
 		return desired
-	# On a phone the panel FILLS the available space: the base space is
-	# the physical space divided by the engine's scale, so the whole
-	# width in the base space is view_width / engine_scale.
+	# The panel keeps the DESKTOP's physical layout: a desired size is
+	# a physical size (820x480 px on the desktop), so on a phone it is
+	# expressed in the base space as desired / engine_scale. The
+	# available base space is the window's physical size divided by the
+	# engine's scale -- which is the viewport's own size.
 	var theMaxW: float = maxf(120.0, (view_width - margin * 2.0) / engine_scale)
 	var theMaxH: float = maxf(120.0, (view_height - margin * 2.0) / engine_scale)
-	return Vector2(theMaxW, theMaxH)
+	return Vector2(
+		clampf(desired.x / engine_scale, 120.0, theMaxW),
+		clampf(desired.y / engine_scale, 120.0, theMaxH))
 
 
 ## Физический (CSS) размер элемента с заданным base-space размером.

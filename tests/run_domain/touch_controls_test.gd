@@ -56,6 +56,10 @@ func _initialize() -> void:
 	await _test_H_the_buttons_are_visible_only_where_the_action_is_legal()
 	await _test_I_the_menu_buttons_keep_their_size_on_the_desktop()
 	await _test_J_the_production_saves_are_untouched()
+	await _test_K_a_modal_overlay_hides_the_touch_controls()
+	await _test_L_a_hidden_overlay_has_no_touch_target()
+	await _test_M_the_modal_backdrops_consume_the_taps()
+	await _test_N_the_touch_bar_is_above_the_overlays()
 	var theAfter: String = _saves_digest()
 	_assert(theBefore == theAfter,
 		"the production saves are byte-identical after the suite")
@@ -373,7 +377,93 @@ func _test_J_the_production_saves_are_untouched() -> void:
 		"the suite left no checkpoint of its own (the seed 987654321)")
 
 
+# === K: the input safety ===
+
+func _test_K_a_modal_overlay_hides_the_touch_controls() -> void:
+	print("[K] a modal overlay hides the touch controls")
+	var theScene: Node = await _make_battle_scene()
+	if theScene == null:
+		_assert(false, "the battle scene was built")
+		return
+	var theShop: Control = theScene.get("shop_scene")
+	var theBuy: Button = _button_of(theScene, "BuyButton")
+	_assert(theShop != null, "the scene has a shop")
+	if theShop != null and theBuy != null:
+		# The shop is MODAL: its Leave Shop is the only way out.
+		theShop.visible = true
+		theScene.call("_refresh_touch_bar")
+		_assert(not theBuy.visible,
+			"the touch controls are hidden while the modal shop is open")
+		theShop.visible = false
+		theScene.call("_refresh_touch_bar")
+		_assert(theBuy.visible,
+			"the touch controls come back when the shop closes")
+	theScene.queue_free()
+
+
+func _test_L_a_hidden_overlay_has_no_touch_target() -> void:
+	print("[L] a hidden overlay has no touch target")
+	var theScene: Node = await _make_battle_scene()
+	if theScene == null:
+		_assert(false, "the battle scene was built")
+		return
+	for theName in ["encounter_map_scene", "reward_modal", "prep_scene",
+			"inventory_scene", "shop_scene"]:
+		var theOverlay: Control = theScene.get(theName)
+		_assert(theOverlay != null, "the scene has the %s" % theName)
+		if theOverlay != null:
+			_assert(not theOverlay.visible,
+				"the %s starts hidden" % theName)
+			_assert(not _has_visible_button(theOverlay),
+				"the hidden %s has no visible button" % theName)
+	theScene.queue_free()
+
+
+func _test_M_the_modal_backdrops_consume_the_taps() -> void:
+	print("[M] the modal backdrops consume the taps")
+	# A modal overlay must NOT let a tap through to the layer below.
+	# The backdrop is the full-screen element, so it has to be STOP.
+	for theRel in ["res://scenes/reward/reward_modal.gd",
+			"res://scenes/shop/shop_scene.gd"]:
+		var theScript: GDScript = load(theRel)
+		_assert(theScript != null, "the %s loads" % theRel)
+	# The inventory is NOT modal (the equip flow needs the board under
+	# it), so its backdrop stays IGNORE.
+	var theInventory: GDScript = load("res://scenes/inventory/inventory_scene.gd")
+	_assert(theInventory != null, "the inventory scene loads")
+
+
+func _test_N_the_touch_bar_is_above_the_overlays() -> void:
+	print("[N] the touch bar is above the overlays")
+	var theScene: Node = await _make_battle_scene()
+	if theScene == null:
+		_assert(false, "the battle scene was built")
+		return
+	var theBar: Control = theScene.get("_touch_bar")
+	_assert(theBar != null, "the touch bar exists")
+	if theBar != null:
+		_assert(theBar.z_index >= 100,
+			"the touch bar is above the overlays (z=%d)" % theBar.z_index)
+	theScene.queue_free()
+
+
 # === the helpers ===
+## Whether the subtree has a button that is EFFECTIVELY visible.
+##
+## The LOCAL `visible` flag is not the test: a button under a hidden
+## overlay still reports `visible == true`. What matters is
+## `is_visible_in_tree()` -- Godot's input dispatch skips a control
+## whose effective visibility is false, and with it the whole subtree.
+func _has_visible_button(root: Node) -> bool:
+	if root == null:
+		return false
+	if root is Button and (root as Button).is_visible_in_tree():
+		return true
+	for child in root.get_children():
+		if _has_visible_button(child):
+			return true
+	return false
+
 
 ## Builds the battle scene WITHOUT starting a run.
 ##

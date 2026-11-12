@@ -29,6 +29,42 @@ var _edge_pairs: Array[Vector2i] = []
 
 
 ## Assigns the EncounterMap model displayed by this view.
+## The node's size in the base space.
+##
+## The constant is a PHYSICAL size (54x46 CSS px on the desktop), so
+## on a phone it is expressed in the base space as physical /
+## engine_scale. The node's letter stays readable and the finger finds
+## it.
+func _node_size() -> Vector2:
+	var theLayout: ResponsiveUILayoutScript = _layout()
+	if theLayout == null:
+		return NODE_SIZE
+	return NODE_SIZE / theLayout.engine_scale
+
+
+## The side margin in the base space.
+func _side_margin() -> float:
+	var theLayout: ResponsiveUILayoutScript = _layout()
+	if theLayout == null:
+		return SIDE_MARGIN
+	return SIDE_MARGIN / theLayout.engine_scale
+
+
+## The top margin in the base space.
+func _top_margin() -> float:
+	var theLayout: ResponsiveUILayoutScript = _layout()
+	if theLayout == null:
+		return TOP_MARGIN
+	return TOP_MARGIN / theLayout.engine_scale
+
+
+## The bottom margin in the base space.
+func _bottom_margin() -> float:
+	var theLayout: ResponsiveUILayoutScript = _layout()
+	if theLayout == null:
+		return BOTTOM_MARGIN
+	return BOTTOM_MARGIN / theLayout.engine_scale
+
 func set_map(map) -> void:
 	_map = map
 	_rebuild()
@@ -105,8 +141,10 @@ func _layout_nodes() -> void:
 	var viewport_size: Vector2 = size
 	if viewport_size.x <= 0.0 or viewport_size.y <= 0.0:
 		viewport_size = Vector2(1152.0, 648.0)
-	var usable_width: float = maxf(NODE_SIZE.x, viewport_size.x - SIDE_MARGIN * 2.0)
-	var usable_height: float = maxf(NODE_SIZE.y, viewport_size.y - TOP_MARGIN - BOTTOM_MARGIN)
+	var theNodeSize: Vector2 = _node_size()
+	var theSide: float = _side_margin()
+	var usable_width: float = maxf(theNodeSize.x, viewport_size.x - theSide * 2.0)
+	var usable_height: float = maxf(theNodeSize.y, viewport_size.y - _top_margin() - _bottom_margin())
 	var max_depth: int = maxi(1, Balance.MAP_MAX_DEPTH)
 	var layer_gap: float = usable_height / float(maxi(1, max_depth - 1))
 	for depth in range(1, max_depth + 1):
@@ -114,10 +152,10 @@ func _layout_nodes() -> void:
 		if layer.is_empty():
 			continue
 		var slot_gap: float = usable_width / float(layer.size())
-		var y: float = viewport_size.y - BOTTOM_MARGIN - float(depth - 1) * layer_gap
+		var y: float = viewport_size.y - _bottom_margin() - float(depth - 1) * layer_gap
 		for index in layer.size():
 			var node = layer[index]
-			var x: float = SIDE_MARGIN + slot_gap * (float(index) + 0.5)
+			var x: float = theSide + slot_gap * (float(index) + 0.5)
 			_node_positions[node.id] = Vector2(x, y)
 
 
@@ -145,9 +183,9 @@ func _create_node_buttons() -> void:
 			EncounterTypeScript.display_name(node.type),
 			node.depth,
 		]
-		button.custom_minimum_size = NODE_SIZE
-		button.size = NODE_SIZE
-		button.position = _node_positions[node.id] - NODE_SIZE * 0.5
+		button.custom_minimum_size = _node_size()
+		button.size = _node_size()
+		button.position = _node_positions[node.id] - _node_size() * 0.5
 		button.focus_mode = Control.FOCUS_ALL
 		button.disabled = node.id not in available
 		button.add_theme_font_size_override("font_size", _font_px(18))
