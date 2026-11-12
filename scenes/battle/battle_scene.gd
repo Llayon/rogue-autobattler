@@ -18,6 +18,13 @@ const GameLog: GDScript = preload("res://core/utils/logger.gd")
 var _ui_font: SystemFont = null
 
 
+
+const ResponsiveUILayoutScript = preload("res://core/ui/responsive_ui_layout.gd")
+## The responsive layout: the HUD and the touch controls are drawn in
+var _layout: ResponsiveUILayoutScript = null
+## The root of the compensated UI.
+var _ui_root: Control = null
+
 func _get_ui_font() -> SystemFont:
 	if _ui_font != null:
 		return _ui_font
@@ -52,6 +59,14 @@ var summary_label: Label = null
 var _summary_pending: bool = false
 var speed: float = 1.0
 var _bus: Node = null  # EventBus instance (autoload) или локальный
+## the base space and the node compensates the engine's downscale.
+## The on-screen controls (the touch path). Each one calls the SAME
+## domain operation as the keyboard shortcut.
+var _touch_bar: HBoxContainer = null
+var _inventory_button: Button = null
+var _speed_button: Button = null
+var _buy_button: Button = null
+var _restart_button: Button = null
 # === S5.3: encounter map overlay on MAP phase ===
 var encounter_map_scene: Control = null
 # === S6.1: reward modal on REWARD phase ===
@@ -60,7 +75,12 @@ var reward_modal: Control = null
 
 func _ready() -> void:
 	# S4.2: HUD bar (поверх battle_view).
+	# The responsive layout: the HUD and the touch controls keep
+	# their physical size on a phone.
+	_layout = ResponsiveUILayoutScript.from_window(_window_size())
+	_build_ui_root()
 	_build_hud()
+	_build_touch_bar()
 	# UI.
 	battle_view = BATTLE_VIEW_SCRIPT.new()
 	battle_view.name = "BattleView"
@@ -78,10 +98,10 @@ func _ready() -> void:
 	status_label.name = "StatusLabel"
 	status_label.position = Vector2(16, size.y - 32)
 	status_label.add_theme_color_override("font_color", Color(0.85, 0.85, 0.9))
-	status_label.add_theme_font_size_override("font_size", 16)
+	status_label.add_theme_font_size_override("font_size", _font_px(16))
 	status_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_apply_font(status_label)
-	add_child(status_label)
+	_ui_root.add_child(status_label)
 	# RunController.
 	run_controller = RUN_CONTROLLER_SCRIPT.new()
 	run_controller.name = "RunController"
@@ -110,6 +130,11 @@ func _ready() -> void:
 		run_controller.phase_changed.connect(_on_run_phase_changed)
 	# The launch request carries the INTENT; the scene does not decide
 	# whether the run is new or resumed.
+	# A UI test can build the scene's TREE without starting a run: the
+	# `suppress_run` meta is set only by the tests, and it leaves the
+	# production path untouched (the meta is never set there).
+	if has_meta("suppress_run"):
+		return
 	var launch_request: RunLaunchRequestScript = _read_launch_request()
 	if launch_request == null:
 		launch_request = RunLaunchRequestScript.new_run(Rng.randi_range(1, 999999))
@@ -126,10 +151,10 @@ func _build_hud() -> void:
 	hud.name = "HUD"
 	hud.set_anchors_preset(Control.PRESET_TOP_WIDE)
 	hud.position = Vector2(0, 0)
-	hud.add_theme_constant_override("separation", 24)
+	hud.add_theme_constant_override("separation", _px_i(24))
 	hud.add_theme_stylebox_override("normal", _make_hud_panel_style())
 	hud.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(hud)
+	_ui_root.add_child(hud)
 	hud_round_label = _make_hud_label("Round 1")
 	hud_gold_label = _make_hud_label("Gold: 0")
 	hud_wins_label = _make_hud_label("Wins: 0")
@@ -146,10 +171,10 @@ func _make_hud_panel_style() -> StyleBoxFlat:
 	sb.border_color = Color(0.25, 0.30, 0.40, 0.6)
 	sb.set_border_width_all(1)
 	sb.set_corner_radius_all(4)
-	sb.content_margin_left = 16
-	sb.content_margin_right = 16
-	sb.content_margin_top = 6
-	sb.content_margin_bottom = 6
+	sb.content_margin_left = _px(16)
+	sb.content_margin_right = _px(16)
+	sb.content_margin_top = _px(6)
+	sb.content_margin_bottom = _px(6)
 	return sb
 
 
@@ -157,7 +182,7 @@ func _make_hud_label(initial_text: String) -> Label:
 	var label: Label = Label.new()
 	label.text = initial_text
 	label.add_theme_color_override("font_color", Color(0.92, 0.94, 1.0))
-	label.add_theme_font_size_override("font_size", 16)
+	label.add_theme_font_size_override("font_size", _font_px(16))
 	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_apply_font(label)
 	return label
@@ -305,33 +330,250 @@ func _process(delta: float) -> void:
 	_refresh_status()
 
 
+## The shared domain actions.
+##
+## The keyboard shortcuts and the on-screen buttons call the SAME
+## methods, so there is exactly one implementation of every action and
+## no possibility of the two paths drifting apart.
+##
+## ## The actions
+## - `toggle_inventory` — the inventory overlay (the `I` key).
+## - `set_battle_speed` — the battle speed (the `1`/`2`/`4` keys).
+## - `buy_first_unit` — the unit purchase (the `B` key).
+## - `start_battle` — the battle start (the `SPACE` key in PREP).
+## - `restart_run` — the game-over restart (the `R` key).
+func toggle_inventory() -> void:
+	## Opens or closes the inventory overlay.
+	##
+	## The scene is created ONCE (in `_build_inventory_scene`) and only
+	## its visibility changes, so a repeated tap never creates a second
+	## InventoryScene.
+	if inventory_scene == null:
+		return
+	var theNext: bool = not inventory_scene.visible
+	inventory_scene.visible = theNext
+	if theNext:
+		inventory_scene.set_run_controller(run_controller)
+	get_viewport().set_input_as_handled()
+
+
+func set_battle_speed(value: float) -> void:
+	## Sets the battle speed.
+	##
+	## The value is one of the persisted profile's speeds (1.0, 2.0,
+	## 4.0), so the on-screen control and the keyboard shortcut share
+	## the one source of truth.
+	speed = value
+	if run_controller != null and run_controller.profile != null:
+		run_controller.profile.battle_speed = value
+	_refresh_hud()
+	_refresh_status()
+
+
+func buy_first_unit() -> void:
+	## Buys a unit in the PREP phase.
+	if run_controller == null:
+		return
+	if run_controller.phase != RunController.Phase.PREP:
+		return
+	run_controller.buy_unit(0)
+
+
+func start_battle() -> void:
+	## Starts the battle in the PREP phase.
+	if run_controller == null:
+		return
+	if run_controller.phase != RunController.Phase.PREP:
+		return
+	run_controller.start_battle()
+
+
+func restart_run() -> void:
+	## Starts a new run after the game over.
+	if run_controller == null:
+		return
+	if run_controller.phase != RunController.Phase.GAMEOVER:
+		return
+	run_controller.start_run(Rng.randi_range(1, 999999))
+
+
+## Builds the on-screen controls.
+##
+## The bar sits at the bottom of the screen and holds the actions a
+## phone player needs: the inventory, the battle speed, the unit
+## purchase and the game-over restart. Each button is visible only in
+## the phase where its action is legal, so a hidden action has no
+## touch target at all.
+func _build_touch_bar() -> void:
+	if _touch_bar != null:
+		return
+	_touch_bar = HBoxContainer.new()
+	_touch_bar.name = "TouchBar"
+	_touch_bar.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+	_touch_bar.offset_top = -64
+	_touch_bar.offset_bottom = -8
+	_touch_bar.offset_left = 8
+	_touch_bar.offset_right = -8
+	_touch_bar.alignment = BoxContainer.ALIGNMENT_CENTER
+	_touch_bar.add_theme_constant_override("separation", _px_i(12))
+	_touch_bar.mouse_filter = Control.MOUSE_FILTER_PASS
+	_ui_root.add_child(_touch_bar)
+	_inventory_button = _make_touch_button("Inventory", _on_inventory_button_pressed)
+	_speed_button = _make_touch_button("Speed", _on_speed_button_pressed)
+	_buy_button = _make_touch_button("Buy", _on_buy_button_pressed)
+	_restart_button = _make_touch_button("Restart", _on_restart_button_pressed)
+	_touch_bar.add_child(_inventory_button)
+	_touch_bar.add_child(_speed_button)
+	_touch_bar.add_child(_buy_button)
+	_touch_bar.add_child(_restart_button)
+
+
+func _make_touch_button(text: String, callback: Callable) -> Button:
+	var btn: Button = Button.new()
+	btn.name = text + "Button"
+	btn.text = text
+	btn.custom_minimum_size = _touch_size(Vector2(110, 48))
+	btn.add_theme_font_size_override("font_size", _font_px(16))
+	btn.add_theme_stylebox_override("normal", _make_touch_style(Color(0.24, 0.32, 0.48)))
+	btn.add_theme_stylebox_override("hover", _make_touch_style(Color(0.30, 0.40, 0.58)))
+	btn.add_theme_stylebox_override("pressed", _make_touch_style(Color(0.18, 0.24, 0.38)))
+	btn.pressed.connect(callback)
+	_apply_font(btn)
+	return btn
+
+
+func _make_touch_style(bg: Color) -> StyleBoxFlat:
+	var sb: StyleBoxFlat = StyleBoxFlat.new()
+	sb.bg_color = bg
+	sb.border_color = Color(0.6, 0.7, 0.9, 0.7)
+	sb.set_border_width_all(2)
+	sb.set_corner_radius_all(8)
+	sb.content_margin_left = _px(10)
+	sb.content_margin_right = _px(10)
+	return sb
+
+
+## The touch bar's buttons are shown only where their action is legal.
+##
+## A hidden button has no touch target, so a tap can never reach an
+## action that the current phase forbids.
+func _refresh_touch_bar() -> void:
+	if _touch_bar == null or run_controller == null:
+		return
+	var thePhase: int = run_controller.phase
+	_inventory_button.visible = (thePhase != RunController.Phase.GAMEOVER)
+	_speed_button.visible = (thePhase == RunController.Phase.BATTLE
+			or thePhase == RunController.Phase.PREP)
+	_buy_button.visible = (thePhase == RunController.Phase.PREP)
+	_restart_button.visible = (thePhase == RunController.Phase.GAMEOVER)
+
+
+## The speed button cycles the persisted speed profile.
+##
+## The profile's speeds are the source of truth, so the button and the
+## `1`/`2`/`4` keys can never disagree.
+func _on_speed_button_pressed() -> void:
+	var theSpeeds: Array[float] = [1.0, 2.0, 4.0]
+	var theIndex: int = 0
+	for i in range(theSpeeds.size()):
+		if is_equal_approx(theSpeeds[i], speed):
+			theIndex = i
+			break
+	var theNext: float = theSpeeds[(theIndex + 1) % theSpeeds.size()]
+	set_battle_speed(theNext)
+	_speed_button.text = "Speed x%.0f" % theNext
+
+
+func _on_inventory_button_pressed() -> void:
+	toggle_inventory()
+
+
+func _on_buy_button_pressed() -> void:
+	buy_first_unit()
+
+
+func _on_restart_button_pressed() -> void:
+	restart_run()
+
+
+## The physical size of an interactive area, in the base space.
+## The base-space length for a physical (CSS) length.
+##
+## The engine shrinks the viewport by `engine_scale`, so a physical
+## length P is expressed in the base space as P / engine_scale. On the
+## desktop the scale is 1 and nothing changes.
+func _px(physical_px: float) -> float:
+	if _layout == null:
+		return physical_px
+	return _layout.px(physical_px)
+
+
+## The same for an integer length.
+func _px_i(physical_px: int) -> int:
+	if _layout == null:
+		return physical_px
+	return _layout.px_i(physical_px)
+
+func _touch_size(base_size: Vector2) -> Vector2:
+	if _layout == null:
+		return base_size
+	return _layout.touch_px(base_size)
+
+
+## The physical font size of a base-space font size.
+func _font_px(base_px: int) -> int:
+	if _layout == null:
+		return base_px
+	return _layout.font_px(base_px)
+
+
+## The window's size in physical (CSS) pixels.
+func _window_size() -> Vector2:
+	var theWindow := get_window()
+	if theWindow == null:
+		return Vector2(ResponsiveUILayoutScript.BASE_WIDTH, ResponsiveUILayoutScript.BASE_HEIGHT)
+	var theSize := theWindow.size
+	if theSize.x <= 0.0 or theSize.y <= 0.0:
+		return Vector2(ResponsiveUILayoutScript.BASE_WIDTH, ResponsiveUILayoutScript.BASE_HEIGHT)
+	return theSize
+
+
+## Builds the compensated UI root.
+##
+## The content is drawn in the base space; this node's scale returns the
+## physical size that the engine's `canvas_items + expand` downscale took
+## away. On the desktop the scale is 1 and nothing changes.
+func _build_ui_root() -> void:
+	if _ui_root != null:
+		return
+	_ui_root = Control.new()
+	_ui_root.name = "UiRoot"
+	_ui_root.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_ui_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_ui_root)
+	if _layout != null:
+		_layout.apply_to(_ui_root)
+
+
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:
 		match event.keycode:
 			KEY_SPACE:
-				if run_controller.phase == RunController.Phase.PREP:
-					run_controller.start_battle()
+				# The same domain operation the on-screen control calls.
+				start_battle()
 			KEY_1:
-				speed = 1.0
+				set_battle_speed(1.0)
 			KEY_2:
-				speed = 2.0
+				set_battle_speed(2.0)
 			KEY_4:
-				speed = 4.0
+				set_battle_speed(4.0)
 			KEY_B:
-				if run_controller.phase == RunController.Phase.PREP:
-					run_controller.buy_unit(0)
+				buy_first_unit()
 			KEY_R:
-				if run_controller.phase == RunController.Phase.GAMEOVER:
-					run_controller.start_run(Rng.randi_range(1, 999999))
+				restart_run()
 			KEY_I:
 				# S7.1: toggle inventory overlay.
-				if inventory_scene != null:
-					inventory_scene.visible = not inventory_scene.visible
-					if inventory_scene.visible:
-						inventory_scene.set_run_controller(run_controller)
-					get_viewport().set_input_as_handled()
-
-
+				toggle_inventory()
 func _on_battle_ended(winner_team: int) -> void:
 	# Очищаем ui_overlay (он не должен показывать dead combatants).
 	if ui_overlay != null:
@@ -358,9 +600,9 @@ func _show_round_summary(text: String) -> void:
 	summary_label.add_theme_color_override("font_color", Color(1, 0.95, 0.3))
 	summary_label.set_anchors_preset(Control.PRESET_CENTER_TOP)
 	summary_label.position = Vector2(360, 60)
-	summary_label.add_theme_font_size_override("font_size", 24)
+	summary_label.add_theme_font_size_override("font_size", _font_px(24))
 	summary_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(summary_label)
+	_ui_root.add_child(summary_label)
 	_summary_pending = true
 	# Через 1.5s убрать (если ран продолжается).
 	await get_tree().create_timer(1.5).timeout
@@ -517,6 +759,7 @@ func _on_run_phase_changed(new_phase: int) -> void:
 		shop_scene.visible = show_shop
 		if show_shop:
 			shop_scene.set_run_controller(run_controller)
+	_refresh_touch_bar()
 	# Обновляем status.
 	_refresh_status()
 	_refresh_hud()

@@ -8,6 +8,8 @@ signal node_selected(node_id: int)
 
 const EncounterMapScript = preload("res://core/encounter/encounter_map.gd")
 const EncounterMapViewScript = preload("res://scenes/encounter/encounter_map_view.gd")
+const ResponsiveUILayoutScript = preload("res://core/ui/responsive_ui_layout.gd")
+
 
 @export var preview_seed: int = 5202
 
@@ -17,9 +19,60 @@ var status_label: Label = null
 # S6.1: When true, scene delegates node selection to outer handler
 # (RunController) instead of advancing the model itself.
 var _delegate_selection: bool = true
+## The responsive layout: the map's nodes keep their physical size on a
+## phone.
+var _layout: ResponsiveUILayoutScript = null
+## The root of the compensated UI.
+var _ui_root: Control = null
 
+
+## The layout, for the map view and the status label.
+
+
+func get_responsive_layout() -> ResponsiveUILayoutScript:
+	return _layout
+
+
+## The physical font size of a base-space font size.
+func _font_px(base_px: int) -> int:
+	if _layout == null:
+		return base_px
+	return _layout.font_px(base_px)
+
+
+## The window's size in physical (CSS) pixels.
+func _window_size() -> Vector2:
+	var theWindow := get_window()
+	if theWindow == null:
+		return Vector2(ResponsiveUILayoutScript.BASE_WIDTH, ResponsiveUILayoutScript.BASE_HEIGHT)
+	var theSize := theWindow.size
+	if theSize.x <= 0.0 or theSize.y <= 0.0:
+		return Vector2(ResponsiveUILayoutScript.BASE_WIDTH, ResponsiveUILayoutScript.BASE_HEIGHT)
+	return theSize
+
+
+## Builds the compensated UI root.
+##
+## The content is drawn in the base space; this node's scale returns the
+## physical size that the engine's `canvas_items + expand` downscale took
+## away. On the desktop the scale is 1 and nothing changes.
+func _build_ui_root() -> void:
+	if _ui_root != null:
+		return
+	_ui_root = Control.new()
+	_ui_root.name = "UiRoot"
+	_ui_root.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_ui_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_ui_root)
+	if _layout != null:
+		_layout.apply_to(_ui_root)
 
 func _ready() -> void:
+	_layout = ResponsiveUILayoutScript.from_window(_window_size())
+	_build_ui_root()
+	_setup_background()
+	_setup_map_view()
+	_setup_status_label()
 	_setup_background()
 	_setup_map_view()
 	_setup_status_label()
@@ -79,7 +132,7 @@ func _setup_map_view() -> void:
 	map_view.name = "EncounterMapView"
 	map_view.set_anchors_preset(Control.PRESET_FULL_RECT)
 	map_view.node_selected.connect(_on_node_selected)
-	add_child(map_view)
+	_ui_root.add_child(map_view)
 
 
 ## Creates a bottom status pill above the map view.
@@ -92,12 +145,12 @@ func _setup_status_label() -> void:
 	status_label.position = Vector2(-180.0, -44.0)
 	status_label.size = Vector2(360.0, 32.0)
 	status_label.add_theme_color_override("font_color", Color("d8e2f0"))
-	status_label.add_theme_font_size_override("font_size", 15)
+	status_label.add_theme_font_size_override("font_size", _font_px(15))
 	var panel := StyleBoxFlat.new()
 	panel.bg_color = Color("b0202937")
 	panel.set_corner_radius_all(10)
 	status_label.add_theme_stylebox_override("normal", panel)
-	add_child(status_label)
+	_ui_root.add_child(status_label)
 
 
 ## Adds a dark background behind the full-rect view for transparent margins.
@@ -107,7 +160,7 @@ func _setup_background() -> void:
 	background.color = Color("0b0f18")
 	background.set_anchors_preset(Control.PRESET_FULL_RECT)
 	background.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(background)
+	_ui_root.add_child(background)
 
 
 ## Updates user-facing selection feedback.

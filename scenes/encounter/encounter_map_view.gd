@@ -9,6 +9,7 @@ signal node_selected(node_id: int)
 const EncounterTypeScript = preload("res://core/encounter/encounter_type.gd")
 
 const NODE_SIZE: Vector2 = Vector2(54.0, 46.0)
+const ResponsiveUILayoutScript = preload("res://core/ui/responsive_ui_layout.gd")
 const SIDE_MARGIN: float = 72.0
 const TOP_MARGIN: float = 86.0
 const BOTTOM_MARGIN: float = 54.0
@@ -39,6 +40,23 @@ func get_map():
 
 
 ## Returns a copy of node-id to center-position layout data.
+## The physical font size of a base-space font size.
+func _font_px(base_px: int) -> int:
+	var theLayout: ResponsiveUILayoutScript = _layout()
+	if theLayout == null:
+		return base_px
+	return theLayout.font_px(base_px)
+
+
+## The layout, taken from the owning scene.
+func _layout() -> ResponsiveUILayoutScript:
+	var theParent := get_parent()
+	while theParent != null:
+		if theParent.has_method("get_responsive_layout"):
+			return theParent.get_responsive_layout()
+		theParent = theParent.get_parent()
+	return null
+
 func get_node_positions() -> Dictionary:
 	return _node_positions.duplicate()
 
@@ -132,7 +150,7 @@ func _create_node_buttons() -> void:
 		button.position = _node_positions[node.id] - NODE_SIZE * 0.5
 		button.focus_mode = Control.FOCUS_ALL
 		button.disabled = node.id not in available
-		button.add_theme_font_size_override("font_size", 18)
+		button.add_theme_font_size_override("font_size", _font_px(18))
 		_apply_button_style(button, node, current_id, node.id in available)
 		button.pressed.connect(_on_node_pressed.bind(node.id))
 		add_child(button)

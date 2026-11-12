@@ -44,42 +44,77 @@ var _meta_reader: Object = null
 ## choice needs the player.
 var _continue_seed_value: int = 0
 var _continue_needs_a_choice: bool = false
+## touch targets keep their physical size on a phone.
+## The root of the compensated UI: everything the menu draws lives
+## under it.
 
+
+
+const ResponsiveUILayoutScript = preload("res://core/ui/responsive_ui_layout.gd")
+## The responsive layout: the interface is drawn in the base space and
+## the node compensates the engine's downscale, so the text and the
+var _layout: ResponsiveUILayoutScript = null
+var _ui_root: Control = null
 
 func _ready() -> void:
     _profile = _load_meta()
     if _profile == null:
         _profile = MetaProfileScript.new()
+        _layout = ResponsiveUILayoutScript.from_window(_window_size())
     _build_layout()
     _refresh()
 
 
+## The size of the window in physical (CSS) pixels.
+##
+## `get_window().size` is the viewport's size in the base space, so the
+## window's own size is used: it is the canvas's real pixel count.
+func _window_size() -> Vector2:
+    var theWindow := get_window()
+    if theWindow == null:
+        return Vector2(ResponsiveUILayoutScript.BASE_WIDTH, ResponsiveUILayoutScript.BASE_HEIGHT)
+    var theSize := theWindow.size
+    if theSize.x <= 0.0 or theSize.y <= 0.0:
+        return Vector2(ResponsiveUILayoutScript.BASE_WIDTH, ResponsiveUILayoutScript.BASE_HEIGHT)
+    return theSize
+
+
 func _build_layout() -> void:
+    # The compensated root: the menu's content is drawn in the base
+    # space and this node's scale returns the physical size that the
+    # engine's `canvas_items + expand` downscale took away.
+    _ui_root = Control.new()
+    _ui_root.name = "UiRoot"
+    _ui_root.set_anchors_preset(Control.PRESET_FULL_RECT)
+    _ui_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
+    add_child(_ui_root)
+    if _layout != null:
+        _layout.apply_to(_ui_root)
     var bg: ColorRect = ColorRect.new()
     bg.color = Color(0.04, 0.06, 0.12, 1.0)
     bg.set_anchors_preset(Control.PRESET_FULL_RECT)
     bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
-    add_child(bg)
+    _ui_root.add_child(bg)
     var center: CenterContainer = CenterContainer.new()
     center.set_anchors_preset(Control.PRESET_FULL_RECT)
     center.mouse_filter = Control.MOUSE_FILTER_IGNORE
-    add_child(center)
+    _ui_root.add_child(center)
     var vbox: VBoxContainer = _build_vbox()
     center.add_child(vbox)
 
 
 func _build_vbox() -> VBoxContainer:
     var vbox: VBoxContainer = VBoxContainer.new()
-    vbox.add_theme_constant_override("separation", 18)
+    vbox.add_theme_constant_override("separation", _px_i(18))
     vbox.alignment = BoxContainer.ALIGNMENT_CENTER
     _title_label = Label.new()
     _title_label.text = "ROGUE AUTOBATTLER"
-    _title_label.add_theme_font_size_override("font_size", 36)
+    _title_label.add_theme_font_size_override("font_size", _font_px(36))
     _title_label.add_theme_color_override("font_color", Color(1.0, 0.95, 0.7))
     _title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
     vbox.add_child(_title_label)
     _stats_label = Label.new()
-    _stats_label.add_theme_font_size_override("font_size", 16)
+    _stats_label.add_theme_font_size_override("font_size", _font_px(16))
     _stats_label.add_theme_color_override("font_color", Color(0.85, 0.90, 1.0))
     _stats_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
     vbox.add_child(_stats_label)
@@ -101,11 +136,47 @@ func _build_vbox() -> VBoxContainer:
     return vbox
 
 
+## The physical size of an interactive area, in the base space.
+##
+## The base-space size is divided by the UI's scale, so the element
+## occupies the same physical pixels it would on the desktop. On a
+## phone it is then raised to the 44 CSS px touch floor.
+## The base-space length for a physical (CSS) length.
+##
+## The engine shrinks the viewport by `engine_scale`, so a physical
+## length P is expressed in the base space as P / engine_scale. On the
+## desktop the scale is 1 and nothing changes.
+func _px(physical_px: float) -> float:
+    if _layout == null:
+        return physical_px
+    return _layout.px(physical_px)
+
+
+## The same for an integer length.
+func _px_i(physical_px: int) -> int:
+    if _layout == null:
+        return physical_px
+    return _layout.px_i(physical_px)
+
+func _touch_size(base_size: Vector2) -> Vector2:
+    if _layout == null:
+        return base_size
+    return _layout.touch_px(base_size)
+
+
+## The physical font size of a base-space font size.
+func _font_px(base_px: int) -> int:
+    if _layout == null:
+        return base_px
+    return _layout.font_px(base_px)
+
 func _make_button(text: String, callback: Callable, color: Color) -> Button:
     var btn: Button = Button.new()
     btn.text = text
-    btn.custom_minimum_size = Vector2(280, 60)
-    btn.add_theme_font_size_override("font_size", 22)
+    # The size and the font are physical: on a phone the button keeps
+    # its 44 CSS px touch target and its text stays readable.
+    btn.custom_minimum_size = _touch_size(Vector2(280, 60))
+    btn.add_theme_font_size_override("font_size", _font_px(22))
     var normal: StyleBoxFlat = StyleBoxFlat.new()
     normal.bg_color = color
     normal.border_color = Color(0.6, 0.6, 0.8, 0.6)
@@ -267,16 +338,16 @@ func _build_settings_panel(parent: Node) -> void:
     sb.set_corner_radius_all(12)
     _settings_panel.add_theme_stylebox_override("panel", sb)
     var vbox: VBoxContainer = VBoxContainer.new()
-    vbox.add_theme_constant_override("separation", 12)
+    vbox.add_theme_constant_override("separation", _px_i(12))
     _settings_panel.add_child(vbox)
     var title: Label = Label.new()
     title.text = "Battle Speed"
-    title.add_theme_font_size_override("font_size", 20)
+    title.add_theme_font_size_override("font_size", _font_px(20))
     title.add_theme_color_override("font_color", Color(0.95, 0.97, 1.0))
     title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
     vbox.add_child(title)
     var hbox: HBoxContainer = HBoxContainer.new()
-    hbox.add_theme_constant_override("separation", 8)
+    hbox.add_theme_constant_override("separation", _px_i(8))
     hbox.alignment = BoxContainer.ALIGNMENT_CENTER
     _speed_1_button = _make_small_button("1x", _on_speed_1_pressed)
     _speed_2_button = _make_small_button("2x", _on_speed_2_pressed)
@@ -297,8 +368,8 @@ func _build_settings_panel(parent: Node) -> void:
 func _make_small_button(text: String, callback: Callable) -> Button:
     var btn: Button = Button.new()
     btn.text = text
-    btn.custom_minimum_size = Vector2(60, 40)
-    btn.add_theme_font_size_override("font_size", 16)
+    btn.custom_minimum_size = _touch_size(Vector2(60, 40))
+    btn.add_theme_font_size_override("font_size", _font_px(16))
     btn.pressed.connect(callback)
     return btn
 
