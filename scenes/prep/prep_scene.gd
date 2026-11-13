@@ -171,6 +171,12 @@ func _build_panel() -> void:
 	title.name = "Title"
 	title.text = "PREP — arrange your units (SPACE to start)"
 	title.add_theme_color_override("font_color", Color(0.95, 0.97, 1.0))
+	# The title wraps on a narrow screen: "PREP -- arrange your units
+	# (SPACE to start)" is 41 characters, and at the phone's font it is
+	# wider than the screen.
+	if _layout != null and _layout.is_mobile():
+		title.text = "PREP -- arrange your units\n(SPACE to start)"
+	title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	title.add_theme_font_size_override("font_size", _font_px(20))
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	vbox.add_child(title)

@@ -166,6 +166,7 @@ func _build_panel() -> void:
 	var title: Label = Label.new()
 	title.text = "REWARD — choose a unit (or skip)"
 	title.add_theme_color_override("font_color", Color(0.95, 0.97, 1.0))
+	title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	title.add_theme_font_size_override("font_size", _font_px(22))
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_apply_font(title)
