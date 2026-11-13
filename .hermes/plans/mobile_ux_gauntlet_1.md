@@ -145,3 +145,45 @@ call.
   cost).
 - The domain layer is not touched: the touch controls call the **same**
   `run_controller` operations as the keys.
+
+
+---
+
+# ИТОГ (Phase 0-8)
+
+**FINAL HEAD:** `f34069f`
+**BRANCH:** `feature/mobile-ux-gauntlet-1`
+**BASELINE:** `canonical/master` = `d6ea2bfde2ad37c5a8291492fd3c1f2d92a94914`
+
+## Что сделано
+
+Единый helper `core/ui/responsive_ui_layout.gd`: физический размер P выражается
+в base-space как `P / engine_scale`. На десктопе `engine_scale == 1` → все
+размеры тождественны → десктопная регрессия невозможна по построению.
+
+Адаптированы 8 сцен. Добавлены touch-контролы (Inventory / Speed / Buy /
+Restart), вызывающие те же доменные операции, что и клавиши.
+
+## Находки критиков (2 независимых ревью) — все HIGH/MEDIUM закрыты
+
+| # | Находка | Исправление |
+|---|---|---|
+| H1 | Reward: 3 кнопки по 180 px = 588 px при панели 358 px | вертикальный стек |
+| H2 | Тач-бар: 4 x 110 + 36 = 476 px при экране 390 px | кнопки делят ширину |
+| H3 | Строка статуса: `size.y` = 0 в `_ready()` → y = −32 | якорь к низу |
+| H4 | Доска PREP: 5 x 120 = 648 px при панели 358 px | сетка 2 колонки |
+| H5 | **Регресс draw-order:** статус ушёл под непрозрачный BattleView | UI-слой `z_index = 10` |
+| H6 | Инвентарь под тач-баром (z = 100) | панель поднята на 80 px |
+| M1 | Шрифт unit-кнопок не компенсирован (4.3 CSS px) | `_font_px(14)` |
+| M2 | Заголовки PREP/reward шире экрана | перенос + autowrap |
+| M3 | Пагинация: путь искал кнопки прямо в VBox | путь через BottomRow |
+| M4 | Пересборка оставляла старый панель (`queue_free` отложен) | `remove_child` + `queue_free` |
+| M5 | Тест M проверял только загрузку скрипта | проверяет `mouse_filter` |
+
+## Верификация
+
+- `tests/run_domain/touch_controls_test.gd`: 115 assertions, GREEN
+- 123/123 suites · 9346 assertions · 0 fail
+- A–H PASS · release controls 36/36 · F6 PASS · ledger VALID · lint 0 errors
+- WebGL: 1280x720 / 360x640 / 390x844 / 430x932 / 844x390 — 24/24
+- Touch-only journey: 6/6 (без клавиатуры)
