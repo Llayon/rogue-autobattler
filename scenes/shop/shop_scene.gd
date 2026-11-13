@@ -130,6 +130,13 @@ func _font_px_for(text: String, base_px: int, max_width_px: float) -> int:
 	return _layout.font_px_for(text, base_px, max_width_px)
 
 func _build_panel() -> void:
+	# The build is idempotent: the old panel is removed first.
+	# A rebuild (the orientation changed) must not leave a
+	# stale one behind -- and the node lookup must find the
+	# CURRENT one.
+	for theChild in _ui_root.get_children():
+		if theChild.name == "Center":
+			theChild.queue_free()
 	var center: CenterContainer = CenterContainer.new()
 	center.name = "Center"
 	center.set_anchors_preset(Control.PRESET_FULL_RECT)

@@ -166,9 +166,22 @@ func _build_background() -> void:
 
 
 func _build_panel() -> void:
+	# The build is idempotent: the old panel is removed first.
+	# A rebuild (the orientation changed) must not leave a
+	# stale one behind -- and the node lookup must find the
+	# CURRENT one.
+	for theChild in _ui_root.get_children():
+		if theChild.name == "Center":
+			theChild.queue_free()
 	var center: CenterContainer = CenterContainer.new()
 	center.name = "Center"
 	center.set_anchors_preset(Control.PRESET_FULL_RECT)
+	# The battle's touch bar is the TOPMOST layer (z = 100) and the
+	# inventory is NOT modal -- the bar stays visible so the player can
+	# close the inventory with the Inventory button. So the inventory's
+	# bottom row (Prev / Close / Next) must not be UNDER the bar: the
+	# panel is centred in the area ABOVE the bar.
+	center.offset_bottom = -_px(80.0)
 	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_ui_root.add_child(center)
 	var panel: PanelContainer = PanelContainer.new()

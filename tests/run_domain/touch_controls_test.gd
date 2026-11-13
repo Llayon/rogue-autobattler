@@ -63,6 +63,8 @@ func _initialize() -> void:
 	await _test_O_the_prep_unit_buttons_have_a_readable_font()
 	await _test_P_the_reward_choices_fit_the_phone()
 	await _test_Q_the_touch_bar_fits_the_phone()
+	await _test_R_the_prep_board_fits_the_phone()
+	await _test_S_the_inventory_does_not_go_under_the_touch_bar()
 	var theAfter: String = _saves_digest()
 	_assert(theBefore == theAfter,
 		"the production saves are byte-identical after the suite")
@@ -604,6 +606,98 @@ func _test_Q_the_touch_bar_fits_the_phone() -> void:
 		"the touch bar's buttons fit the phone's width"
 		+ " (the sum: %.0f, the separations: %.0f, the screen: %.0f)"
 		% [theTotal, theSeparation, thePhone.view_width])
+	theBattle.queue_free()
+	await process_frame
+
+
+func _test_R_the_prep_board_fits_the_phone() -> void:
+	# The PREP's unit board is the core of the phase: the player
+	# arranges the units here. Five 120 px buttons in a row are 648 px,
+	# and the phone's screen is 390 px -- the last units would be off
+	# the screen and untappable.
+	var thePrep: Node = load("res://scenes/prep/prep_scene.gd").new()
+	root.add_child(thePrep)
+	await process_frame
+	var thePhone: ResponsiveUILayoutScript = ResponsiveUILayoutScript.from_window(Vector2(390, 844))
+	thePrep.set("_layout", thePhone)
+	thePrep.call("_build_ui_root")
+	thePrep.call("_build_background")
+	thePrep.call("_build_panel")
+	await process_frame
+
+	var theRow: Container = _find_named(thePrep, "BoardRow")
+	_assert(theRow != null, "the PREP has the board's row")
+	# The panel's physical width.
+	var thePanelWidth: float = thePhone.view_width - 32.0
+	# The row's physical width: a horizontal row is the SUM of the
+	# units, a wrapped one is the widest.
+	var theUnitWidth: float = 120.0
+	var theCount: int = 5
+	var theSeparation: float = 12.0
+	var theRowWidth: float = theUnitWidth
+	if theRow is GridContainer:
+		# A grid lays the units out in rows: the width is the columns
+		# times the unit's width.
+		var theColumns: int = (theRow as GridContainer).columns
+		theRowWidth = theColumns * theUnitWidth + (theColumns - 1) * theSeparation
+	elif theRow is HBoxContainer:
+		theRowWidth = theCount * theUnitWidth + (theCount - 1) * theSeparation
+	_assert(theRowWidth <= thePanelWidth,
+		"the PREP's board fits the phone's width"
+		+ " (the row: %.0f, the panel: %.0f, the wrapped: %s)"
+		% [theRowWidth, thePanelWidth, not (theRow is HBoxContainer)])
+	thePrep.queue_free()
+	await process_frame
+
+
+func _test_S_the_inventory_does_not_go_under_the_touch_bar() -> void:
+	# The inventory is NOT modal: the touch bar stays visible so the
+	# player can close the inventory with the Inventory button. But the
+	# bar is the TOPMOST layer (z = 100), so the inventory's bottom
+	# row (Prev / Close / Next) would be UNDER it and unreachable.
+	var theBattle: Node = load("res://scenes/battle/battle_scene.gd").new()
+	theBattle.set_meta("suppress_run", true)
+	var thePhone: ResponsiveUILayoutScript = ResponsiveUILayoutScript.from_window(Vector2(390, 844))
+	theBattle.set("_layout", thePhone)
+	root.add_child(theBattle)
+	await process_frame
+
+	var theBar: BoxContainer = _find_named(theBattle, "TouchBar")
+	_assert(theBar != null, "the battle has the touch bar")
+	# The inventory's bottom row must be ABOVE the bar's top edge.
+	var theBarTop: float = theBar.offset_top
+	# The inventory's panel: the bottom offset must clear the bar.
+	# The inventory's geometry: the battle's own instance when it
+	# exists, otherwise a probe of the scene. The check must ALWAYS
+	# run -- it is the inventory's bottom row that must clear the bar.
+	# The battle's inventory instance was built with the DESKTOP layout
+	# (the headless window is 64x64), so the PHONE's geometry is
+	# measured on a probe with the phone's layout.
+	var theProbe: Node = load("res://scenes/inventory/inventory_scene.gd").new()
+	theProbe.set("_layout", thePhone)
+	theProbe.call("_build_ui_root")
+	theProbe.call("_build_background")
+	theProbe.call("_build_panel")
+	await process_frame
+	var theTarget: Node = theProbe
+	var theClose: Button = _find_named(theTarget, "CloseButton")
+	_assert(theClose != null, "the inventory has the close button")
+	# The bar's physical height plus its bottom margin.
+	var theBarHeight: float = abs(theBar.offset_top) + abs(theBar.offset_bottom)
+	# The inventory's bottom row must be above the bar: the panel's
+	# bottom offset must clear the bar's height.
+	var theCenter: Control = _find_named(theTarget, "Center")
+	_assert(theCenter != null, "the inventory has the center")
+	# The center's bottom offset must clear the touch bar's height,
+	# so the inventory's bottom row is not UNDER the bar.
+	var theBottom: float = theCenter.offset_bottom
+	_assert(theBottom <= -theBarHeight - 8.0,
+		"the inventory's bottom row is above the touch bar"
+		+ " (the center's bottom: %.0f, the bar: %.0f)"
+		% [theBottom, theBarHeight])
+	if theProbe != null:
+		theProbe.queue_free()
+		await process_frame
 	theBattle.queue_free()
 	await process_frame
 

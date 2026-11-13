@@ -144,6 +144,13 @@ func _window_size() -> Vector2:
 
 
 func _build_panel() -> void:
+	# The build is idempotent: the old panel is removed first.
+	# A rebuild (the orientation changed) must not leave a
+	# stale one behind -- and the node lookup must find the
+	# CURRENT one.
+	for theChild in _ui_root.get_children():
+		if theChild.name == "Center":
+			theChild.queue_free()
 	var center: CenterContainer = CenterContainer.new()
 	center.name = "Center"
 	center.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -172,10 +179,21 @@ func _build_panel() -> void:
 	board_label.text = "Board"
 	board_label.add_theme_color_override("font_color", Color(0.75, 0.85, 1.0))
 	vbox.add_child(board_label)
-	var board_row: HBoxContainer = HBoxContainer.new()
+	# The board's row: on a narrow screen the units WRAP into a
+	# grid -- five 120 px buttons in a row are 648 px, and the
+	# phone's panel is 358 px, so the last units would be off
+	# the screen and untappable.
+	var theWrapped: bool = _layout != null and _layout.is_mobile() \
+			and _layout.view_width < 560.0
+	var board_row: Container = GridContainer.new() if theWrapped else HBoxContainer.new()
 	board_row.name = "BoardRow"
-	board_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	if board_row is BoxContainer:
+		board_row.alignment = BoxContainer.ALIGNMENT_CENTER
 	board_row.add_theme_constant_override("separation", _px_i(12))
+	if board_row is GridContainer:
+		# Two columns: 2 * 120 + 12 = 252 px, and the phone's panel
+		# is 358 px. Three columns would be 384 px -- too wide.
+		board_row.columns = 2
 	vbox.add_child(board_row)
 	# Bench strip.
 	var bench_label: Label = Label.new()
@@ -183,10 +201,13 @@ func _build_panel() -> void:
 	bench_label.text = "Bench"
 	bench_label.add_theme_color_override("font_color", Color(0.85, 0.75, 0.6))
 	vbox.add_child(bench_label)
-	var bench_row: HBoxContainer = HBoxContainer.new()
+	var bench_row: Container = GridContainer.new() if theWrapped else HBoxContainer.new()
 	bench_row.name = "BenchRow"
-	bench_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	if bench_row is BoxContainer:
+		bench_row.alignment = BoxContainer.ALIGNMENT_CENTER
 	bench_row.add_theme_constant_override("separation", _px_i(12))
+	if bench_row is GridContainer:
+		bench_row.columns = 2
 	vbox.add_child(bench_row)
 	# Ready button.
 	_ready_button = Button.new()
