@@ -172,6 +172,10 @@ func _build_panel() -> void:
 	# CURRENT one.
 	for theChild in _ui_root.get_children():
 		if theChild.name == "Center":
+			# The removal is IMMEDIATE: queue_free() is deferred,
+			# so the stale panel would stay in the tree for a
+			# frame, and the node lookup would find it.
+			_ui_root.remove_child(theChild)
 			theChild.queue_free()
 	var center: CenterContainer = CenterContainer.new()
 	center.name = "Center"
@@ -223,6 +227,7 @@ func _build_panel() -> void:
 	list_box.add_child(empty_hint)
 	# Pagination row + Close button.
 	var bottom: HBoxContainer = HBoxContainer.new()
+	bottom.name = "BottomRow"
 	bottom.alignment = BoxContainer.ALIGNMENT_CENTER
 	bottom.add_theme_constant_override("separation", _px_i(24))
 	vbox.add_child(bottom)
@@ -391,8 +396,12 @@ func _update_counter() -> void:
 
 
 func _update_pagination() -> void:
-	var prev: Button = get_node_or_null("UiRoot/Center/Panel/VBox/PrevButton")
-	var next: Button = get_node_or_null("UiRoot/Center/Panel/VBox/NextButton")
+	# The buttons are in the BOTTOM ROW (an HBoxContainer inside the
+	# VBox), so the path goes through it. The old path looked for them
+	# directly in the VBox -- it always found nothing, so the buttons
+	# were never hidden. (The bug is the baseline's too.)
+	var prev: Button = get_node_or_null("UiRoot/Center/Panel/VBox/BottomRow/PrevButton")
+	var next: Button = get_node_or_null("UiRoot/Center/Panel/VBox/BottomRow/NextButton")
 	if prev == null or next == null:
 		return
 	var total: int = run_controller.inventory_count()

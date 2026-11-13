@@ -106,9 +106,11 @@ func _ready() -> void:
 	# the bottom, so the status line must be anchored there.)
 	status_label.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
 	status_label.offset_left = _px(16.0)
-	status_label.offset_top = -_px(44.0)
+	# The label is ABOVE the touch bar: the bar occupies the bottom
+	# 8..64 physical px, so the label's band starts above it.
+	status_label.offset_top = -_px(96.0)
 	status_label.offset_right = _px(600.0)
-	status_label.offset_bottom = -_px(16.0)
+	status_label.offset_bottom = -_px(72.0)
 	status_label.add_theme_color_override("font_color", Color(0.85, 0.85, 0.9))
 	status_label.add_theme_font_size_override("font_size", _font_px(16))
 	status_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -615,6 +617,12 @@ func _build_ui_root() -> void:
 	_ui_root.name = "UiRoot"
 	_ui_root.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_ui_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	# The UI layer is ABOVE the battle view: the view draws an opaque
+	# full-rect background, so the HUD and the status line under it
+	# would be invisible. (In the baseline the status label was the
+	# scene's last child -- above the view -- and the HUD was under
+	# it; the layer keeps both visible.)
+	_ui_root.z_index = 10
 	add_child(_ui_root)
 	if _layout != null:
 		_layout.apply_to(_ui_root)

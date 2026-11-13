@@ -138,6 +138,10 @@ func _build_panel() -> void:
 	# CURRENT one.
 	for theChild in _ui_root.get_children():
 		if theChild.name == "Center":
+			# The removal is IMMEDIATE: queue_free() is deferred,
+			# so the stale panel would stay in the tree for a
+			# frame, and the node lookup would find it.
+			_ui_root.remove_child(theChild)
 			theChild.queue_free()
 	# The build is idempotent: the old panel is removed first.
 	# A rebuild (the orientation changed) must not leave a

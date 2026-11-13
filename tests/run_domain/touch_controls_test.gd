@@ -65,6 +65,9 @@ func _initialize() -> void:
 	await _test_Q_the_touch_bar_fits_the_phone()
 	await _test_R_the_prep_board_fits_the_phone()
 	await _test_S_the_inventory_does_not_go_under_the_touch_bar()
+	await _test_T_the_ui_layer_is_above_the_battle_view()
+	await _test_U_the_pagination_buttons_are_reachable()
+	await _test_V_the_status_line_does_not_overlap_the_touch_bar()
 	var theAfter: String = _saves_digest()
 	_assert(theBefore == theAfter,
 		"the production saves are byte-identical after the suite")
@@ -427,15 +430,46 @@ func _test_L_a_hidden_overlay_has_no_touch_target() -> void:
 func _test_M_the_modal_backdrops_consume_the_taps() -> void:
 	print("[M] the modal backdrops consume the taps")
 	# A modal overlay must NOT let a tap through to the layer below.
-	# The backdrop is the full-screen element, so it has to be STOP.
+	# The backdrop is the full-screen element, so it has to be STOP --
+	# the assertion must be about the BACKDROP's filter, not about the
+	# script loading.
+	var thePhone: ResponsiveUILayoutScript = ResponsiveUILayoutScript.from_window(Vector2(390, 844))
 	for theRel in ["res://scenes/reward/reward_modal.gd",
 			"res://scenes/shop/shop_scene.gd"]:
 		var theScript: GDScript = load(theRel)
 		_assert(theScript != null, "the %s loads" % theRel)
+		if theScript == null:
+			continue
+		var theScene: Node = theScript.new()
+		theScene.set("_layout", thePhone)
+		root.add_child(theScene)
+		await process_frame
+		var theBackdrop: Control = _find_named(theScene, "Backdrop")
+		_assert(theBackdrop != null,
+			"the %s has a backdrop" % theRel.split("/")[-1])
+		if theBackdrop != null:
+			_assert(theBackdrop.mouse_filter == Control.MOUSE_FILTER_STOP,
+				"the %s's backdrop consumes the taps (the filter: %d)"
+				% [theRel.split("/")[-1], theBackdrop.mouse_filter])
+		theScene.queue_free()
+		await process_frame
 	# The inventory is NOT modal (the equip flow needs the board under
 	# it), so its backdrop stays IGNORE.
-	var theInventory: GDScript = load("res://scenes/inventory/inventory_scene.gd")
-	_assert(theInventory != null, "the inventory scene loads")
+	var theInventoryScript: GDScript = load("res://scenes/inventory/inventory_scene.gd")
+	_assert(theInventoryScript != null, "the inventory scene loads")
+	if theInventoryScript != null:
+		var theInventory: Node = theInventoryScript.new()
+		theInventory.set("_layout", thePhone)
+		root.add_child(theInventory)
+		await process_frame
+		var theInvBackdrop: Control = _find_named(theInventory, "Backdrop")
+		_assert(theInvBackdrop != null, "the inventory has a backdrop")
+		if theInvBackdrop != null:
+			_assert(theInvBackdrop.mouse_filter == Control.MOUSE_FILTER_IGNORE,
+				"the inventory's backdrop lets the taps through to the board"
+				+ " (the filter: %d)" % theInvBackdrop.mouse_filter)
+		theInventory.queue_free()
+		await process_frame
 
 
 func _test_N_the_touch_bar_is_above_the_overlays() -> void:
@@ -698,6 +732,98 @@ func _test_S_the_inventory_does_not_go_under_the_touch_bar() -> void:
 	if theProbe != null:
 		theProbe.queue_free()
 		await process_frame
+	theBattle.queue_free()
+	await process_frame
+
+
+func _test_T_the_ui_layer_is_above_the_battle_view() -> void:
+	# The battle view draws an OPAQUE full-rect background. Any UI
+	# under it is invisible -- so the HUD and the status line must be
+	# ABOVE it. In the baseline the status label was the scene's last
+	# child (above the view); moving the UI into the compensated layer
+	# put it under the view, and the status line disappeared.
+	var theBattle: Node = load("res://scenes/battle/battle_scene.gd").new()
+	theBattle.set_meta("suppress_run", true)
+	root.add_child(theBattle)
+	await process_frame
+
+	var theRoot: Control = _find_named(theBattle, "UiRoot")
+	_assert(theRoot != null, "the battle has the UI layer")
+	var theView: Control = _find_named(theBattle, "BattleView")
+	_assert(theView != null, "the battle has the view")
+	# The layer's z must be above the view's.
+	_assert(theRoot.z_index > theView.z_index,
+		"the UI layer is above the battle view"
+		+ " (the layer: %d, the view: %d)" % [theRoot.z_index, theView.z_index])
+	# And the status line must be IN that layer.
+	var theLabel: Label = _find_named(theBattle, "StatusLabel")
+	_assert(theLabel != null, "the battle has the status line")
+	_assert(theRoot.is_ancestor_of(theLabel),
+		"the status line is in the compensated UI layer")
+	theBattle.queue_free()
+	await process_frame
+
+
+func _test_U_the_pagination_buttons_are_reachable() -> void:
+	# The pagination's buttons live in the bottom row, but the lookup
+	# searched for them directly in the VBox -- so it always found
+	# nothing, the buttons were never hidden, and the pagination was
+	# broken. (The bug is the baseline's too.)
+	var theInv: Node = load("res://scenes/inventory/inventory_scene.gd").new()
+	root.add_child(theInv)
+	await process_frame
+	var thePhone: ResponsiveUILayoutScript = ResponsiveUILayoutScript.from_window(Vector2(390, 844))
+	theInv.set("_layout", thePhone)
+	theInv.call("_build_ui_root")
+	theInv.call("_build_background")
+	theInv.call("_build_panel")
+	await process_frame
+	# The buttons are in the tree.
+	var thePrev: Button = _find_named(theInv, "PrevButton")
+	var theNext: Button = _find_named(theInv, "NextButton")
+	_assert(thePrev != null, "the inventory has the previous page button")
+	_assert(theNext != null, "the inventory has the next page button")
+	# The pagination's lookup path must resolve to THESE buttons: the
+	# path went through the VBox, but the buttons are in the bottom
+	# row, so it always found nothing.
+	var thePath: Node = theInv.get_node_or_null(
+		"UiRoot/Center/Panel/VBox/BottomRow/PrevButton")
+	_assert(thePath != null,
+		"the pagination's path finds the previous page button")
+	if thePath != null:
+		_assert(thePath.name == "PrevButton",
+			"the pagination's path resolves to the previous page button")
+	var thePathNext: Node = theInv.get_node_or_null(
+		"UiRoot/Center/Panel/VBox/BottomRow/NextButton")
+	_assert(thePathNext != null,
+		"the pagination's path finds the next page button")
+	if thePathNext != null:
+		_assert(thePathNext.name == "NextButton",
+			"the pagination's path resolves to the next page button")
+	theInv.queue_free()
+	await process_frame
+
+
+func _test_V_the_status_line_does_not_overlap_the_touch_bar() -> void:
+	# The touch bar occupies the bottom 8..64 physical px. The status
+	# line is anchored to the bottom too, so it must clear the bar --
+	# otherwise the bar covers it.
+	var theBattle: Node = load("res://scenes/battle/battle_scene.gd").new()
+	theBattle.set_meta("suppress_run", true)
+	root.add_child(theBattle)
+	await process_frame
+	var theBar: Control = _find_named(theBattle, "TouchBar")
+	var theLabel: Control = _find_named(theBattle, "StatusLabel")
+	_assert(theBar != null, "the battle has the touch bar")
+	_assert(theLabel != null, "the battle has the status line")
+	if theBar != null and theLabel != null:
+		# The label's bottom offset must be at or above the bar's top.
+		# Both are in the base space, and the bar's top is its
+		# offset_top (negative, measured from the bottom).
+		_assert(theLabel.offset_bottom <= theBar.offset_top,
+			"the status line clears the touch bar"
+			+ " (the label's bottom: %.0f, the bar's top: %.0f)"
+			% [theLabel.offset_bottom, theBar.offset_top])
 	theBattle.queue_free()
 	await process_frame
 
