@@ -77,7 +77,10 @@ func _ready() -> void:
 	# S4.2: HUD bar (поверх battle_view).
 	# The responsive layout: the HUD and the touch controls keep
 	# their physical size on a phone.
-	_layout = ResponsiveUILayoutScript.from_window(_window_size())
+	# The layout is taken from the window ONCE: a layout that was
+	# set before the scene entered the tree is kept.
+	if _layout == null:
+		_layout = ResponsiveUILayoutScript.from_window(_window_size())
 	_build_ui_root()
 	_build_hud()
 	_build_touch_bar()
@@ -96,7 +99,16 @@ func _ready() -> void:
 	# Status label (нижний-левый, отдельно от HUD).
 	status_label = Label.new()
 	status_label.name = "StatusLabel"
-	status_label.position = Vector2(16, size.y - 32)
+	# The label is ANCHORED to the bottom: the position was set
+	# once in _ready(), when the scene's size was still 0, so the
+	# label sat at y = -32 -- off the screen. (This is the
+	# baseline's behaviour too, but the touch bar now occupies
+	# the bottom, so the status line must be anchored there.)
+	status_label.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
+	status_label.offset_left = _px(16.0)
+	status_label.offset_top = -_px(44.0)
+	status_label.offset_right = _px(600.0)
+	status_label.offset_bottom = -_px(16.0)
 	status_label.add_theme_color_override("font_color", Color(0.85, 0.85, 0.9))
 	status_label.add_theme_font_size_override("font_size", _font_px(16))
 	status_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -435,11 +447,32 @@ func _build_touch_bar() -> void:
 	_touch_bar.add_child(_restart_button)
 
 
+## The on-screen control's size.
+##
+## On the desktop the controls keep their 110x48 px size. On a phone
+## the four controls SHARE the bar's width: the sum of their widths
+## plus the separations must fit the screen, or the rightmost ones are
+## off the screen and unreachable. The minimum is the touch floor.
+func _touch_bar_button_size() -> Vector2:
+	var theSize: Vector2 = _touch_size(Vector2(110, 48))
+	if _layout == null or not _layout.is_mobile():
+		return theSize
+	var theCount: float = 4.0
+	var theSeparation: float = _px(12.0)
+	var theAvailable: float = _layout.view_width - _px(16.0) - theSeparation * (theCount - 1.0)
+	var theWidth: float = maxf(ResponsiveUILayoutScript.MIN_TOUCH_PX, theAvailable / theCount)
+	return Vector2(_px(theWidth), theSize.y)
+
 func _make_touch_button(text: String, callback: Callable) -> Button:
 	var btn: Button = Button.new()
 	btn.name = text + "Button"
 	btn.text = text
-	btn.custom_minimum_size = _touch_size(Vector2(110, 48))
+	# The button's width: on a narrow screen the four controls
+	# SHARE the bar's width -- four 110 px buttons and three
+	# 12 px separations are 476 px, and the phone's screen is
+	# 390 px. The minimum is the touch floor, so the button is
+	# still a comfortable target.
+	btn.custom_minimum_size = _touch_bar_button_size()
 	btn.add_theme_font_size_override("font_size", _font_px(16))
 	btn.add_theme_stylebox_override("normal", _make_touch_style(Color(0.24, 0.32, 0.48)))
 	btn.add_theme_stylebox_override("hover", _make_touch_style(Color(0.30, 0.40, 0.58)))

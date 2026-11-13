@@ -29,7 +29,10 @@ var _layout: ResponsiveUILayoutScript = null
 var _ui_root: Control = null
 
 func _ready() -> void:
-	_layout = ResponsiveUILayoutScript.from_window(_window_size())
+	# The layout is taken from the window ONCE: a layout that was
+	# set before the scene entered the tree is kept.
+	if _layout == null:
+		_layout = ResponsiveUILayoutScript.from_window(_window_size())
 	_build_ui_root()
 	_build_background()
 	_build_panel()

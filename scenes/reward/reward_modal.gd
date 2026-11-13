@@ -105,7 +105,10 @@ func _fit_size(desired: Vector2) -> Vector2:
 	return _layout.fit(desired, 16.0)
 
 func _ready() -> void:
-	_layout = ResponsiveUILayoutScript.from_window(_window_size())
+	# The layout is taken from the window ONCE: a layout that was
+	# set before the scene entered the tree is kept.
+	if _layout == null:
+		_layout = ResponsiveUILayoutScript.from_window(_window_size())
 	_build_ui_root()
 	_build_background()
 	_build_panel()
@@ -129,11 +132,18 @@ func _build_panel() -> void:
 	# родителя. Раньше PanelContainer с anchors_preset(PRESET_CENTER) +
 	# custom_minimum_size не центрировал — anchors не работают для
 	# Container'ов с layout.
+	# The build is idempotent: the old panel is removed first.
+	# A rebuild (the orientation changed) must not leave a
+	# stale one behind -- and the node lookup must find the
+	# CURRENT one.
+	for theChild in _ui_root.get_children():
+		if theChild.name == "Center":
+			theChild.queue_free()
 	var center: CenterContainer = CenterContainer.new()
 	center.name = "Center"
 	center.set_anchors_preset(Control.PRESET_FULL_RECT)
 	center.mouse_filter = Control.MOUSE_FILTER_IGNORE  # клики проходят к panel
-	add_child(center)
+	_ui_root.add_child(center)
 
 	var panel: PanelContainer = PanelContainer.new()
 	panel.name = "Panel"
@@ -154,8 +164,16 @@ func _build_panel() -> void:
 	_apply_font(title)
 	vbox.add_child(title)
 
-	var hbox: HBoxContainer = HBoxContainer.new()
-	hbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	# The choices' row: on a narrow screen they STACK. Three
+	# 180 px buttons side by side are 588 px wide, and the
+	# phone's panel is 358 px -- two of the three choices would
+	# be entirely off the screen.
+	var theStacked: bool = _layout != null and _layout.is_mobile() \
+			and _layout.view_width < 560.0
+	var hbox: BoxContainer = VBoxContainer.new() if theStacked else HBoxContainer.new()
+	hbox.name = "ChoicesRow"
+	if hbox is HBoxContainer:
+		hbox.alignment = BoxContainer.ALIGNMENT_CENTER
 	hbox.add_theme_constant_override("separation", _px_i(24))
 	vbox.add_child(hbox)
 
@@ -163,7 +181,9 @@ func _build_panel() -> void:
 	for i in 3:
 		var btn: Button = Button.new()
 		btn.name = "Choice_%d" % i
-		btn.custom_minimum_size = _touch_size(Vector2(180, 200))
+		btn.custom_minimum_size = Vector2(
+			_fit_size(Vector2(720, 360)).x - 48.0,
+			_touch_size(Vector2(180, 200)).y) if theStacked else _touch_size(Vector2(180, 200))
 		btn.add_theme_font_size_override("font_size", _font_px(14))
 		btn.add_theme_stylebox_override("normal", _make_button_style(Color(0.16, 0.22, 0.32)))
 		btn.add_theme_stylebox_override("hover", _make_button_style(Color(0.22, 0.30, 0.44)))

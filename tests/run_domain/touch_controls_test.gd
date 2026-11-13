@@ -61,6 +61,8 @@ func _initialize() -> void:
 	await _test_M_the_modal_backdrops_consume_the_taps()
 	await _test_N_the_touch_bar_is_above_the_overlays()
 	await _test_O_the_prep_unit_buttons_have_a_readable_font()
+	await _test_P_the_reward_choices_fit_the_phone()
+	await _test_Q_the_touch_bar_fits_the_phone()
 	var theAfter: String = _saves_digest()
 	_assert(theBefore == theAfter,
 		"the production saves are byte-identical after the suite")
@@ -518,6 +520,93 @@ func _test_O_the_prep_unit_buttons_have_a_readable_font() -> void:
 		theButton.free()
 	thePrep.queue_free()
 	await process_frame
+
+
+func _test_P_the_reward_choices_fit_the_phone() -> void:
+	# The reward's choice buttons must be reachable on a phone: three
+	# 180 px buttons side by side are 588 px wide, and the phone's
+	# panel is 358 px -- two of the three choices would be entirely
+	# off the screen, and the player could not pick a reward.
+	var theReward: Node = load("res://scenes/reward/reward_modal.gd").new()
+	root.add_child(theReward)
+	await process_frame
+	var thePhone: ResponsiveUILayoutScript = ResponsiveUILayoutScript.from_window(Vector2(390, 844))
+	theReward.set("_layout", thePhone)
+	theReward.call("_build_ui_root")
+	theReward.call("_build_background")
+	theReward.call("_build_panel")
+	await process_frame
+
+	# The choices are created from the offered rewards (a run
+	# controller), and the suite must not start a run. The CHOICES'
+	# ROW is the measurable thing: the scene creates it in
+	# _build_panel, and the row's orientation decides whether the
+	# choices fit.
+	var theRow: BoxContainer = _find_named(theReward, "ChoicesRow")
+	_assert(theRow != null, "the reward has the choices' row")
+	# The panel's physical width.
+	var thePanelWidth: float = thePhone.view_width - 32.0
+	# The choice button's physical width.
+	var theChoiceWidth: float = 180.0
+	# The row's physical width: a horizontal row is the SUM of the
+	# choices, a vertical one is the WIDEST.
+	var theCount: int = 3
+	var theSeparation: float = 24.0
+	var theRowWidth: float = theChoiceWidth
+	if theRow is HBoxContainer:
+		theRowWidth = theCount * theChoiceWidth + (theCount - 1) * theSeparation
+	_assert(theRowWidth <= thePanelWidth,
+		"the reward's choices fit the phone's width"
+		+ " (the row: %.0f, the panel: %.0f, the stacked: %s)"
+		% [theRowWidth, thePanelWidth, theRow is VBoxContainer])
+	theReward.queue_free()
+	await process_frame
+
+
+## The node with a name, anywhere in the tree.
+func _find_named(theNode: Node, theName: String) -> Node:
+	if theNode.name == theName:
+		return theNode
+	for theChild in theNode.get_children():
+		var theFound: Node = _find_named(theChild, theName)
+		if theFound != null:
+			return theFound
+	return null
+func _test_Q_the_touch_bar_fits_the_phone() -> void:
+	# The on-screen controls must fit the phone's width: four 110 px
+	# buttons and three 12 px separations are 476 px, and the phone's
+	# screen is 390 px -- the rightmost buttons would be off the
+	# screen and unreachable.
+	var thePhone: ResponsiveUILayoutScript = ResponsiveUILayoutScript.from_window(Vector2(390, 844))
+	# The layout is set BEFORE the scene enters the tree, so its
+	# _ready() builds the phone's layout in one go (a rebuild would be
+	# skipped: the builders return early when their node exists).
+	var theBattle: Node = load("res://scenes/battle/battle_scene.gd").new()
+	theBattle.set_meta("suppress_run", true)
+	theBattle.set("_layout", thePhone)
+	root.add_child(theBattle)
+	await process_frame
+
+	var theBar: BoxContainer = _find_named(theBattle, "TouchBar")
+	_assert(theBar != null, "the battle has the touch bar")
+	var theButtons: Array = []
+	for theChild in theBar.get_children():
+		if theChild is Button:
+			theButtons.append(theChild)
+	_assert(theButtons.size() == 4, "the touch bar has the four controls")
+	# The sum of the buttons' physical widths plus the separations must
+	# fit the screen.
+	var theTotal: float = 0.0
+	for theButton in theButtons:
+		theTotal += theButton.custom_minimum_size.x * thePhone.engine_scale
+	var theSeparation: float = 12.0 * (theButtons.size() - 1)
+	_assert(theTotal + theSeparation <= thePhone.view_width,
+		"the touch bar's buttons fit the phone's width"
+		+ " (the sum: %.0f, the separations: %.0f, the screen: %.0f)"
+		% [theTotal, theSeparation, thePhone.view_width])
+	theBattle.queue_free()
+	await process_frame
+
 
 
 func _collect_buttons(theNode: Node, theOut: Array) -> void:

@@ -62,7 +62,10 @@ func _ready() -> void:
         _profile = MetaProfileScript.new()
     # The layout is set UNCONDITIONALLY: a player with an existing
     # profile must get the same compensation as a fresh one.
-    _layout = ResponsiveUILayoutScript.from_window(_window_size())
+    # The layout is taken from the window ONCE: a layout that was
+    # set before the scene entered the tree is kept.
+    if _layout == null:
+        _layout = ResponsiveUILayoutScript.from_window(_window_size())
     _build_layout()
     _refresh()
 
