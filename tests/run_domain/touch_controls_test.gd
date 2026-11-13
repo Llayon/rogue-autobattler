@@ -68,6 +68,7 @@ func _initialize() -> void:
 	await _test_T_the_ui_layer_is_above_the_battle_view()
 	await _test_U_the_pagination_buttons_are_reachable()
 	await _test_V_the_status_line_does_not_overlap_the_touch_bar()
+	await _test_W_the_reward_fits_the_phone_height()
 	var theAfter: String = _saves_digest()
 	_assert(theBefore == theAfter,
 		"the production saves are byte-identical after the suite")
@@ -825,6 +826,38 @@ func _test_V_the_status_line_does_not_overlap_the_touch_bar() -> void:
 			+ " (the label's bottom: %.0f, the bar's top: %.0f)"
 			% [theLabel.offset_bottom, theBar.offset_top])
 	theBattle.queue_free()
+	await process_frame
+
+
+func _test_W_the_reward_fits_the_phone_height() -> void:
+	# The reward's three choices are 200 physical px tall each, and on
+	# a 360x640 phone the whole content (the title + the three +
+	# the skip + the separations) is 738 px -- 98 px MORE than the
+	# screen. The third choice and the Skip button were cut off.
+	var theReward: Node = load("res://scenes/reward/reward_modal.gd").new()
+	root.add_child(theReward)
+	await process_frame
+	var thePhone: ResponsiveUILayoutScript = ResponsiveUILayoutScript.from_window(Vector2(360, 640))
+	theReward.set("_layout", thePhone)
+	theReward.call("_build_ui_root")
+	theReward.call("_build_background")
+	theReward.call("_build_panel")
+	await process_frame
+
+	# The content's height: the panel's minimum height.
+	var thePanel: Control = _find_named(theReward, "Panel")
+	_assert(thePanel != null, "the reward has the panel")
+	if thePanel != null:
+		# The panel's minimum is in the BASE space (the engine's
+		# viewport), and the screen's height is in PHYSICAL pixels.
+		# The comparison must be in one space: the base one.
+		var theContent: float = thePanel.get_combined_minimum_size().y
+		var theScreenBase: float = float(thePhone.view_height) / thePhone.engine_scale
+		_assert(theContent <= theScreenBase,
+			"the reward's content fits the phone's height"
+			+ " (the content: %.0f, the screen: %.0f base)"
+			% [theContent, theScreenBase])
+	theReward.queue_free()
 	await process_frame
 
 

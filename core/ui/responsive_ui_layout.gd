@@ -121,22 +121,6 @@ func fit(desired: Vector2, margin: float = 0.0) -> Vector2:
 	return Vector2(theMaxW, theMaxH)
 
 
-## The available PHYSICAL space, in the base space.
-##
-## The whole window minus the margin, expressed in the base space.
-func available(margin: float = 0.0) -> Vector2:
-	if mode == Mode.DESKTOP:
-		return Vector2(BASE_WIDTH - margin * 2.0, BASE_HEIGHT - margin * 2.0)
-	return Vector2(
-		maxf(120.0, (view_width - margin * 2.0) / engine_scale),
-		maxf(120.0, (view_height - margin * 2.0) / engine_scale))
-
-
-## Физический (CSS) размер элемента с заданным base-space размером.
-func physical(base_size: Vector2) -> Vector2:
-	return base_size * engine_scale
-
-
 ## Переводит физический размер в base-space.
 ##
 ## Это ОБРАТНАЯ операция к `physical`: физический размер P становится

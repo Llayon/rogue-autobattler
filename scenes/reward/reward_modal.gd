@@ -127,6 +127,31 @@ func _build_background() -> void:
 	_ui_root.add_child(bg)
 
 
+## The reward choice's height on a phone.
+##
+## The reward's content is the title + the three choices + the skip
+## button + the separations. On a 360x640 phone the three choices at
+## 200 physical px each are 738 px of content -- 98 px MORE than the
+## screen, so the third choice and the Skip button were cut off.
+##
+## The choices share the height that is left, so the whole reward
+## fits the screen and every choice stays reachable. The touch floor
+## is the minimum.
+func _choice_button_height() -> float:
+	var theHeight: float = _touch_size(Vector2(180, 200)).y
+	if _layout == null or not _layout.is_mobile():
+		return theHeight
+	# The physical height that is left for the three choices.
+	# The available height: the screen minus the panel's own margins
+	# (36 physical px), the outer margin (16), the title, the skip
+	# button and the separations.
+	var theAvailable: float = float(_layout.view_height) - 32.0 - 36.0 \
+		- 56.0 - 40.0 - 48.0
+	# The share is a PHYSICAL height, and the result is a BASE size
+	# (the button lives in the base space).
+	var theEach: float = _px(theAvailable / 3.0)
+	return maxf(ResponsiveUILayoutScript.MIN_TOUCH_PX, minf(theHeight, theEach))
+
 func _build_panel() -> void:
 	# S6.1: CenterContainer центрирует дочерний panel в пределах full-rect
 	# родителя. Раньше PanelContainer с anchors_preset(PRESET_CENTER) +
@@ -158,7 +183,18 @@ func _build_panel() -> void:
 
 	var panel: PanelContainer = PanelContainer.new()
 	panel.name = "Panel"
-	panel.custom_minimum_size = _fit_size(Vector2(720, 360))
+	# The panel's minimum: the available area MINUS the content's
+	# margins. `fit()` returns the WHOLE available area, and the
+	# style's margins are added on top of it -- so the panel became
+	# taller than the screen (2356 base px = 664 physical on a 640 px
+	# phone) and the third choice and the Skip button were cut off.
+	# `custom_minimum_size` only RAISES a Control's minimum, so it can
+	# never make the panel smaller than its content. On a phone the
+	# panel takes the CONTENT's size (the content is built to fit the
+	# screen) and the Center centres it; on the desktop the custom
+	# minimum keeps the layout exactly as it was.
+	if _layout == null or not _layout.is_mobile():
+		panel.custom_minimum_size = _fit_size(Vector2(720, 360))
 	panel.add_theme_stylebox_override("panel", _make_panel_style())
 	panel.mouse_filter = Control.MOUSE_FILTER_STOP  # поглощает клики, передаёт детям
 	center.add_child(panel)
@@ -195,7 +231,7 @@ func _build_panel() -> void:
 		btn.name = "Choice_%d" % i
 		btn.custom_minimum_size = Vector2(
 			_fit_size(Vector2(720, 360)).x - 48.0,
-			_touch_size(Vector2(180, 200)).y) if theStacked else _touch_size(Vector2(180, 200))
+			_choice_button_height()) if theStacked else _touch_size(Vector2(180, 200))
 		btn.add_theme_font_size_override("font_size", _font_px(14))
 		btn.add_theme_stylebox_override("normal", _make_button_style(Color(0.16, 0.22, 0.32)))
 		btn.add_theme_stylebox_override("hover", _make_button_style(Color(0.22, 0.30, 0.44)))
