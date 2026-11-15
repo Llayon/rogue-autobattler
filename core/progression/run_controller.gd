@@ -72,6 +72,17 @@ var _battle_outcome_applied: bool = false
 ## outcome, so the retry only has to WRITE it -- it must never
 ## re-apply it.
 var _outcome_pending_persist: bool = false
+## A0.1 / D2: a purchase was applied to the live state, but its
+## checkpoint did NOT land. The live state already holds the
+## purchase (the gold is spent, the unit exists, the offer is
+## taken), so the retry only has to WRITE it: it must never charge
+## the gold again and it must never create a second unit.
+var _purchase_pending_persist: bool = false
+## A0.1 / D1: the meta profile was found DAMAGED and could not be
+## recovered. The controller must not replace it with a new empty
+## profile, and it must not write over it either: the player's data
+## is still on the disk and a manual repair may save it.
+var _meta_profile_damaged: bool = false
 ## H-05: the retry is rate limited, so a persistent filesystem failure
 ## does not turn into a write on every frame. The value is the
 ## timestamp of the last attempt in milliseconds.
@@ -89,8 +100,23 @@ var _battle_participants: LegacyBattleParticipantMap = null
 
 
 func _ready() -> void:
-	profile = SaveService.load_meta()
-	if profile == null:
+	# A0.1 / D1: the profile load has THREE outcomes, and they must
+	# not be confused:
+	#
+	#   the file never existed -> a NEW profile (the first run)
+	#   the file is valid        -> the profile
+	#   the file is DAMAGED      -> an EXPLICIT failure
+	#
+	# A damaged profile must NOT become a new empty one: the data is
+	# still on the disk, and the next write would destroy it.
+	var theResult: Dictionary = SaveService.load_meta_result()
+	if bool(theResult["ok"]):
+		profile = theResult["profile"]
+	else:
+		_meta_profile_damaged = true
+		profile = MetaProfile.new()
+		GameLog.error("run", "the meta profile is damaged and was NOT replaced",
+			{"reason": str(theResult["reason"])})
 		profile = MetaProfile.new()
 
 
@@ -278,6 +304,15 @@ func buy_unit(slot: int) -> Resource:
 	# Stable instance_id is allocated by RunDomainState.create_unit.
 	state.create_unit(def.id, def.max_hp if def != null else 100, RunUnit.LOCATION_BENCH)
 	shop.take_at(slot)
+	_write_purchase()
+	# A0.1 / D2: the purchase is persisted. The write happens AFTER
+	# the mutation, so a failed write leaves a STALE checkpoint with
+	# the PRE-purchase state: the unit is not duplicated and the gold
+	# is not charged twice.
+	#
+	# The write's result is NOT ignored: a failed write is reported
+	# through the pending-persistence state, and the retry writes ONLY
+	# the data -- it never re-applies the purchase.
 	GameBus.emit_gold_changed(state.gold)
 	GameLog.info("run", "Bought unit", {"id": def.id, "gold_left": state.gold})
 	return def
@@ -1132,7 +1167,73 @@ func _load_run_v5(seed_value: int) -> RefCounted:
 
 
 ## The meta seam. See `_save_run_v5`.
+
+## A0.1 / D2: writes the purchase's checkpoint.
+##
+## The write happens AFTER the mutation, so a failed write leaves a
+## STALE checkpoint with the PRE-purchase state: the unit is not
+## duplicated and the gold is not charged twice. The failure is NOT
+## swallowed: the pending flag records that the purchase is applied
+## but not durable, and the retry writes ONLY the data.
+func _write_purchase() -> bool:
+	var report: RefCounted = save_now_report()
+	var written: bool = bool(report.checkpoint_committed)
+	if written:
+		_purchase_pending_persist = false
+	else:
+		# The purchase IS applied to the live state: the gold is
+		# spent, the unit exists and the offer is taken. Only the WRITE
+		# failed, so the purchase is PENDING, not lost and not
+		# reapplicable.
+		_purchase_pending_persist = true
+		GameLog.error("run", "the purchase checkpoint failed to write",
+			{"seed": state.seed})
+	return written
+
+
+## A0.1 / D2: whether a purchase is applied but not yet durable.
+##
+## The caller must not report the purchase as durable while this is
+## true.
+func purchase_persistence_pending() -> bool:
+	return _purchase_pending_persist
+
+
+## A0.1 / D2: retries ONLY the purchase's write.
+##
+## It never charges the gold again and it never creates a second
+## unit: the live state already holds the purchase, so the retry only
+## has to WRITE it.
+func retry_purchase_persistence() -> bool:
+	if not _purchase_pending_persist:
+		return false
+	var report: RefCounted = save_now_report()
+	if not bool(report.checkpoint_committed):
+		GameLog.error("run", "the purchase persistence retry failed",
+			{"seed": state.seed})
+		return false
+	_purchase_pending_persist = false
+	GameLog.info("run", "the purchase persistence retry landed",
+		{"seed": state.seed})
+	return true
+
+
+
+## A0.1 / D1: whether the meta profile was found damaged.
+##
+## A damaged profile is NOT the same as a missing one: the data is
+## still on the disk, and the controller must not overwrite it.
+func meta_profile_damaged() -> bool:
+	return _meta_profile_damaged
+
 func _save_meta(meta_profile: MetaProfile) -> bool:
+	# A0.1 / D1: a damaged profile is NEVER overwritten. The data is
+	# still on the disk and a manual repair may save it, so the write
+	# is refused instead of replacing it with an empty profile.
+	if _meta_profile_damaged:
+		GameLog.error("run", "the meta write was refused: the profile is damaged",
+			{})
+		return false
 	if meta_writer != null and meta_writer.has_method("write_meta"):
 		return bool(meta_writer.write_meta(meta_profile))
 	return SaveService.save_meta(meta_profile)

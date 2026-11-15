@@ -12,15 +12,38 @@ extends RefCounted
 
 var fail_methods: Dictionary = {}
 
+## A0.1: the number of CALLS that still succeed before the method
+## starts failing. Zero means "fail from the first call". It is the
+## knob for "the first rename succeeds, the second fails" -- the
+## window between the two renames of the commit protocol.
+var fail_after: int = 0
+
+## A0.1: the write SUCCEEDS but the bytes that land are garbage.
+## This is the "the write was interrupted" case that a plain failure
+## cannot express: the operation reports success and the file is
+## corrupt.
+var corrupt_write: bool = false
+
+## The call counters of the injected methods.
+var _calls: Dictionary = {}
+
+
+func _should_fail(theMethod: StringName) -> bool:
+	var theCount: int = int(_calls.get(theMethod, 0))
+	_calls[theMethod] = theCount + 1
+	if not fail_methods.get(theMethod, false):
+		return false
+	return theCount >= fail_after
+
 
 func exists(path: String) -> bool:
-	if fail_methods.get(&"exists", false):
+	if _should_fail(&"exists"):
 		return false
 	return FileAccess.file_exists(path)
 
 
 func read_bytes(path: String) -> PackedByteArray:
-	if fail_methods.get(&"read_bytes", false):
+	if _should_fail(&"read_bytes"):
 		return PackedByteArray()
 	if not FileAccess.file_exists(path):
 		return PackedByteArray()
@@ -28,7 +51,7 @@ func read_bytes(path: String) -> PackedByteArray:
 
 
 func write_bytes_and_flush(path: String, bytes: PackedByteArray) -> bool:
-	if fail_methods.get(&"write_bytes_and_flush", false):
+	if _should_fail(&"write_bytes_and_flush"):
 		return false
 	var dir_path: String = path.get_base_dir()
 	if not DirAccess.dir_exists_absolute(dir_path):
@@ -36,14 +59,18 @@ func write_bytes_and_flush(path: String, bytes: PackedByteArray) -> bool:
 	var f: FileAccess = FileAccess.open(path, FileAccess.WRITE)
 	if f == null:
 		return false
-	f.store_buffer(bytes)
+	if corrupt_write:
+		# The write "succeeds", but what lands is not the profile.
+		f.store_string("[gd_resource type=\"Resource\" truncated")
+	else:
+		f.store_buffer(bytes)
 	f.flush()
 	f.close()
 	return FileAccess.file_exists(path)
 
 
 func rename(from_path: String, to_path: String) -> bool:
-	if fail_methods.get(&"rename", false):
+	if _should_fail(&"rename"):
 		return false
 	if not FileAccess.file_exists(from_path):
 		return false

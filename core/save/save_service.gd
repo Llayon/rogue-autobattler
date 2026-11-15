@@ -11,6 +11,7 @@ class_name SaveService extends RefCounted
 
 const RunSaveRepositoryScript = preload(
 	"res://core/save/run_save_repository.gd")
+const MetaStoreScript = preload("res://core/save/meta_store.gd")
 
 
 # --------------------------------------------------------------------
@@ -21,17 +22,82 @@ const RunSaveRepositoryScript = preload(
 static func save_meta(profile: MetaProfile) -> bool:
 	if profile == null:
 		return false
-	return SaveSvc.save_resource(profile, SaveSvc.meta_path())
+	# A0.1 / D1: the profile is written through the ATOMIC store --
+	# temp -> verify -> commit-old -> swap -> verify -> cleanup. The
+	# baseline wrote it directly with `ResourceSaver.save()`, so a
+	# crash during the write truncated the file and the loader then
+	# silently replaced the player's progress with a default profile.
+	return _meta_store().save_meta(profile)
 
 
 static func load_meta() -> MetaProfile:
-	var res: Resource = SaveSvc.load_resource(SaveSvc.meta_path())
-	if res == null:
-		return MetaProfile.new()
-	if res is MetaProfile:
-		return res
-	GameLog.warn("save", "Meta resource has unexpected type, returning default", {"type": res.get_class()})
+	# A0.1 / D1: the load goes through the atomic store, so an
+	# interrupted write is RECOVERED instead of silently reset.
+	#
+	# The three outcomes must not be confused:
+	#
+	#   the file never existed -> a NEW default profile (the first run)
+	#   the file is valid        -> the profile
+	#   the file is DAMAGED      -> the store returns null; the caller
+	#                              must know, because the data is still
+	#                              on the disk and a default profile
+	#                              would DESTROY it.
+	#
+	# `load_meta_result()` carries the distinction; `load_meta()`
+	# keeps its historical signature.
+	var theResult: Dictionary = load_meta_result()
+	if bool(theResult["ok"]):
+		var theProfile: Variant = theResult["profile"]
+		if theProfile is MetaProfile:
+			return theProfile
+	# A damaged profile: the default is NOT written back, so the
+	# player's data survives for a manual repair.
+	GameLog.error("save", "the meta profile could not be loaded",
+		{"reason": str(theResult["reason"])})
 	return MetaProfile.new()
+
+
+## The structured result of a meta load.
+##
+##   ok       -> the profile was loaded (or never existed)
+##   profile  -> the MetaProfile, when ok
+##   existed  -> whether a profile FILE was on the disk
+##   reason   -> why the load failed, when it did
+static func load_meta_result() -> Dictionary:
+	var theStore: Object = _meta_store()
+	var theProfile: Variant = theStore.load_meta()
+	if theProfile is MetaProfile:
+		return {"ok": true, "profile": theProfile, "existed": true, "reason": ""}
+	# The store returns null only when the file EXISTED and could not
+	# be recovered.
+	return {
+		"ok": false,
+		"profile": null,
+		"existed": true,
+		"reason": str(theStore.get("last_error")),
+	}
+
+
+## The atomic meta store over the production directory.
+##
+## A0.1: the test seam. A test points the service at a store over an
+## ISOLATED directory, so the production path (`save_meta` /
+## `load_meta`) is exercised without touching the real saves. It is
+## null in production.
+static var _meta_store_override: Object = null
+
+
+## The store the service writes through.
+static func _meta_store() -> Object:
+	if _meta_store_override != null:
+		return _meta_store_override
+	return MetaStoreScript.new(SaveSvc.SAVE_DIR)
+
+
+## A0.1: the test seam. A test points the service at a store over an
+## isolated directory; `null` restores the production store.
+static func set_meta_store_for_test(theStore: Object) -> void:
+	_meta_store_override = theStore
 
 
 static func save_run(run: RunState) -> bool:
