@@ -40,6 +40,10 @@ var _save_repository: Object = null
 ## RunController uses for its meta publication.
 var _meta_writer: Object = null
 var _meta_reader: Object = null
+    ## A0.1 / D1: the meta profile was found DAMAGED and could not be
+    ## recovered. The menu must not present it as a default profile and
+    ## must not write over it: the data is still on the disk.
+var _meta_profile_damaged: bool = false
 ## R-04: the seed the Continue button would restore, and whether the
 ## choice needs the player.
 var _continue_seed_value: int = 0
@@ -57,17 +61,10 @@ var _layout: ResponsiveUILayoutScript = null
 var _ui_root: Control = null
 
 func _ready() -> void:
+    # A0.1 / D1: the load has THREE outcomes. A damaged profile is
+    # NOT a default one: `_load_meta` sets the flag and refuses to
+    # let the menu write over it.
     _profile = _load_meta()
-    if _profile == null:
-        _profile = MetaProfileScript.new()
-    # The layout is set UNCONDITIONALLY: a player with an existing
-    # profile must get the same compensation as a fresh one.
-    # The layout is taken from the window ONCE: a layout that was
-    # set before the scene entered the tree is kept.
-    if _layout == null:
-        _layout = ResponsiveUILayoutScript.from_window(_window_size())
-    _build_layout()
-    _refresh()
 
 
 ## The size of the window in physical (CSS) pixels.
@@ -446,6 +443,13 @@ func _set_speed(s: float) -> void:
 ## Writes the profile through the injected seam when there is one.
 ## Returns whether the profile IS on the disk afterwards.
 func _save_meta(profile: MetaProfileScript) -> bool:
+    # A0.1 / D1: a damaged profile is NEVER overwritten. The data is
+    # still on the disk and a manual repair may save it, so the write
+    # is refused instead of replacing it with an empty profile.
+    if _meta_profile_damaged:
+        GameLog.error("ui", "the meta write was refused: the profile is damaged",
+            {})
+        return false
     if _meta_writer != null and _meta_writer.has_method("write_meta"):
         return bool(_meta_writer.write_meta(profile))
     return SaveService.save_meta(profile)
@@ -453,12 +457,30 @@ func _save_meta(profile: MetaProfileScript) -> bool:
 
 ## Reads the profile through the injected seam when there is one.
 func _load_meta() -> MetaProfileScript:
+    # A0.1 / D1: the load has THREE outcomes, and the menu must
+    # know which one it was: a damaged profile is NOT a default one.
     if _meta_reader != null and _meta_reader.has_method("read_meta"):
         var loaded: Variant = _meta_reader.read_meta()
         if loaded is MetaProfileScript:
             return loaded
         return MetaProfileScript.new()
-    return SaveService.load_meta()
+    var theResult: Dictionary = SaveService.load_meta_result()
+    if bool(theResult["ok"]):
+        _meta_profile_damaged = false
+        return theResult["profile"]
+    # The profile is damaged and could not be recovered.
+    _meta_profile_damaged = true
+    GameLog.error("ui", "the meta profile is damaged and was NOT replaced",
+        {"reason": str(theResult["reason"])})
+    return MetaProfileScript.new()
+
+
+## A0.1 / D1: whether the meta profile was found damaged.
+##
+## A damaged profile is not the same as a missing one: the data is
+## still on the disk, and the menu must not overwrite it.
+func meta_profile_damaged() -> bool:
+    return _meta_profile_damaged
 
 
 func _refresh_speed_buttons() -> void:

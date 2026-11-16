@@ -67,7 +67,15 @@ static func load_meta_result() -> Dictionary:
 	var theStore: Object = _meta_store()
 	var theProfile: Variant = theStore.load_meta()
 	if theProfile is MetaProfile:
-		return {"ok": true, "profile": theProfile, "existed": true, "reason": ""}
+		# A0.1: the store tells whether a FILE was on the disk, so
+		# "the first run" is distinguishable from "the profile was
+		# read".
+		return {
+			"ok": true,
+			"profile": theProfile,
+			"existed": bool(theStore.get("last_load_existed")),
+			"reason": "",
+		}
 	# The store returns null only when the file EXISTED and could not
 	# be recovered.
 	return {

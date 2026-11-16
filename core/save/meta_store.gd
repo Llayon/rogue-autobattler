@@ -83,6 +83,11 @@ var ops: Object = null
 ## The last error's detail (empty when the last operation succeeded).
 var last_error: String = ""
 
+## A0.1: whether a profile FILE was on the disk during the last load.
+## It separates "the file never existed" (the first run) from "the
+## file existed" (it was read, or it was damaged).
+var last_load_existed: bool = false
+
 
 func _init(p_dir: String = "user://saves/") -> void:
 	meta_dir = p_dir
@@ -124,7 +129,16 @@ func save_meta(profile: Object) -> bool:
 		return false
 	# The recovery runs FIRST: a new write never starts while an
 	# unfinished previous operation is still on the disk.
-	_recover()
+	#
+	# A0.1: if the recovery could NOT restore the slot (both
+	# generations are damaged), the write is ABORTED. Overwriting a
+	# fully damaged slot would destroy BOTH generations -- including
+	# the data a manual repair might still recover.
+	if not _recover():
+		# The recovery's own reason is the informative one.
+		if last_error == "":
+			last_error = "the profile slot could not be recovered"
+		return false
 	var theTemp: String = temp_path()
 	var theTarget: String = meta_path()
 	var theCommitOld: String = commit_old_path()
@@ -167,12 +181,15 @@ func save_meta(profile: Object) -> bool:
 		last_error = "the written profile failed the verification"
 		return false
 	# 7. the previous generation is no longer needed.
+	#
+	# A0.1: a failed cleanup does NOT make the write a failure: the
+	# new profile IS verified and on the disk. The leftover is a
+	# recovery obligation, and the recovery removes it on the next
+	# load. Reporting a failure here would tell the caller that the
+	# profile was NOT saved while it actually IS.
 	if theHadTarget and ops.exists(theCommitOld):
 		if not ops.remove(theCommitOld):
-			# The profile IS on the disk; the leftover is a recovery
-			# obligation, not a lost write.
 			last_error = "the previous generation could not be removed"
-			return false
 	return true
 
 
@@ -189,6 +206,7 @@ func save_meta(profile: Object) -> bool:
 ## player's progress. The caller must report the failure.
 func load_meta() -> Object:
 	last_error = ""
+	last_load_existed = false
 	if not _ensure_dir():
 		return null
 	if not _recover():
@@ -201,6 +219,7 @@ func load_meta() -> Object:
 		# The file never existed: the FIRST run. A new profile is
 		# the correct answer, not a failure.
 		return MetaProfileScript.new()
+	last_load_existed = true
 	var theProfile: Object = _load_from_disk(meta_path())
 	if theProfile == null:
 		last_error = "the profile could not be loaded"
@@ -215,11 +234,14 @@ func load_meta() -> Object:
 ## nothing is destroyed and the caller must report the failure.
 func _recover() -> bool:
 	# A stale scratch file from an interrupted serialization is not a
-	# generation: it is removed.
+	# generation: it is removed. The PROTOCOL's temp file is stale
+	# too: a new write rewrites it, but a stale one must not linger.
 	if ops.exists(scratch_path()):
 		_safe_remove(scratch_path())
 	if ops.exists(verify_path()):
 		_safe_remove(verify_path())
+	if ops.exists(temp_path()):
+		_safe_remove(temp_path())
 	var theTarget: String = meta_path()
 	var theCommitOld: String = commit_old_path()
 	var theTargetValid: bool = ops.exists(theTarget) and _verify_file(theTarget)
@@ -329,7 +351,7 @@ func _load_from_disk(thePath: String) -> Object:
 	_safe_remove(theVerify)
 	if theResource == null:
 		return null
-	if not (theResource is MetaProfile):
+	if not (theResource is MetaProfileScript):
 		return null
 	# The profile must be USABLE: the loader must see the fields.
 	if not ("total_runs" in theResource):

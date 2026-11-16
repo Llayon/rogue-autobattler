@@ -82,7 +82,7 @@ func rename(from_path: String, to_path: String) -> bool:
 
 
 func remove(path: String) -> bool:
-	if fail_methods.get(&"remove", false):
+	if _should_fail(&"remove"):
 		return false
 	if not FileAccess.file_exists(path):
 		return false
@@ -96,7 +96,7 @@ func remove(path: String) -> bool:
 
 
 func sha256(path: String) -> String:
-	if fail_methods.get(&"sha256", false):
+	if _should_fail(&"sha256"):
 		return ""
 	if not FileAccess.file_exists(path):
 		return ""

@@ -40,6 +40,8 @@ const FaultOps = preload("res://tests/save_repository/support/run_save_file_ops_
 const BalanceScript = preload("res://core/balance.gd")
 const RunUnitScript = preload("res://core/progression/run_unit.gd")
 const CheckpointMapper = preload("res://core/progression/run_checkpoint_v5_mapper.gd")
+const MetaStoreScript = preload("res://core/save/meta_store.gd")
+const SaveServiceScript = preload("res://core/save/save_service.gd")
 
 const ISOLATED_DIR: String = "user://run_integrity_a01/"
 
@@ -50,6 +52,12 @@ var _failed: int = 0
 func _initialize() -> void:
 	DirAccess.make_dir_recursive_absolute(
 		ProjectSettings.globalize_path(ISOLATED_DIR))
+	# A0.1: the controllers' `_ready()` opens the meta store. Without
+	# this seam the suite would touch the developer's REAL save tree
+	# (the recovery runs there). The seam points it at the isolated
+	# directory.
+	SaveServiceScript.set_meta_store_for_test(
+		MetaStoreScript.new(ISOLATED_DIR + "meta/"))
 	await _test_A_a_purchase_survives_a_resume()
 	await _test_B_a_purchase_survives_an_aborted_process()
 	await _test_C_two_purchases_survive_a_resume()
@@ -58,6 +66,9 @@ func _initialize() -> void:
 	await _test_F_the_retry_neither_charges_nor_duplicates()
 	await _test_G_the_offer_the_gold_and_the_instance_agree()
 	await _test_H_the_touch_button_calls_the_same_operation()
+	# A0.1: the seam is restored, so the production store is used
+	# again by anything that runs after this suite.
+	SaveServiceScript.set_meta_store_for_test(null)
 	print("")
 	print("=== A0.1 / D2: THE UNIT PURCHASE IS DURABLE: %d pass / %d fail ==="
 		% [_passed, _failed])

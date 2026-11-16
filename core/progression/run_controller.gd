@@ -78,6 +78,12 @@ var _outcome_pending_persist: bool = false
 ## taken), so the retry only has to WRITE it: it must never charge
 ## the gold again and it must never create a second unit.
 var _purchase_pending_persist: bool = false
+## A0.1 / D2: the purchase's retry is rate limited, so a
+## persistent filesystem failure does not turn into a write on
+## every frame. The value is the timestamp of the last attempt.
+var _purchase_retry_after_ms: int = 0
+## A0.1 / D2: the minimum interval between two purchase retries.
+const PURCHASE_RETRY_INTERVAL_MS: int = 1000
 ## A0.1 / D1: the meta profile was found DAMAGED and could not be
 ## recovered. The controller must not replace it with a new empty
 ## profile, and it must not write over it either: the player's data
@@ -117,7 +123,6 @@ func _ready() -> void:
 		profile = MetaProfile.new()
 		GameLog.error("run", "the meta profile is damaged and was NOT replaced",
 			{"reason": str(theResult["reason"])})
-		profile = MetaProfile.new()
 
 
 ## Запускает новый ран с заданным seed.
@@ -940,6 +945,7 @@ func start_battle() -> bool:
 ## on every frame.
 func _process(_delta: float) -> void:
 	_retry_pending_outcome_persistence()
+	_retry_pending_purchase_persistence()
 
 
 func tick_battle(dt: float) -> void:
@@ -1177,18 +1183,50 @@ func _load_run_v5(seed_value: int) -> RefCounted:
 ## but not durable, and the retry writes ONLY the data.
 func _write_purchase() -> bool:
 	var report: RefCounted = save_now_report()
-	var written: bool = bool(report.checkpoint_committed)
+	# A0.1 / D2: the report has THREE states, and a PARTIAL success is
+	# not a durable purchase:
+	#
+	#   the checkpoint AND the meta landed -> the purchase is durable
+	#   the checkpoint landed, the meta did NOT -> the purchase IS on
+	#     the disk, but Continue is not discoverable: the purchase is
+	#     PENDING, not durable
+	#   the checkpoint did NOT land -> the purchase is not on the disk
+	#
+	# Only the first state clears the pending flag.
+	var written: bool = bool(report.checkpoint_committed) and bool(report.meta_committed)
 	if written:
 		_purchase_pending_persist = false
+		_purchase_retry_after_ms = 0
 	else:
 		# The purchase IS applied to the live state: the gold is
 		# spent, the unit exists and the offer is taken. Only the WRITE
 		# failed, so the purchase is PENDING, not lost and not
 		# reapplicable.
 		_purchase_pending_persist = true
+		# The FIRST retry is immediate: the write just failed, and the
+		# filesystem may have recovered already. The interval governs
+		# the SUBSEQUENT attempts, so a persistent failure does not
+		# turn into a write on every frame.
+		_purchase_retry_after_ms = 0
 		GameLog.error("run", "the purchase checkpoint failed to write",
 			{"seed": state.seed})
 	return written
+
+
+## A0.1 / D2: the internal purchase retry, driven by the tick and RATE
+## LIMITED.
+##
+## The purchase's persistence must not depend on a caller: without this
+## driver nothing would ever retry it, and the purchase would stay
+## silently non-durable.
+func _retry_pending_purchase_persistence() -> void:
+	if not _purchase_pending_persist:
+		return
+	var now: int = Time.get_ticks_msec()
+	if now < _purchase_retry_after_ms:
+		return
+	_purchase_retry_after_ms = now + PURCHASE_RETRY_INTERVAL_MS
+	retry_purchase_persistence()
 
 
 ## A0.1 / D2: whether a purchase is applied but not yet durable.
@@ -1208,7 +1246,7 @@ func retry_purchase_persistence() -> bool:
 	if not _purchase_pending_persist:
 		return false
 	var report: RefCounted = save_now_report()
-	if not bool(report.checkpoint_committed):
+	if not bool(report.checkpoint_committed) or not bool(report.meta_committed):
 		GameLog.error("run", "the purchase persistence retry failed",
 			{"seed": state.seed})
 		return false
