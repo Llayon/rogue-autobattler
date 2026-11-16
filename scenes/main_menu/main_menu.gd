@@ -40,9 +40,9 @@ var _save_repository: Object = null
 ## RunController uses for its meta publication.
 var _meta_writer: Object = null
 var _meta_reader: Object = null
-    ## A0.1 / D1: the meta profile was found DAMAGED and could not be
-    ## recovered. The menu must not present it as a default profile and
-    ## must not write over it: the data is still on the disk.
+## A0.1 / D1: the meta profile was found DAMAGED and could not be
+## recovered. The menu must not present it as a default profile and
+## must not write over it: the data is still on the disk.
 var _meta_profile_damaged: bool = false
 ## R-04: the seed the Continue button would restore, and whether the
 ## choice needs the player.
@@ -65,6 +65,14 @@ func _ready() -> void:
     # NOT a default one: `_load_meta` sets the flag and refuses to
     # let the menu write over it.
     _profile = _load_meta()
+    # The layout is set UNCONDITIONALLY: a player with an existing
+    # profile must get the same compensation as a fresh one.
+    # The layout is taken from the window ONCE: a layout that was
+    # set before the scene entered the tree is kept.
+    if _layout == null:
+        _layout = ResponsiveUILayoutScript.from_window(_window_size())
+    _build_layout()
+    _refresh()
 
 
 ## The size of the window in physical (CSS) pixels.
