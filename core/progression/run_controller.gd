@@ -78,6 +78,13 @@ var _outcome_pending_persist: bool = false
 ## taken), so the retry only has to WRITE it: it must never charge
 ## the gold again and it must never create a second unit.
 var _purchase_pending_persist: bool = false
+## A0.1 / D2: WHICH part of the purchase's write did not land.
+##
+##   false -> the CHECKPOINT did not land: the retry writes both
+##   true  -> the checkpoint landed and only the META pointer did
+##            not: the checkpoint IS durable, so the retry publishes
+##            ONLY the pointer and does not rewrite the checkpoint
+var _purchase_checkpoint_committed: bool = false
 ## A0.1 / D2: the purchase's retry is rate limited, so a
 ## persistent filesystem failure does not turn into a write on
 ## every frame. The value is the timestamp of the last attempt.
@@ -1194,6 +1201,11 @@ func _write_purchase() -> bool:
 	#
 	# Only the first state clears the pending flag.
 	var written: bool = bool(report.checkpoint_committed) and bool(report.meta_committed)
+	# A0.1 / D2: the retry must know WHICH part did not land. When
+	# the checkpoint landed and only the pointer did not, the
+	# checkpoint IS durable and the retry publishes ONLY the pointer:
+	# a new checkpoint generation would be a needless write.
+	_purchase_checkpoint_committed = bool(report.checkpoint_committed)
 	if written:
 		_purchase_pending_persist = false
 		_purchase_retry_after_ms = 0
@@ -1245,12 +1257,29 @@ func purchase_persistence_pending() -> bool:
 func retry_purchase_persistence() -> bool:
 	if not _purchase_pending_persist:
 		return false
+	if _purchase_checkpoint_committed:
+		# A0.1 / D2: the checkpoint IS on the disk and it is durable.
+		# Only the POINTER publication is missing, so the retry
+		# publishes ONLY the pointer: a new checkpoint generation
+		# would be a needless write, and it would bump the run's
+		# commit counter for nothing.
+		if not retry_meta_publication():
+			GameLog.error("run", "the purchase meta publication retry failed",
+				{"seed": state.seed})
+			return false
+		_purchase_pending_persist = false
+		_purchase_checkpoint_committed = false
+		GameLog.info("run", "the purchase meta publication retry landed",
+			{"seed": state.seed})
+		return true
+	# The checkpoint did NOT land: the retry writes both.
 	var report: RefCounted = save_now_report()
 	if not bool(report.checkpoint_committed) or not bool(report.meta_committed):
 		GameLog.error("run", "the purchase persistence retry failed",
 			{"seed": state.seed})
 		return false
 	_purchase_pending_persist = false
+	_purchase_checkpoint_committed = false
 	GameLog.info("run", "the purchase persistence retry landed",
 		{"seed": state.seed})
 	return true
