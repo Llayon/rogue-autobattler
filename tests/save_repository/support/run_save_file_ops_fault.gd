@@ -61,7 +61,7 @@ func write_bytes_and_flush(path: String, bytes: PackedByteArray) -> bool:
 		return false
 	if corrupt_write:
 		# The write "succeeds", but what lands is not the profile.
-		f.store_string("[gd_resource type=\"Resource\" truncated")
+		f.store_string("[gd_resource type=\"Resource\" format=3 uid=\"uid://a01corrupt\"]\n\n[resource]\nresource_name = \"corrupt\"\n")
 	else:
 		f.store_buffer(bytes)
 	f.flush()

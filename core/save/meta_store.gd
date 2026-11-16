@@ -271,6 +271,13 @@ func _verify_file(thePath: String) -> bool:
 	var theBytes: PackedByteArray = ops.read_bytes(thePath)
 	if theBytes.is_empty():
 		return false
+	# A0.1: the structural check comes FIRST. If the bytes are not
+	# even shaped like a Godot resource, the verification fails
+	# WITHOUT handing the garbage to the loader: the loader would log
+	# a Parse Error, and a damaged file is a NORMAL condition of the
+	# failure model, not a project error.
+	if not _looks_like_resource(theBytes):
+		return false
 	var theVerify: String = verify_path()
 	_safe_remove(theVerify)
 	if not ops.write_bytes_and_flush(theVerify, theBytes):
@@ -279,6 +286,25 @@ func _verify_file(thePath: String) -> bool:
 	var theProfile: Object = _load_from_disk(theVerify)
 	_safe_remove(theVerify)
 	return theProfile != null
+
+
+## Whether the bytes are shaped like a Godot resource.
+##
+## The check is a HEADER check: a Godot text resource starts with
+## `[gd_resource` and ends with the resource's properties. The bytes
+## that do not match are rejected WITHOUT the loader, so the
+## deliberately damaged files of the failure model never reach the
+## parser (and never turn into a logged Parse Error).
+func _looks_like_resource(theBytes: PackedByteArray) -> bool:
+	if theBytes.size() < 16:
+		return false
+	var theHead: String = theBytes.slice(0, 12).get_string_from_utf8()
+	if not theHead.begins_with("[gd_resource"):
+		return false
+	# The header must be complete: a truncated file ends without the
+	# closing bracket.
+	var theText: String = theBytes.get_string_from_utf8()
+	return theText.find("]") > 0 and theText.find("type=") > 0
 
 
 ## Loads the profile from the disk, bypassing the cache.

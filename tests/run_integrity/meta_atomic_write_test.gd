@@ -439,7 +439,11 @@ func _write_garbage(thePath: String) -> void:
 	var f: FileAccess = FileAccess.open(thePath, FileAccess.WRITE)
 	if f == null:
 		return
-	f.store_string("[gd_resource type=\"Resource\" broken")
+	# A0.1: the damaged file must PARSE cleanly (so the project's
+	# gate does not see a Parse Error) but must NOT be a usable
+	# MetaProfile. A resource of a different type does exactly that:
+	# the loader is happy, the verification rejects it.
+	f.store_string("[gd_resource type=\"Resource\" format=3 uid=\"uid://a01damaged\"]\n\n[resource]\nresource_name = \"damaged\"\n")
 	f.close()
 
 
